@@ -1,0 +1,102 @@
+<script lang="ts">
+  import { store } from '../lib/store.svelte';
+  import { S } from '../lib/strings';
+  import { TRIM_MIN_DB } from '../lib/protocol';
+  import { formatDb, trimDbToPos, trimPosToDb } from '../lib/fader';
+
+  const cr = $derived(store.state?.control_room);
+  const main = $derived(store.state?.main.db ?? TRIM_MIN_DB);
+  const off = $derived(!store.ready);
+
+  function slider(e: Event, apply: (db: number) => void) {
+    const pos = Number((e.currentTarget as HTMLInputElement).value) / 1000;
+    apply(Math.round(trimPosToDb(pos, TRIM_MIN_DB)));
+  }
+</script>
+
+<footer class="cr" aria-label={S.controlRoom}>
+  <span class="label">{S.controlRoom}</span>
+  {#if cr}
+    <button class="t amber" class:on={cr.dim} aria-pressed={cr.dim} disabled={off} data-unmapped={store.unmapped('dim') ? '' : undefined} title={store.hint('dim')} onclick={() => store.set({ param: 'dim', on: !cr.dim }, true)}>{S.dim}</button>
+    <button class="t" class:on={cr.mono} aria-pressed={cr.mono} disabled={off} onclick={() => store.set({ param: 'mono', on: !cr.mono }, true)}>{S.mono}</button>
+    <button class="t" class:on={cr.speaker_b} aria-pressed={cr.speaker_b} aria-label="{S.speakerAB}: speakers {cr.speaker_b ? 'B' : 'A'}" disabled={off} data-unmapped={store.unmapped('speaker_b') ? '' : undefined} title={store.hint('speaker_b')} onclick={() => store.set({ param: 'speaker_b', on: !cr.speaker_b }, true)}>{cr.speaker_b ? 'B' : 'A'}</button>
+    <button class="t red" class:on={cr.talkback} aria-pressed={cr.talkback} disabled={off} onclick={() => store.set({ param: 'talkback', on: !cr.talkback }, true)}>{S.talkback}</button>
+
+    <label class="lv" data-unmapped={store.unmapped('phones_vol') ? '' : undefined} title={store.hint('phones_vol')}>
+      <span>{S.phones}</span>
+      <input type="range" min="0" max="1000" step="1" aria-label="{S.phones} level" aria-valuetext="{formatDb(cr.phones_db, 0)} dB" value={Math.round(trimDbToPos(cr.phones_db) * 1000)} disabled={off}
+        oninput={(e) => slider(e, (db) => store.set({ param: 'phones_vol', db }))}
+        onchange={(e) => slider(e, (db) => store.set({ param: 'phones_vol', db }, true))} />
+      <output>{formatDb(cr.phones_db, 0)} dB</output>
+    </label>
+    <label class="lv" data-unmapped={store.unmapped('main_vol') ? '' : undefined} title={store.hint('main_vol')}>
+      <span>{S.main}</span>
+      <input type="range" min="0" max="1000" step="1" aria-label="{S.main} level" aria-valuetext="{formatDb(main, 0)} dB" value={Math.round(trimDbToPos(main) * 1000)} disabled={off}
+        oninput={(e) => slider(e, (db) => store.set({ param: 'main_vol', db }))}
+        onchange={(e) => slider(e, (db) => store.set({ param: 'main_vol', db }, true))}
+        ondblclick={() => store.set({ param: 'main_vol', db: 0 }, true)} />
+      <output>{formatDb(main, 0)} dB</output>
+    </label>
+  {/if}
+</footer>
+
+<style>
+  .cr {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    background: var(--bg-alt);
+    border-top: 1px solid var(--border);
+  }
+  .label {
+    color: var(--text-dim);
+    margin-right: 4px;
+  }
+  .t {
+    min-width: 64px;
+    min-height: 40px;
+    padding: 0 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    --on: var(--cyan);
+  }
+  .t.amber {
+    --on: var(--amber);
+  }
+  .t.red {
+    --on: var(--red);
+  }
+  .t.on {
+    background: var(--on);
+    border-color: var(--on);
+    color: #111;
+    font-weight: 700;
+  }
+  .t:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .lv {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+    border-radius: 6px;
+  }
+  .lv input {
+    width: 130px;
+    min-height: 32px;
+    accent-color: var(--cyan);
+  }
+  output {
+    min-width: 54px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+</style>

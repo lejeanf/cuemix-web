@@ -104,6 +104,18 @@ Once running:
 - Without a MOTU on the network, the server starts in **demo mode**: state is kept in memory and commands are accepted but not sent to any device.
 - Presets and labels are stored under `[storage]`. The example points to `/var/lib/cuemix-web/`, so create that directory or change the paths in `config.toml`.
 
+## Web UI
+
+The embedded Svelte 5 console (dark theme) has Mixer, Preamps, Routing and Reverb views, a channel DSP drawer (interactive EQ curve, compressor, gate), a presets popover and an always-visible Control Room bar. Faders: double-click/tap resets to 0 dB, Shift-drag is fine adjustment, mouse wheel nudges. Meters are provisional (level *i* is drawn on mixer input *i*) and stay idle in demo mode. When online, controls not yet written to the MOTU get a dashed outline.
+
+```sh
+cd frontend && npm install
+npm run dev      # Vite dev server, proxies /ws and /api to 127.0.0.1:8080
+npm test         # vitest
+npm run check    # svelte-check
+npm run build    # outputs frontend/dist (embedded into the binary)
+```
+
 ## OSC quick reference
 
 UDP `:8000`. **Indices are 1-based on the wire** (the server converts them to 0-based internally).

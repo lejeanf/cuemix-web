@@ -51,3 +51,24 @@ button {
   font: inherit;
   color: inherit;
 }
+
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* Param not written to the MOTU yet (online only) — see src/lib/hwmap.ts */
+[data-unmapped] {
+  outline: 1px dashed #6b7280;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
