@@ -599,8 +599,14 @@ pub struct DeviceInfo {
     /// Display name per mixer input (device names, else the model's defaults;
     /// empty string = no name known).
     pub input_names: Vec<String>,
+    /// Display name per mixer input when it is the left channel of a stereo
+    /// pair (e.g. `S/PDIF 1-2`); empty = use `input_names`.
+    pub stereo_names: Vec<String>,
     /// Display name per stereo mix.
     pub mix_names: Vec<String>,
+    /// Order in which to list the mixes (CueMix 5: Main, Phones, Line 3-4…);
+    /// empty = index order.
+    pub mix_order: Vec<u8>,
     /// Per mixer input: `true` on the left channel of a stereo pair.
     pub stereo_inputs: Vec<bool>,
     /// Per mono bus: `true` on the left bus of a stereo mix.

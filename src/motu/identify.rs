@@ -43,30 +43,42 @@ fn text(payload: &[u8]) -> String {
     String::from_utf8_lossy(&payload[..end]).trim().to_owned()
 }
 
-/// Default display names of the UltraLite-mk5 mixer inputs and mixes, in
-/// CueMix 5 order of the device indices.
-fn mk5_names(mixer_inputs: usize, mixes: usize) -> (Vec<String>, Vec<String>) {
-    let mut inputs: Vec<String> = vec!["Mic 1".into(), "Mic 2".into()];
-    inputs.extend((3..=8).map(|n| format!("Line {n}")));
-    inputs.extend(["S/PDIF L".into(), "S/PDIF R".into()]);
-    inputs.extend((1..=8).map(|n| format!("Optical {n}")));
-    let usb = mixer_inputs.saturating_sub(inputs.len());
-    inputs.extend((1..=usb).map(|n| format!("USB {n}")));
-    inputs.truncate(mixer_inputs);
-    let mut names: Vec<String> = [
-        "Main 1-2",
-        "Line 3-4",
-        "Line 5-6",
-        "Line 7-8",
-        "Line 9-10",
-        "Phones",
-        "Reverb",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
-    names.resize(mixes, String::new());
-    (inputs, names)
+/// Mixes of the UltraLite-mk5 in device order (bus pairs 0-1 … 12-13).
+const MK5_MIXES: [&str; 7] = [
+    "Main 1-2",
+    "Line 3-4",
+    "Line 5-6",
+    "Line 7-8",
+    "Line 9-10",
+    "Phones",
+    "Reverb",
+];
+/// CueMix 5 lists Phones right after Main.
+const MK5_MIX_ORDER: [u8; 7] = [0, 5, 1, 2, 3, 4, 6];
+
+/// Default names of the UltraLite-mk5 mixer inputs, in device order (as CueMix
+/// 5 shows them): 8 analog, S/PDIF 1-2, ADAT 1-8, then the computer (USB)
+/// return of each mix but Reverb, then the reverb return.
+/// Returns (mono names, stereo-pair names on the left channel).
+fn mk5_input_names(mixer_inputs: usize) -> (Vec<String>, Vec<String>) {
+    let mut mono: Vec<String> = vec!["Mic 1".into(), "Mic 2".into()];
+    mono.extend((3..=8).map(|n| format!("Line {n}")));
+    mono.extend(["S/PDIF 1".into(), "S/PDIF 2".into()]);
+    mono.extend((1..=8).map(|n| format!("ADAT {n}")));
+    let mut stereo = vec![String::new(); mono.len()];
+    stereo[8] = "S/PDIF 1-2".into();
+    for n in (1..=8).step_by(2) {
+        stereo[9 + n] = format!("ADAT {n}-{}", n + 1);
+    }
+    for mix in &MK5_MIXES[..6] {
+        mono.extend([format!("USB {mix} L"), format!("USB {mix} R")]);
+        stereo.extend([format!("USB {mix}"), String::new()]);
+    }
+    mono.extend(["Reverb L".into(), "Reverb R".into()]);
+    stereo.extend(["Reverb".into(), String::new()]);
+    mono.resize(mixer_inputs, String::new());
+    stereo.resize(mixer_inputs, String::new());
+    (mono, stereo)
 }
 
 /// Identify the device from the raw frames of its state dump. `None` when a
@@ -115,16 +127,21 @@ pub fn identify(frames: &[Vec<u8>]) -> Option<DeviceInfo> {
         routing_outputs: count(P_OUTPUT_NAMES)?,
     };
     let model = one_text(P_MODEL);
-    let (mut input_names, mix_names) = if model == MODEL_ULTRALITE_MK5 {
-        mk5_names(
-            usize::from(topology.mixer_inputs),
-            usize::from(topology.mixes),
+    let inputs = usize::from(topology.mixer_inputs);
+    let mixes = usize::from(topology.mixes);
+    let mk5 = model == MODEL_ULTRALITE_MK5 && mixes == MK5_MIXES.len();
+    let (mut input_names, stereo_names) = if mk5 {
+        mk5_input_names(inputs)
+    } else {
+        (vec![String::new(); inputs], vec![String::new(); inputs])
+    };
+    let (mix_names, mix_order) = if mk5 {
+        (
+            MK5_MIXES.iter().map(|m| (*m).to_owned()).collect(),
+            MK5_MIX_ORDER.to_vec(),
         )
     } else {
-        (
-            vec![String::new(); usize::from(topology.mixer_inputs)],
-            vec![String::new(); usize::from(topology.mixes)],
-        )
+        (vec![String::new(); mixes], Vec::new())
     };
     // Names set on the device (physical inputs) win over the defaults.
     if let Some(names) = props.get(&P_INPUT_NAMES) {
@@ -142,7 +159,9 @@ pub fn identify(frames: &[Vec<u8>]) -> Option<DeviceInfo> {
         firmware: one_text(P_FIRMWARE),
         topology,
         input_names,
+        stereo_names,
         mix_names,
+        mix_order,
         stereo_inputs: flags(P_MIX_INPUT_STEREO),
         stereo_buses: flags(P_MIX_BUS_STEREO),
     })
@@ -251,10 +270,19 @@ mod tests {
         assert_eq!(info.input_names.len(), 32);
         assert_eq!(info.input_names[0], "Mic 1");
         assert_eq!(info.input_names[2], "Line 3");
-        assert_eq!(info.input_names[8], "S/PDIF L");
-        assert_eq!(info.input_names[10], "Optical 1");
-        assert_eq!(info.input_names[18], "USB 1");
-        assert_eq!(info.input_names[31], "USB 14");
+        assert_eq!(info.input_names[8], "S/PDIF 1");
+        assert_eq!(info.input_names[10], "ADAT 1");
+        assert_eq!(info.input_names[17], "ADAT 8");
+        assert_eq!(info.input_names[18], "USB Main 1-2 L");
+        assert_eq!(info.input_names[29], "USB Phones R");
+        assert_eq!(info.input_names[30], "Reverb L");
+        assert_eq!(info.stereo_names[8], "S/PDIF 1-2");
+        assert_eq!(info.stereo_names[10], "ADAT 1-2");
+        assert_eq!(info.stereo_names[16], "ADAT 7-8");
+        assert_eq!(info.stereo_names[18], "USB Main 1-2");
+        assert_eq!(info.stereo_names[28], "USB Phones");
+        assert_eq!(info.stereo_names[30], "Reverb");
+        assert_eq!(info.mix_order, vec![0, 5, 1, 2, 3, 4, 6]);
         assert_eq!(info.mix_names[0], "Main 1-2");
         assert_eq!(info.mix_names[5], "Phones");
         assert_eq!(info.mix_names[6], "Reverb");
@@ -284,6 +312,7 @@ mod tests {
         let info = identify(&d).expect("identified");
         assert_eq!(info.topology, Topology::ULTRALITE_MK5);
         assert!(info.input_names.iter().all(String::is_empty));
+        assert!(info.mix_order.is_empty());
     }
 
     fn fixed(prop_id: u16, index: u16, v: f64) -> Frame {

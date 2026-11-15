@@ -97,7 +97,9 @@ describe('applyEvent', () => {
       firmware: '2.0.8',
       topology: s.state!.topology,
       input_names: ['Mic 1'],
+      stereo_names: [''],
       mix_names: ['Main 1-2'],
+      mix_order: [0],
       stereo_inputs: [false],
       stereo_buses: [true, false],
     };

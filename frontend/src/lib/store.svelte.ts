@@ -78,6 +78,36 @@ class Store {
     return this.c.session.device ?? null;
   }
 
+  /** Strip name: user label, else the device's (pair) name, else `In N`. */
+  stripName(ch: number, stereo = false): string {
+    const own = this.label(ch)?.name;
+    if (own) return own;
+    const d = this.device;
+    return (stereo && d?.stereo_names[ch]) || d?.input_names[ch] || `In ${ch + 1}`;
+  }
+
+  /** Mixer strips: stereo pairs (left channel flagged by the device) share one strip. */
+  get strips(): { ch: number; pair?: number }[] {
+    const n = this.c.state?.topology.mixer_inputs ?? 0;
+    const stereo = this.device?.stereo_inputs ?? [];
+    const out: { ch: number; pair?: number }[] = [];
+    for (let ch = 0; ch < n; ch++) {
+      if (stereo[ch] && ch + 1 < n) {
+        out.push({ ch, pair: ch + 1 });
+        ch++;
+      } else out.push({ ch });
+    }
+    return out;
+  }
+
+  /** Mix indices in display order (device order if it gives one). */
+  get mixOrder(): number[] {
+    const n = this.c.state?.mixes.length ?? 0;
+    const order = (this.device?.mix_order ?? []).filter((i) => i < n);
+    if (order.length !== n || new Set(order).size !== n) return Array.from({ length: n }, (_, i) => i);
+    return order;
+  }
+
   /** Mix tab name: user-set name, else the device's name, else `Mix N`. */
   mixName(i: number): string {
     const own = this.c.state?.mixes[i]?.name ?? '';

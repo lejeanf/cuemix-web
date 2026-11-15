@@ -13,7 +13,7 @@
 {#if st}
   <div class="mixer">
     <div class="buses" role="tablist" aria-label="Mix bus">
-      {#each st.mixes as _, i (i)}
+      {#each store.mixOrder as i (i)}
         <button
           role="tab"
           aria-selected={store.bus === i}
@@ -24,8 +24,8 @@
     </div>
     <div class="row">
       <div class="strips">
-        {#each { length: st.topology.mixer_inputs } as _, ch (ch)}
-          <Strip {ch} />
+        {#each store.strips as s (s.ch)}
+          <Strip ch={s.ch} pair={s.pair} />
         {/each}
       </div>
       <section class="main" aria-label={S.main}>

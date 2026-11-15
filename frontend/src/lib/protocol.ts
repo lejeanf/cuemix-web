@@ -133,8 +133,12 @@ export interface DeviceInfo {
   topology: Topology;
   /** Per mixer input; empty string = no name known. */
   input_names: string[];
+  /** Name when the input is the left channel of a stereo pair; empty = use input_names. */
+  stereo_names: string[];
   /** Per stereo mix; empty string = no name known. */
   mix_names: string[];
+  /** Display order of the mixes (empty = index order). */
+  mix_order: number[];
   /** Per mixer input: true on the left channel of a stereo pair. */
   stereo_inputs: boolean[];
   stereo_buses: boolean[];
