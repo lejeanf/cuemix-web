@@ -26,11 +26,6 @@ HOST_HELPER="/usr/local/sbin/cuemix-motu-bridge"
 UDEV_RULE="/etc/udev/rules.d/99-motu-mk5.rules"
 MOTU_BRIDGE_CFG="/etc/network/interfaces.d/cuemix-motu.cfg"
 
-RELEASE_API="https://api.github.com/repos/lejeanf/cuemix-web/releases/latest"
-RELEASE_BASE="https://github.com/lejeanf/cuemix-web/releases/download"
-SOURCE_TARBALL="https://github.com/lejeanf/cuemix-web/archive/refs/heads/main.tar.gz"
-ARCH_TARGET="x86_64-unknown-linux-musl"
-
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 ROOTFS_GB="${ROOTFS_GB:-4}"
 
@@ -206,7 +201,9 @@ collect_settings() {
   ask MOTU_BRIDGE "Isolated MOTU bridge (no gateway)" "vmbr2"
   MOTU_IP="${MOTU_IP:-169.254.254.1/16}"
 
-  [[ "${CTID}" =~ ^[0-9]+$ ]] && (( CTID >= 100 )) || die "CTID must be an integer >= 100"
+  if ! [[ "${CTID}" =~ ^[0-9]+$ ]] || (( CTID < 100 )); then
+    die "CTID must be an integer >= 100"
+  fi
   [[ "${CT_HOSTNAME}" =~ ^[A-Za-z0-9-]{1,63}$ ]] || die "invalid hostname: ${CT_HOSTNAME}"
   [[ "${WAN_IP}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]] \
     || die "WAN_IP must be IP/CIDR, e.g. 192.0.2.50/24"
@@ -409,8 +406,7 @@ start_container() {
     run pct exec "${CTID}" -- sh -c 'wait for a default route (LAN gateway)'
     return 0
   fi
-  local i
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     if pct exec "${CTID}" -- sh -c 'ip -4 route show default | grep -q .' >/dev/null 2>&1; then
       log_info "container network is up"
       return 0
