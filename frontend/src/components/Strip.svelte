@@ -34,7 +34,8 @@
       max={1}
       reset={0}
       step={0.01}
-      label="{S.pan} {store.labelName(ch)}"
+      label={S.pan}
+      ariaLabel="{S.pan} {store.labelName(ch)}"
       size={36}
       format={panText}
       disabled={off}

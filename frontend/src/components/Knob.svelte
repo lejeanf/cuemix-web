@@ -8,6 +8,8 @@
     /** Value a double-click/tap resets to. */
     reset: number;
     label: string;
+    /** Accessible name when it must say more than the visible caption. */
+    ariaLabel?: string;
     /** Rounding step (e.g. 1 for whole dB). */
     step?: number;
     /** Logarithmic mapping (frequency, times). */
@@ -24,6 +26,7 @@
     max,
     reset,
     label,
+    ariaLabel,
     step = 0,
     log = false,
     format = (v) => String(Math.round(v * 100) / 100),
@@ -132,7 +135,7 @@
     style:height="{size}px"
     role="slider"
     tabindex={disabled ? -1 : 0}
-    aria-label={label}
+    aria-label={ariaLabel ?? label}
     aria-valuemin={min}
     aria-valuemax={max}
     aria-valuenow={Math.round(value * 100) / 100}

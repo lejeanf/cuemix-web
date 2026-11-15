@@ -2,7 +2,11 @@
 
 High-performance **Rust** web controller and bidirectional **OSC** bridge for the **MOTU UltraLite-mk5** audio interface. A single Rust binary embeds a dark-theme Svelte web UI and serves it together with a WebSocket API. OSC controllers (TouchOSC, QLab, ...) and browsers share one state core, so every change made from either side is applied, clamped and broadcast back to all clients.
 
-**Status:** Phase 2 (engine & bridges) — runs in demo mode; hardware control partially mapped and unverified on a real device.
+**Status:** Phases 1–4 implemented (engine, bridges, web UI, deployment scripts) — runs in demo mode; hardware control partially mapped and not yet verified on a real device.
+
+![cuemix-web mixer view: channel strips with faders, pan, mute/solo, EQ and DSP buttons, main fader and the Control Room bar](docs/images/webui-mixer.png)
+
+<sub>Mixer view in demo mode (no MOTU connected); channel names, colours and levels set through the regular WebSocket API.</sub>
 
 ## Hardware coverage
 
