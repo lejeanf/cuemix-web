@@ -67,6 +67,14 @@ fn arg_bool(addr: &str, args: &[OscType]) -> Result<bool, OscError> {
     }
 }
 
+/// Address of the explicit "send me the full state" request (no arguments).
+pub const SYNC_ADDRESS: &str = "/sync";
+
+/// `true` for a `/sync` message without arguments.
+pub fn is_sync(msg: &OscMessage) -> bool {
+    msg.addr == SYNC_ADDRESS && msg.args.is_empty()
+}
+
 /// Parse one incoming OSC message into a [`Command`].
 pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
     let addr = msg.addr.as_str();
