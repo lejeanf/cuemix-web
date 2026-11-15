@@ -33,6 +33,9 @@ jobs:
       - name: Type check (svelte-check)
         working-directory: frontend
         run: npm run check
+      - name: Unit tests (vitest)
+        working-directory: frontend
+        run: npm test
       - name: Build
         working-directory: frontend
         run: npm run build

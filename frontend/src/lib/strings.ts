@@ -46,7 +46,7 @@ export const S = {
   saveAs: 'Save as',
   presetName: 'Preset name',
   presetNameInvalid: 'Use 1–64 letters, digits, space, _ . -',
-  presetRecallNote: 'Loading a preset does not recall trims (gain, main, phones) or +48V.',
+  presetRecallNote: 'Loading a preset does not recall the main and headphone trims or +48V phantom power.',
   noPresets: 'No presets saved yet.',
   rename: 'Rename channel',
   labelColor: 'Colour',
