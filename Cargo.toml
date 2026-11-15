@@ -33,7 +33,10 @@ axum = { version = "0.8", features = ["ws"] }
 # cpufeatures 0.3 (edition 2024, Rust >= 1.85) and broke the former MSRV 1.80 (pin kept; revisit now that MSRV is 1.85).
 rust-embed = { version = "8", features = ["mime-guess"] }
 # OSC over UDP
-rosc = "0.11"
+# Without the default `std` feature: it only adds ISO-8601 formatting of OSC
+# timetags via the `time` crate (unused here — bundles run immediately), and
+# every patched `time` (>= 0.3.47, RUSTSEC-2026-0009) needs Rust 1.88 > MSRV.
+rosc = { version = "0.11", default-features = false }
 # Link-local discovery & Zeroconf
 if-addrs = "0.15"
 mdns-sd = "0.11"
