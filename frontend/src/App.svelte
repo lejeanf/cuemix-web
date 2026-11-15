@@ -72,8 +72,8 @@
     overflow-x: auto;
   }
   .tabs button {
-    min-height: 40px;
-    padding: 0 18px;
+    min-height: 34px;
+    padding: 0 14px;
     background: none;
     border: 0;
     border-bottom: 3px solid transparent;
@@ -95,7 +95,7 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 12px 14px;
+    padding: 8px 10px;
   }
   .toasts {
     position: fixed;

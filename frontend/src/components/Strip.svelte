@@ -39,9 +39,9 @@
       max={1}
       reset={0}
       step={0.01}
-      label={S.pan}
+      label=""
       ariaLabel="{S.pan} {name}"
-      size={36}
+      size={28}
       format={panText}
       disabled={off}
       hint={store.hint('mix_pan')}
@@ -90,8 +90,9 @@
         onclick={() => store.set({ param: 'mix_solo', bus, ch, on: !mc.solo }, true)}>S</button
       >
     </div>
+    <div class="btns fx">
     <button
-      class="b wide cyan"
+      class="b cyan"
       class:on={!eq.bypass}
       aria-pressed={!eq.bypass}
       aria-label="{S.eq} {eq.bypass ? 'bypassed' : 'active'} — {S.eqBypass} {name}"
@@ -100,31 +101,34 @@
       data-unmapped={store.unmapped('eq_bypass') ? '' : undefined}
       onclick={() => store.set({ param: 'eq_bypass', ch, on: !eq.bypass }, true)}>EQ</button
     >
-    <button class="b wide" aria-label="{S.dsp} {name}" disabled={off} onclick={() => (store.dspChannel = ch)}>
+    <button class="b" aria-label="{S.dsp} {name}" title="{S.dsp} {name}" disabled={off} onclick={() => (store.dspChannel = ch)}>
       {S.dsp}
     </button>
+    </div>
   </section>
 {/if}
 
 <style>
   .strip {
     flex: none;
-    width: 88px;
+    width: 66px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding: 0 6px 8px;
+    gap: 4px;
+    padding: 0 3px 4px;
     background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-right: 1px solid var(--border);
     overflow: visible;
+  }
+  .strip.stereo {
+    width: 76px;
   }
   .bar {
     align-self: stretch;
     height: 5px;
     border-radius: 7px 7px 0 0;
-    margin: 0 -6px;
+    margin: 0 -3px;
   }
   .namewrap {
     position: relative;
@@ -134,9 +138,10 @@
     width: 100%;
     background: none;
     border: 0;
-    padding: 4px 2px;
+    padding: 3px 1px;
     text-align: center;
     font-weight: 600;
+    font-size: 12px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -152,7 +157,7 @@
     gap: 4px;
     align-items: stretch;
     align-self: stretch;
-    min-height: 160px;
+    min-height: 140px;
   }
   .faderrow :global(.fader) {
     margin: 0;
@@ -164,11 +169,13 @@
   }
   .btns {
     display: flex;
-    gap: 6px;
+    gap: 4px;
   }
   .b {
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0 4px;
+    font-size: 12px;
     background: var(--bg-alt);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -184,6 +191,12 @@
   }
   .b.amber {
     --on: var(--amber);
+  }
+  /* EQ "on" is the normal state: outline it instead of filling every strip. */
+  .b.cyan.on {
+    background: transparent;
+    color: var(--cyan);
+    font-weight: 600;
   }
   .b.on {
     background: var(--on);

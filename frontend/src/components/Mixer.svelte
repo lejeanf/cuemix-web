@@ -52,7 +52,7 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    gap: 10px;
+    gap: 6px;
   }
   .buses {
     display: flex;
@@ -62,11 +62,12 @@
   }
   .buses button {
     flex: none;
-    min-height: 36px;
-    padding: 0 14px;
+    min-height: 30px;
+    padding: 0 12px;
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 18px;
+    border-radius: 15px;
+    font-size: 13px;
     cursor: pointer;
   }
   .buses button.sel {
@@ -84,9 +85,11 @@
   .strips {
     flex: 1;
     display: flex;
-    gap: 6px;
+    gap: 0;
     overflow-x: auto;
     overflow-y: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     padding-bottom: 6px;
     min-width: 0;
     /* popovers inside strips must not be clipped vertically */
@@ -94,12 +97,12 @@
   }
   .main {
     flex: none;
-    width: 96px;
+    width: 80px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding: 8px 6px;
+    gap: 4px;
+    padding: 6px 4px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
