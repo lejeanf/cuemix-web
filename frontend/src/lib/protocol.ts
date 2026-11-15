@@ -45,55 +45,50 @@ export interface Preamp {
   phase: boolean;
 }
 
+/** One EQ band as the MOTU stores it (input EQ props 1002-1006, output 1022-1026). */
 export interface EqBand {
-  enabled: boolean;
+  /** Filter type, raw byte (see EQ_MODE); unknown values are kept. */
+  mode: number;
+  /** true = bypassed. */
+  bypass: boolean;
+  /** Whole Hz. */
   freq_hz: number;
   gain_db: number;
-  q: number;
-}
-
-export interface Hpf {
-  enabled: boolean;
-  freq_hz: number;
-}
-
-export interface Equalizer {
-  /** Global bypass of the 4 bands (cuemix-web improvement). */
-  bypass: boolean;
-  hpf: Hpf;
-  bands: [EqBand, EqBand, EqBand, EqBand];
+  /** Bandwidth in octaves. */
+  bw_oct: number;
 }
 
 export interface Compressor {
-  enabled: boolean;
+  /** true = bypassed. */
+  bypass: boolean;
   threshold_db: number;
-  ratio: number;
+  /** Whole ms. */
   attack_ms: number;
+  /** Whole ms. */
   release_ms: number;
-  gain_db: number;
+  ratio: number;
+  /** Make-up gain, linear (1.0 = 0 dB). */
+  makeup: number;
 }
 
 export interface Gate {
-  enabled: boolean;
+  /** true = bypassed. */
+  bypass: boolean;
   threshold_db: number;
   attack_ms: number;
   release_ms: number;
 }
 
-export interface ChannelDsp {
-  eq: Equalizer;
-  comp: Compressor;
-  gate: Gate;
-}
-
+/** Reverb processor. Sends = faders of the Reverb mix; return = a mixer input in every mix. */
 export interface Reverb {
-  enabled: boolean;
-  /** Linear gain. */
-  return_gain: number;
-  time_s: number;
+  /** Whole 0..100. */
+  decay: number;
+  damping: number;
+  /** Whole ms 0..100. */
   predelay_ms: number;
-  /** Per mixer input, linear gain. */
-  sends: number[];
+  width: number;
+  /** Raw preset number. */
+  preset: number;
 }
 
 export interface ControlRoom {
@@ -111,7 +106,14 @@ export interface MotuState {
   mixes: Mix[];
   main: { /** Whole dB, -100..0. */ db: number };
   preamps: Preamp[];
-  channels: ChannelDsp[];
+  /** input_eq[ch][band]: analog inputs (topology.preamps) x INPUT_EQ_BANDS. */
+  input_eq: EqBand[][];
+  /** One per analog input. */
+  compressors: Compressor[];
+  /** One per mic input. */
+  gates: Gate[];
+  /** output_eq[out][band]: OUTPUT_EQ_OUTPUTS x OUTPUT_EQ_BANDS. */
+  output_eq: EqBand[][];
   reverb: Reverb;
   routing: { /** matrix[input][output] */ matrix: boolean[][] };
   control_room: ControlRoom;
@@ -170,7 +172,6 @@ export type Param =
   | { param: 'phantom'; ch: number; on: boolean }
   | { param: 'pad'; ch: number; on: boolean }
   | { param: 'phase'; ch: number; on: boolean }
-  | { param: 'eq_bypass'; ch: number; on: boolean }
   | { param: 'route'; input: number; output: number; on: boolean }
   | { param: 'dim'; on: boolean }
   | { param: 'mono'; on: boolean }
@@ -178,13 +179,33 @@ export type Param =
   | { param: 'talkback'; on: boolean }
   | { param: 'phones_vol'; db: number }
   | { param: 'output_trim'; ch: number; db: number }
-  | ({ param: 'eq_band'; ch: number; band: number } & EqBand)
-  | ({ param: 'hpf'; ch: number } & Hpf)
-  | ({ param: 'comp'; ch: number } & Compressor)
-  | ({ param: 'gate'; ch: number } & Gate)
-  | { param: 'reverb'; enabled: boolean; return_gain: number; time_s: number; predelay_ms: number }
-  | { param: 'reverb_send'; ch: number; gain: number }
-  | { param: 'clock'; sample_rate: SampleRate; source: ClockSource };
+  | { param: 'input_eq_mode'; ch: number; band: number; mode: number }
+  | { param: 'input_eq_bypass'; ch: number; band: number; on: boolean }
+  | { param: 'input_eq_freq'; ch: number; band: number; hz: number }
+  | { param: 'input_eq_gain'; ch: number; band: number; db: number }
+  | { param: 'input_eq_bw'; ch: number; band: number; octaves: number }
+  | { param: 'output_eq_mode'; ch: number; band: number; mode: number }
+  | { param: 'output_eq_bypass'; ch: number; band: number; on: boolean }
+  | { param: 'output_eq_freq'; ch: number; band: number; hz: number }
+  | { param: 'output_eq_gain'; ch: number; band: number; db: number }
+  | { param: 'output_eq_bw'; ch: number; band: number; octaves: number }
+  | { param: 'gate_bypass'; ch: number; on: boolean }
+  | { param: 'gate_threshold'; ch: number; db: number }
+  | { param: 'gate_attack'; ch: number; ms: number }
+  | { param: 'gate_release'; ch: number; ms: number }
+  | { param: 'comp_bypass'; ch: number; on: boolean }
+  | { param: 'comp_threshold'; ch: number; db: number }
+  | { param: 'comp_attack'; ch: number; ms: number }
+  | { param: 'comp_release'; ch: number; ms: number }
+  | { param: 'comp_ratio'; ch: number; ratio: number }
+  | { param: 'comp_makeup'; ch: number; gain: number }
+  | { param: 'reverb_decay'; value: number }
+  | { param: 'reverb_damping'; value: number }
+  | { param: 'reverb_predelay'; ms: number }
+  | { param: 'reverb_width'; value: number }
+  | { param: 'reverb_preset'; preset: number }
+  | { param: 'sample_rate'; rate: SampleRate }
+  | { param: 'clock_source'; source: ClockSource };
 
 export type ParamName = Param['param'];
 
@@ -220,19 +241,41 @@ export const LINE_GAIN_MAX_DB = 20;
 export const LABEL_NAME_MAX = 64;
 export const PRESET_NAME_RE = /^[A-Za-z0-9 _.-]{1,64}$/;
 
+/** Provisional ranges (src/state.rs dsp_limits), wide so MOTU values are never distorted. */
 export const DSP_LIMITS = {
   FREQ_HZ: [20, 20_000],
-  EQ_GAIN_DB: [-20, 20],
-  EQ_Q: [0.1, 10],
-  COMP_THRESHOLD_DB: [-60, 0],
-  COMP_RATIO: [1, 20],
-  COMP_GAIN_DB: [0, 24],
-  GATE_THRESHOLD_DB: [-80, 0],
-  ATTACK_MS: [0.1, 200],
-  RELEASE_MS: [10, 2_000],
-  REVERB_TIME_S: [0.1, 10],
-  REVERB_PREDELAY_MS: [0, 200],
+  EQ_GAIN_DB: [-24, 24],
+  EQ_BW_OCT: [0.01, 4],
+  THRESHOLD_DB: [-100, 0],
+  COMP_RATIO: [1, 100],
+  /** Linear make-up gain. */
+  COMP_MAKEUP: [0, 16],
+  ATTACK_MS: [0, 1_000],
+  RELEASE_MS: [0, 10_000],
+  REVERB_PERCENT: [0, 100],
+  REVERB_PREDELAY_MS: [0, 100],
 } as const satisfies Record<string, readonly [number, number]>;
+
+export const INPUT_EQ_BANDS = 4;
+export const OUTPUT_EQ_OUTPUTS = 12;
+export const OUTPUT_EQ_BANDS = 3;
+
+/** EQ band filter types seen in the MOTU dump (props 1002 / 1022). */
+export const EQ_MODE = { BELL: 0, SHELF: 2, HIGH_PASS: 3 } as const;
+
+/** Short name of an EQ mode byte; unknown values are shown as their number. */
+export function eqModeName(mode: number): string {
+  switch (mode) {
+    case EQ_MODE.BELL:
+      return 'Bell';
+    case EQ_MODE.SHELF:
+      return 'Shelf';
+    case EQ_MODE.HIGH_PASS:
+      return 'HPF';
+    default:
+      return `Type ${mode}`;
+  }
+}
 
 export const SAMPLE_RATES: readonly SampleRate[] = ['44100', '48000', '88200', '96000', '176400', '192000'];
 export const CLOCK_SOURCES: readonly ClockSource[] = ['internal', 'spdif', 'optical'];

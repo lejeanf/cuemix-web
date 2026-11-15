@@ -15,7 +15,8 @@
   const name = $derived(store.stripName(ch, pair !== undefined));
   /** The device keeps both halves of a pair; flag when they differ (e.g. left at -inf). */
   const rDiffers = $derived(mcR !== undefined && mc !== undefined && Math.abs(mcR.gain - mc.gain) > 1e-6);
-  const eq = $derived(store.state?.channels[ch]?.eq);
+  /** DSP (EQ, compressor, gate) only exists on the analog inputs. */
+  const dsp = $derived(store.hasDsp(ch));
   const label = $derived(store.label(ch));
   const off = $derived(!store.ready);
   let editing = $state(false);
@@ -23,7 +24,7 @@
   const panText = (v: number) => (Math.abs(v) < 0.005 ? 'C' : v < 0 ? `L${Math.round(-v * 100)}` : `R${Math.round(v * 100)}`);
 </script>
 
-{#if mc && eq}
+{#if mc}
   <section class="strip" class:stereo={pair !== undefined} aria-label="Channel {name}">
     <div class="bar" style:background={label?.color ?? 'transparent'}></div>
     <div class="namewrap">
@@ -90,21 +91,18 @@
         onclick={() => store.set({ param: 'mix_solo', bus, ch, on: !mc.solo }, true)}>S</button
       >
     </div>
-    <div class="btns fx">
-    <button
-      class="b cyan"
-      class:on={!eq.bypass}
-      aria-pressed={!eq.bypass}
-      aria-label="{S.eq} {eq.bypass ? 'bypassed' : 'active'} — {S.eqBypass} {name}"
-      title={S.eqBypass}
-      disabled={off}
-      data-unmapped={store.unmapped('eq_bypass') ? '' : undefined}
-      onclick={() => store.set({ param: 'eq_bypass', ch, on: !eq.bypass }, true)}>EQ</button
-    >
-    <button class="b" aria-label="{S.dsp} {name}" title="{S.dsp} {name}" disabled={off} onclick={() => (store.dspChannel = ch)}>
-      {S.dsp}
-    </button>
-    </div>
+    {#if dsp}
+      <button
+        class="b dsp"
+        aria-label="{S.dsp} {name}"
+        title="{S.dsp} {name}"
+        disabled={off}
+        onclick={() => (store.dspChannel = ch)}>{S.dsp}</button
+      >
+    {:else}
+      <!-- Keeps the faders aligned with the strips that have DSP. -->
+      <span class="noDsp" aria-hidden="true"></span>
+    {/if}
   </section>
 {/if}
 
@@ -188,11 +186,12 @@
   .b.amber {
     --on: var(--amber);
   }
-  /* EQ "on" is the normal state: outline it instead of filling every strip. */
-  .b.cyan.on {
-    background: transparent;
-    color: var(--cyan);
-    font-weight: 600;
+  .b.dsp {
+    min-width: 60px;
+  }
+  .noDsp {
+    display: block;
+    min-height: 28px;
   }
   .b.on {
     background: var(--on);

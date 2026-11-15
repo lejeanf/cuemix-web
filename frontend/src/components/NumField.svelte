@@ -4,12 +4,14 @@
     min: number;
     max: number;
     step?: number;
+    /** Visible caption above the field; empty = none (then pass `ariaLabel`). */
     label: string;
+    ariaLabel?: string;
     unit?: string;
     disabled?: boolean;
     onchange: (value: number) => void;
   }
-  let { value, min, max, step = 1, label, unit = '', disabled = false, onchange }: Props = $props();
+  let { value, min, max, step = 1, label, ariaLabel, unit = '', disabled = false, onchange }: Props = $props();
 
   function commit(e: Event) {
     const el = e.currentTarget as HTMLInputElement;
@@ -20,9 +22,9 @@
 </script>
 
 <label class="nf">
-  <span>{label}</span>
+  {#if label}<span>{label}</span>{/if}
   <span class="in">
-    <input type="number" {min} {max} {step} {disabled} value={Math.round(value * 100) / 100} aria-label={label} onchange={commit} />
+    <input type="number" {min} {max} {step} {disabled} value={Math.round(value * 100) / 100} aria-label={ariaLabel ?? label} onchange={commit} />
     {#if unit}<em>{unit}</em>{/if}
   </span>
 </label>

@@ -27,9 +27,11 @@
   function key(e: KeyboardEvent) {
     if (e.key === 'Escape') open = '';
   }
-  function setClock(patch: Partial<{ sample_rate: SampleRate; source: ClockSource }>) {
-    if (!clock) return;
-    store.set({ param: 'clock', sample_rate: clock.sample_rate, source: clock.source, ...patch }, true);
+  function setRate(rate: SampleRate) {
+    store.set({ param: 'sample_rate', rate }, true);
+  }
+  function setSource(source: ClockSource) {
+    store.set({ param: 'clock_source', source }, true);
   }
   function saveAs() {
     if (!nameOk) return;
@@ -60,13 +62,14 @@
     </button>
     {#if open === 'clock' && clock}
       <div class="pop" role="dialog" aria-label={S.clock}>
+        {#if store.hint('sample_rate')}<p class="hint">{store.hint('sample_rate')}</p>{/if}
         <label>{S.sampleRate}
-          <select value={clock.sample_rate} onchange={(e) => setClock({ sample_rate: e.currentTarget.value as SampleRate })}>
+          <select value={clock.sample_rate} onchange={(e) => setRate(e.currentTarget.value as SampleRate)}>
             {#each SAMPLE_RATES as r (r)}<option value={r}>{khz(r)}</option>{/each}
           </select>
         </label>
         <label>{S.clockSource}
-          <select value={clock.source} onchange={(e) => setClock({ source: e.currentTarget.value as ClockSource })}>
+          <select value={clock.source} onchange={(e) => setSource(e.currentTarget.value as ClockSource)}>
             {#each CLOCK_SOURCES as c (c)}<option value={c}>{c}</option>{/each}
           </select>
         </label>
@@ -173,6 +176,12 @@
     border-radius: var(--radius);
     box-shadow: 0 8px 24px #000a;
     z-index: 30;
+  }
+  .hint {
+    margin: 0;
+    max-width: 220px;
+    font-size: 12px;
+    color: var(--text-dim);
   }
   .pop.wide {
     width: min(340px, 92vw);

@@ -4,10 +4,15 @@
   import { TRIM_MIN_DB } from '../lib/protocol';
   import { formatDb } from '../lib/fader';
   import Knob from './Knob.svelte';
+  import EqCurve from './EqCurve.svelte';
+  import EqBands from './EqBands.svelte';
 
   const st = $derived(store.state);
   const off = $derived(!store.ready);
   const dbText = (v: number) => `${formatDb(v, 0)} dB`;
+  let eqOut = $state(0);
+  let eqBand = $state(0);
+  const eqHint = $derived(store.hint('output_eq_freq'));
 
   /** CueMix 5 names each analog output pair after the mix that feeds it by default. */
   function outputName(ch: number): string {
@@ -94,6 +99,27 @@
         {/each}
       </div>
     </section>
+
+    {#if st.output_eq.length}
+      <section class="card wide" aria-label={S.outputEq}>
+        <h3>{S.outputEq}{#if eqHint}<span class="sub">{eqHint}</span>{/if}</h3>
+        <div class="outs" role="tablist" aria-label="{S.outputEq} output">
+          {#each st.output_eq as bands, ch (ch)}
+            <button
+              role="tab"
+              class="o"
+              class:sel={eqOut === ch}
+              class:act={bands.some((b) => !b.bypass && b.gain_db !== 0)}
+              aria-selected={eqOut === ch}
+              title={outputName(ch)}
+              onclick={() => (eqOut = ch)}>{ch + 1}</button
+            >
+          {/each}
+        </div>
+        <EqCurve kind="output" ch={eqOut} bind:selected={eqBand} height={130} />
+        <EqBands kind="output" ch={eqOut} bind:selected={eqBand} />
+      </section>
+    {/if}
   </div>
 {/if}
 
@@ -154,6 +180,36 @@
   }
   .t[data-unmapped] {
     border-style: dashed;
+  }
+  .sub {
+    margin-left: 8px;
+    font-size: 0.75rem;
+    font-weight: 400;
+  }
+  .card.wide :global(.eq) {
+    margin-bottom: 6px;
+  }
+  .outs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+  .o {
+    min-width: 32px;
+    min-height: 28px;
+    font-size: 12px;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .o.act {
+    color: var(--cyan);
+  }
+  .o.sel {
+    border-color: var(--cyan);
+    font-weight: 700;
   }
   .trims {
     display: grid;

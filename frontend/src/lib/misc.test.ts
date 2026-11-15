@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { biquadMagDb, eqResponseDb, freqToX, peakingBiquad, xToFreq } from './eq';
+import { biquadMagDb, bwToQ, eqResponseDb, freqToX, peakingBiquad, xToFreq } from './eq';
 import { levelToPos, stepMeter } from './meters';
-import type { Equalizer, Param } from './protocol';
+import { EQ_MODE, eqModeName, type EqBand, type Param } from './protocol';
 import { ParamSender, paramKey } from './sender';
 import { isHexColor, isValidLabelName, isValidPresetName } from './validate';
-import { isHwMapped } from './hwmap';
+import { isHwMapped, isHwReadOnly } from './hwmap';
 
 describe('ParamSender throttle', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -69,29 +69,39 @@ describe('validation', () => {
 });
 
 describe('EQ math', () => {
-  const flat = (): Equalizer => ({
-    bypass: false,
-    hpf: { enabled: false, freq_hz: 80 },
-    bands: [0, 1, 2, 3].map(() => ({ enabled: false, freq_hz: 1000, gain_db: 6, q: 1 })) as Equalizer['bands'],
+  const flat = (): EqBand[] => [0, 1, 2, 3].map(() => ({ mode: EQ_MODE.BELL, bypass: false, freq_hz: 1000, gain_db: 0, bw_oct: 1 }));
+  it('flat when every band is at 0 dB or bypassed', () => {
+    const eq = flat();
+    eq[0] = { ...eq[0], mode: EQ_MODE.HIGH_PASS, bypass: true };
+    for (const f of [20, 100, 1000, 10000, 20000]) expect(eqResponseDb(eq, f)).toBeCloseTo(0, 9);
   });
-  it('flat when everything is disabled', () => {
-    for (const f of [20, 100, 1000, 10000, 20000]) expect(eqResponseDb(flat(), f)).toBeCloseTo(0, 9);
-  });
-  it('+6 dB peaking band gives +6 dB at f0 and ~0 far away', () => {
+  it('+6 dB bell gives +6 dB at f0 and ~0 far away; bypass removes it', () => {
     expect(biquadMagDb(peakingBiquad(1000, 6, 1), 1000)).toBeCloseTo(6, 6);
     const eq = flat();
-    eq.bands[1].enabled = true;
+    eq[1].gain_db = 6;
     expect(eqResponseDb(eq, 1000)).toBeCloseTo(6, 6);
     expect(Math.abs(eqResponseDb(eq, 20))).toBeLessThan(0.2);
-    eq.bypass = true;
+    eq[1].bypass = true;
     expect(eqResponseDb(eq, 1000)).toBeCloseTo(0, 9);
   });
-  it('HPF is -3 dB at fc and 12 dB/oct below', () => {
+  it('high-pass band is -3 dB at fc and 12 dB/oct below', () => {
     const eq = flat();
-    eq.hpf.enabled = true;
-    eq.hpf.freq_hz = 1000;
+    eq[0] = { ...eq[0], mode: EQ_MODE.HIGH_PASS };
     expect(eqResponseDb(eq, 1000)).toBeCloseTo(-3, 0);
     expect(eqResponseDb(eq, 250)).toBeLessThan(-23);
+  });
+  it('shelf reaches its gain far past the corner; unknown modes are not drawn', () => {
+    const eq = flat();
+    eq[3] = { ...eq[3], mode: EQ_MODE.SHELF, freq_hz: 5000, gain_db: 6 };
+    expect(eqResponseDb(eq, 20000)).toBeCloseTo(6, 0);
+    expect(Math.abs(eqResponseDb(eq, 100))).toBeLessThan(0.1);
+    eq[3].mode = 9;
+    expect(eqResponseDb(eq, 20000)).toBeCloseTo(0, 9);
+    expect(eqModeName(9)).toBe('Type 9');
+    expect(eqModeName(EQ_MODE.HIGH_PASS)).toBe('HPF');
+  });
+  it('bandwidth 1 octave is Q ~1.41', () => {
+    expect(bwToQ(1)).toBeCloseTo(Math.SQRT2, 6);
   });
   it('log axis round trip', () => {
     expect(freqToX(20)).toBeCloseTo(0, 12);
@@ -122,5 +132,11 @@ describe('hardware mapping list', () => {
   it('matches ARCHITECTURE §8', () => {
     for (const p of ['preamp_gain', 'phase', 'pad', 'phantom', 'main_vol', 'phones_vol', 'mono', 'talkback'] as const) expect(isHwMapped(p)).toBe(true);
     expect(isHwMapped('mix_vol')).toBe(false);
+  });
+  it('DSP, reverb and clock are read from the MOTU but not written yet', () => {
+    for (const p of ['input_eq_freq', 'output_eq_gain', 'comp_makeup', 'gate_bypass', 'reverb_decay', 'sample_rate', 'clock_source'] as const) {
+      expect(isHwMapped(p)).toBe(false);
+      expect(isHwReadOnly(p)).toBe(true);
+    }
   });
 });
