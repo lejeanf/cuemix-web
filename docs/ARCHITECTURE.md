@@ -287,7 +287,7 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 | Q4 | Volumes en gain linéaire `8.24` | Gain linéaire | 🟡 non confirmé ; seul indice : seuil de gate « 1 = 0 dB » |
 
 À vérifier **sur matériel** par le mainteneur (bloquant pour les faders de mix) :
-1. Écriture avec ou sans champ longueur `u16` (`[id][index][len][payload]` selon deux sources).
+1. ~~Écriture avec ou sans champ longueur~~ — tranché le 2026-11-15 : champ longueur `u16` requis en écriture (`Frame::encode_write`).
 2. Ordre d'index des props 1016–1019 (32 entrées × 14 bus).
 3. Chemin WebSocket selon firmware (`/` ou `/<serial>`, port 1280 ou 1281).
 4. Format des trames de mètres (prop 6000) ; valeur trim 100 = −100 dB ou −inf.

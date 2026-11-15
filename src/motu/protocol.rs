@@ -23,6 +23,8 @@ pub const FIXED_8_24_MIN: f64 = -128.0;
 pub const FIXED_8_24_MAX: f64 = i32::MAX as f64 / FIXED_8_24_SCALE;
 /// Header length: `prop_id` + `index`.
 pub const HEADER_LEN: usize = 4;
+/// Size of the payload length field that written frames carry after the header.
+pub const WRITE_LEN_FIELD: usize = 2;
 /// Length of a fixed-size string payload.
 pub const STR32_LEN: usize = 32;
 
@@ -173,6 +175,61 @@ impl Frame {
         Ok(out)
     }
 
+    /// Encode a frame for writing to the device:
+    /// `[prop_id u16][index u16][payload length u16][payload]`.
+    ///
+    /// The device pushes frames without the length field, but ignores writes
+    /// that lack it (seen on an UltraLite-mk5, 2026-11-15: `5011` written as
+    /// `[id][index][payload]` was sent but never applied). licanccc and the
+    /// m1no gist both write with the length field.
+    pub fn encode_write(&self) -> Result<Vec<u8>, ProtocolError> {
+        let payload_len = self.value.kind().payload_len();
+        let len = u16::try_from(payload_len).map_err(|_| ProtocolError::PayloadLength {
+            kind: self.value.kind(),
+            len: payload_len,
+            expected: usize::from(u16::MAX),
+        })?;
+        let mut out = Vec::with_capacity(HEADER_LEN + WRITE_LEN_FIELD + payload_len);
+        out.extend_from_slice(&self.prop_id.to_be_bytes());
+        out.extend_from_slice(&self.index.to_be_bytes());
+        out.extend_from_slice(&len.to_be_bytes());
+        self.value.encode_into(&mut out)?;
+        Ok(out)
+    }
+
+    /// Decode a frame in the write layout produced by [`Frame::encode_write`].
+    /// The length field must match the payload kind's size.
+    pub fn decode_write(
+        bytes: &[u8],
+        kind_of: impl Fn(u16) -> ValueKind,
+    ) -> Result<Self, ProtocolError> {
+        let need = HEADER_LEN + WRITE_LEN_FIELD;
+        let Some((head, payload)) = bytes.split_first_chunk::<{ HEADER_LEN + WRITE_LEN_FIELD }>()
+        else {
+            return Err(ProtocolError::Truncated {
+                len: bytes.len(),
+                need,
+            });
+        };
+        let prop_id = u16::from_be_bytes([head[0], head[1]]);
+        let index = u16::from_be_bytes([head[2], head[3]]);
+        let declared = usize::from(u16::from_be_bytes([head[4], head[5]]));
+        let kind = kind_of(prop_id);
+        if declared != kind.payload_len() {
+            return Err(ProtocolError::PayloadLength {
+                kind,
+                len: declared,
+                expected: kind.payload_len(),
+            });
+        }
+        let value = Value::decode(kind, payload)?;
+        Ok(Frame {
+            prop_id,
+            index,
+            value,
+        })
+    }
+
     /// Decode one frame. `kind_of` maps a `prop_id` to its payload kind
     /// (the property table, Phase 2). Trailing bytes are rejected.
     pub fn decode(bytes: &[u8], kind_of: impl Fn(u16) -> ValueKind) -> Result<Self, ProtocolError> {
@@ -269,6 +326,43 @@ mod tests {
             let bytes = f.encode().unwrap_or_default();
             assert_eq!(Frame::decode(&bytes, kinds), Ok(f));
         }
+    }
+
+    #[test]
+    fn write_layout_carries_payload_length() {
+        let f = Frame {
+            prop_id: 5011,
+            index: 0,
+            value: Value::U8(43),
+        };
+        assert_eq!(
+            f.encode_write(),
+            Ok(vec![0x13, 0x93, 0x00, 0x00, 0x00, 0x01, 0x2b])
+        );
+        let fixed = Frame {
+            prop_id: 0x0102,
+            index: 0x0304,
+            value: Value::Fixed(1.0),
+        };
+        assert_eq!(
+            fixed.encode_write(),
+            Ok(vec![
+                0x01, 0x02, 0x03, 0x04, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00
+            ])
+        );
+    }
+
+    #[test]
+    fn write_layout_round_trips_and_rejects_bad_length() {
+        let f = Frame {
+            prop_id: 7,
+            index: 3,
+            value: Value::U8(9),
+        };
+        let bytes = f.encode_write().unwrap_or_default();
+        assert_eq!(Frame::decode_write(&bytes, |_| ValueKind::U8), Ok(f));
+        assert!(Frame::decode_write(&[0, 7, 0, 3, 0, 2, 9], |_| ValueKind::U8).is_err());
+        assert!(Frame::decode_write(&[0, 7, 0], |_| ValueKind::U8).is_err());
     }
 
     #[test]

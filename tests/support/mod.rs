@@ -9,7 +9,8 @@
 //! | `0x2000..=0x2FFF` | U8      |
 //! | `0x3000..`        | Str32   |
 //!
-//! Behaviour: every valid binary frame updates the shared store and is
+//! Behaviour: every valid binary frame (write layout with a length field, or
+//! the plain device layout) updates the shared store and is
 //! re-broadcast (re-encoded) to ALL connected clients, including the sender,
 //! simulating hardware feedback. Malformed binary frames are dropped and
 //! counted; text frames are ignored. Neither ever closes a connection.
@@ -72,7 +73,11 @@ impl MockMotu {
                         tokio::select! {
                             incoming = ws.next() => match incoming {
                                 Some(Ok(Message::Binary(bytes))) => {
-                                    match Frame::decode(&bytes, kind_of) {
+                                    // Client writes carry a length field; tests may also
+                                    // push the plain device layout. Accept both.
+                                    match Frame::decode_write(&bytes, kind_of)
+                                        .or_else(|_| Frame::decode(&bytes, kind_of))
+                                    {
                                         Ok(frame) => {
                                             s.lock().await.insert(
                                                 (frame.prop_id, frame.index),

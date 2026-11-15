@@ -13,6 +13,10 @@ need attention. Preset files carry `schema_version`; see
 ## [Unreleased]
 
 ### Fixed
+- Writes to the MOTU had no effect: the device ignores frames without a
+  payload length field. Writes are now `[id][index][len u16][payload]`
+  (verified on an UltraLite-mk5: main volume follows the web UI). Reads are
+  unchanged.
 - `proxmox-setup.sh`: on hosts whose `/etc/network/interfaces` does not load
   `interfaces.d`, the MOTU bridge was never created and the container failed
   to start. The script now offers to source its bridge file (with a backup),
