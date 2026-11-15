@@ -14,7 +14,7 @@ updates:
         update-types: [minor, patch]
     ignore:
       # >= 8.8 pulls sha2 0.11 -> cpufeatures 0.3 (edition 2024) and breaks
-      # MSRV 1.80 (docs/ARCHITECTURE.md D14).
+      # the former MSRV 1.80 (docs/ARCHITECTURE.md D14); revisit with MSRV 1.85.
       - dependency-name: rust-embed
         versions: [">= 8.8"]
       - dependency-name: rust-embed-impl
@@ -39,6 +39,9 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    ignore:
+      # Its refs are toolchain names (stable, master, 1.85.0), not versions.
+      - dependency-name: dtolnay/rust-toolchain
     groups:
       actions:
         patterns: ["*"]

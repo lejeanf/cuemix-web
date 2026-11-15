@@ -2,7 +2,7 @@
 name = "cuemix-web"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.85"
 description = "Standalone web & bidirectional OSC controller for the MOTU UltraLite-mk5"
 license = "MIT"
 repository = "https://github.com/lejeanf/cuemix-web"
@@ -30,7 +30,7 @@ tokio-tungstenite = "0.29"
 axum = { version = "0.8", features = ["ws"] }
 # Frontend bundle embedded in the binary (frontend/dist must exist at build time).
 # Locked to 8.7.2 (+ rust-embed-impl/utils 8.7.2): >= 8.8 pulls sha2 0.11 ->
-# cpufeatures 0.3 (edition 2024, Rust >= 1.85) and breaks MSRV 1.80.
+# cpufeatures 0.3 (edition 2024, Rust >= 1.85) and broke the former MSRV 1.80 (pin kept; revisit now that MSRV is 1.85).
 rust-embed = { version = "8", features = ["mime-guess"] }
 # OSC over UDP
 rosc = "0.11"

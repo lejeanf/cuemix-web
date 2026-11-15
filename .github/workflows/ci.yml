@@ -68,7 +68,7 @@ jobs:
         run: cargo test --locked --all-targets
 
   msrv:
-    name: MSRV (1.80)
+    name: MSRV (1.85)
     needs: frontend
     runs-on: ubuntu-latest
     steps:
@@ -77,9 +77,13 @@ jobs:
         with:
           name: frontend-dist
           path: frontend/dist
-      - uses: dtolnay/rust-toolchain@1.120.0
+      # Toolchain passed as an input, not as the action ref: Dependabot treats a
+      # ref like @1.85.0 as a version and "bumps" it to a nonexistent Rust.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --locked
+      - run: cargo check --locked --all-targets
 
   shell:
     name: Shell scripts (bash -n + shellcheck)

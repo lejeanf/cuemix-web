@@ -8,7 +8,7 @@
 | | |
 |---|---|
 | Version du contrat | `0.3.0` (Phase 3 — interface ; params DSP/réverbe/horloge éditables) |
-| MSRV | Rust `1.80`, édition 2021 |
+| MSRV | Rust `1.85`, édition 2021 (relevée depuis 1.80, décision D18) |
 | Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` (embarqué via `rust-embed`) |
 
 ---
@@ -235,7 +235,7 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 
 * Ordre **non négociable** : `frontend` (`npm ci && npm run build`) **puis** `cargo build`
   (`rust-embed` sans `allow_missing` : pas de binaire sans UI).
-* `.cargo/config.toml` : résolution compatible MSRV 1.80.
+* `.cargo/config.toml` : résolution compatible MSRV 1.85 (`cargo update` choisit des versions compatibles).
 * `ci.yml` : frontend → rust (fmt, clippy `-D warnings`, tests) · msrv · `cargo audit` · gitleaks + RFC1918.
 * `release.yml` : musl x86_64/aarch64/armv7 (`cargo-zigbuild`), `.deb`, GitHub Release, image
   `ghcr.io` amd64/arm64 (distroless `nonroot`).
@@ -270,6 +270,7 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 | D11 | Topologie démo 32 entrées mixer / 8 préamplis / 2 micros | Sources motu-mk5-linux (Q2) |
 | D12 | Pas d'écho `changed` vers l'émetteur (Web et OSC) | Évite le « tremblement » des faders pendant le geste |
 | D13 | Rappel de préset sans trims ni +48V (arbitrage mainteneur, audit n°9) | Sécurité des écoutes et du matériel ; motu-mk5-linux le déconseille |
+| D18 | MSRV relevée de 1.80 à **1.85** (arbitrage mainteneur 2026-11-14) ; job CI MSRV via `dtolnay/rust-toolchain@master` + `toolchain: "1.85"`, ignoré par Dependabot | Les mises à jour Dependabot (tokio 1.54, toml 1.x) exigent 1.85 ; binaires statiques : les utilisateurs ne compilent pas ; reste conforme à « MSRV 1.80+ » (HANDOFF) |
 | D14 | `rust-embed` verrouillé en 8.7.2 dans `Cargo.lock` | ≥ 8.8 tire `cpufeatures 0.3` (édition 2024) et casse la MSRV 1.80 |
 
 ## 8. Questions matériel — arbitrages et état (2026-11-14)

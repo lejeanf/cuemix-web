@@ -25,7 +25,7 @@ async fn connect(mock: &MockMotu) -> Ws {
 }
 
 async fn send_frame(ws: &mut Ws, f: &Frame) {
-    ws.send(Message::Binary(f.encode().expect("encode")))
+    ws.send(Message::Binary(f.encode().expect("encode").into()))
         .await
         .expect("send");
 }
@@ -102,7 +102,9 @@ async fn malformed_frames_counted_and_connection_survives() {
         bad_utf8,
     ];
     for b in &bad {
-        ws.send(Message::Binary(b.clone())).await.expect("send");
+        ws.send(Message::Binary(b.clone().into()))
+            .await
+            .expect("send");
     }
     ws.send(Message::Text("ignored".into()))
         .await
