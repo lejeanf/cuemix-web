@@ -17,16 +17,16 @@ Pas d'accès à `app.asar` de CueMix 5 : les IDs viennent de `motu-mk5-linux` qu
 
 | Param | prop_id | index | payload | Encodage | Source |
 |---|---|---|---|---|---|
-| `PreampGain{ch,db}` | 5001 | `ch` (0..7) | U8 | dB entiers (arrondi, clamp 0..74) | mk5-linux |
+| `PreampGain{ch,db}` | 5001 | `ch` (0..7) | U8 | dB entiers (arrondi ; clamp 0..74 micros ch 0-1, 0..20 lignes ch 2-7) | mk5-linux |
 | `Phase{ch}` | 5002 | `ch` (0..7) | U8 | 0/1 | mk5-linux |
 | `Pad{ch}` | 5003 | `ch` (0..1, micros) | U8 | 0/1 | mk5-linux + licanccc (confirmé) |
 | `Phantom{ch}` | 5004 | `ch` (0..1) | U8 | 0/1 | mk5-linux |
-| `MainVol{value}` | 5011 `main_trim` | 0 | U8 | atténuation 0..100 = 0..-100 dB | mk5-linux + licanccc |
-| `PhonesVol{value}` | 5000 `output_trim` | 10 et 11 (2 trames) | U8 | idem | mk5-linux + licanccc |
+| `MainVol{db}` | 5011 `main_trim` | 0 | U8 | atténuation 0..100 = 0..-100 dB | mk5-linux + licanccc |
+| `PhonesVol{db}` | 5000 `output_trim` | écriture 10 et 11 (2 trames) ; lecture 10 seulement | U8 | idem | mk5-linux + licanccc |
 | `Mono{on}` | 5018 | 0 | U8 | 0/1 (paramètre caché dans CueMix) | mk5-linux + licanccc |
 | `Talkback{on}` | 5027 | 0 | U8 | 0/1 | mk5-linux |
 
-Conversion volume : `MainVol`/`PhonesVol` passent par `fader::pos_to_db`, arrondi au dB entier, **saturé à 0 dB** (le trim ne sait qu'atténuer ; positions > 0.75 -> 0 dB, perte) ; `pos 0` -> 100. Non vérifié : si 100 = -inf ou -100 dB.
+Conversion volume (décision D8, unités natives) : `MainVol`/`PhonesVol` portent des **dB entiers -100..0** dans l'état ; le codec fait une copie directe `octet = -dB` (saturé à 0 dB : le trim ne sait qu'atténuer). La loi `0..1` n'existe qu'en OSC et dans l'UI. Non vérifié : si 100 = -inf ou -100 dB. Rappel de préset : trims et +48V ne sont **jamais** réécrits (règle 6 ci-dessous, arbitrage mainteneur).
 
 Non mappés (pas de trame) : `MixVol/MixPan/MixMute/MixSolo`, `Route`, `EqBypass`, `Dim`, `SpeakerB`, et tout canal hors plage documentée.
 - Mix : les propriétés existent (1016 fader, 1017 pan, 1018 solo, 1019 mute, 448 entrées = 32 entrées x 14 bus) mais **l'ordre des index (bus*32+in ou in*14+bus) n'est documenté nulle part**, ni la gestion du pan/stéréo sur 2 bus. Il faut une capture CueMix.
@@ -39,7 +39,7 @@ Non mappés (pas de trame) : `MixVol/MixPan/MixMute/MixSolo`, `Route`, `EqBypass
 ## Réponses aux questions du mainteneur
 
 - **Q1 (fréquences)** : EQ/HPF en **entier Int32 en Hz brut** (`input_eq_freq` 1004, `output_eq_freq` 1024), pas en 8.24. Gain EQ (1005) et largeur de bande en octaves (1006) sont en 8.24. HPF = un mode de bande (`input_eq_mode` 3 = highpass), pas de propriété dédiée. Source : mk5-linux `properties.rs`. À implémenter avec `ValueKind::U32` dès que le layout d'index des bandes est connu.
-- **Q2 (dimensions)** : entrées de mixage **32**, bus **14** (= 7 mixes stéréo, `mix_output_stereo` 14), préamps : gain sur **8** entrées (2 micros avec pad/48V + 6 lignes), EQ/compresseur sur 8 canaux, gate sur 2 ; noms : 18 entrées / 22 sorties (routage 18x22, cohérent avec `Topology` mais la table réelle est un patch de 80 octets), `output_trim` 12 sorties, EQ de sortie 3 bandes x 12. `Topology::ULTRALITE_MK5.mixer_inputs = 18` est donc probablement faux (32 selon mk5-linux). Dimensions fournies à titre d'information, `state.rs` non modifié.
+- **Q2 (dimensions)** : entrées de mixage **32**, bus **14** (= 7 mixes stéréo, `mix_output_stereo` 14), préamps : gain sur **8** entrées (2 micros avec pad/48V + 6 lignes), EQ/compresseur sur 8 canaux, gate sur 2 ; noms : 18 entrées / 22 sorties (routage 18x22, cohérent avec `Topology` mais la table réelle est un patch de 80 octets), `output_trim` 12 sorties, EQ de sortie 3 bandes x 12. Appliqué : `Topology::ULTRALITE_MK5` = 32 entrées mixer, 8 préamplis, 2 entrées micro (décision D11).
 - **Q4 (volumes mix = gain linéaire 8.24 ?)** : **non confirmé, non réfuté**. `mix_fader` est de type Float (8.24) ; les sources ne disent pas si c'est linéaire ou dB (seul indice : `gate_threshold` "0=-inf, 1=0dB", donc plutôt linéaire). Par contre, volumes Main et Phones ne sont **pas** en 8.24 : octets d'atténuation en dB (voir ci-dessus), ce qui contredit l'hypothèse Q4 pour ces deux paramètres.
 
 ## Handshake / synchronisation complète
