@@ -1,5 +1,6 @@
 # --- Secrets & Local Private Config ---
-config.toml
+# Anchored: only the root runtime config is private (.cargo/config.toml is tracked).
+/config.toml
 *.local.toml
 .env
 *.pem

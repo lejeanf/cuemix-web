@@ -1,0 +1,4 @@
+# Prefer dependency versions compatible with `package.rust-version` (MSRV 1.85)
+# when (re)generating Cargo.lock with a newer toolchain. Ignored by older cargo.
+[resolver]
+incompatible-rust-versions = "fallback"

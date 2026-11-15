@@ -10,8 +10,6 @@ Compatibility notes for each release say whether presets or `config.toml`
 need attention. Preset files carry `schema_version`; see
 `docs/ARCHITECTURE.md` (decision D15).
 
-## [Unreleased]
-
 ## [0.3.0] - unreleased
 
 First feature-complete version (Phases 1–4 of `docs/HANDOFF.md`), not yet
