@@ -61,6 +61,24 @@ describe('applyEvent', () => {
     const t = withSnapshot();
     expect(() => applyParam(t.state!, { param: 'mix_vol', bus: 9, ch: 9, gain: 1 })).not.toThrow();
   });
+  it('changed never treats non-integer keys from the wire as indices', () => {
+    const t = withSnapshot();
+    const before = JSON.stringify(t.state);
+    // Malformed payloads (as JSON.parse would produce them) bypass the TS types.
+    const evil = [
+      { param: 'mix_vol', bus: '__proto__', ch: 'constructor', gain: 0 },
+      { param: 'mix_mute', bus: 0, ch: '__proto__', on: true },
+      { param: 'preamp_gain', ch: '__proto__', db: 1 },
+      { param: 'eq_band', ch: 0, band: '__proto__', enabled: true, freq_hz: 1, gain_db: 1, q: 1 },
+      { param: 'reverb_send', ch: '__proto__', gain: 1 },
+      { param: 'route', input: 0, output: '__proto__', on: true },
+      { param: 'route', input: 0.5, output: 0, on: true },
+    ] as unknown as Parameters<typeof applyParam>[1][];
+    for (const p of evil) applyParam(t.state!, p);
+    expect(JSON.stringify(t.state)).toBe(before);
+    expect(({} as Record<string, unknown>).gain).toBeUndefined();
+    expect(([] as unknown as Record<string, unknown>).on).toBeUndefined();
+  });
   it('status', () => {
     const s = withSnapshot();
     applyEvent(s, { event: 'status', connection: 'demo' });

@@ -30,26 +30,45 @@ export function initialClientState(): ClientState {
   };
 }
 
+/**
+ * Element `i` of `arr`, or undefined unless `i` is an in-range integer index.
+ * Server payloads are untrusted data: a non-numeric key such as "__proto__"
+ * must never select (and then mutate) a prototype object.
+ */
+function at<T>(arr: readonly T[] | undefined, i: unknown): T | undefined {
+  if (!arr || typeof i !== 'number' || !Number.isInteger(i) || i < 0 || i >= arr.length) return undefined;
+  return arr[i];
+}
+
+/**
+ * Replace element `i` of `arr` with `v` when `i` is an in-range integer index.
+ * Uses `splice` rather than `arr[i] = v`, so no property write keyed by
+ * payload data is ever performed.
+ */
+function setAt<T>(arr: T[], i: unknown, v: T): void {
+  if (typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < arr.length) arr.splice(i, 1, v);
+}
+
 /** Apply one parameter to the state (used for `changed` and optimistic edits). Out-of-range indices are ignored. */
 export function applyParam(st: MotuState, p: Param): void {
   switch (p.param) {
     case 'mix_vol': {
-      const c = st.mixes[p.bus]?.channels[p.ch];
+      const c = at(at(st.mixes, p.bus)?.channels, p.ch);
       if (c) c.gain = p.gain;
       break;
     }
     case 'mix_pan': {
-      const c = st.mixes[p.bus]?.channels[p.ch];
+      const c = at(at(st.mixes, p.bus)?.channels, p.ch);
       if (c) c.pan = p.value;
       break;
     }
     case 'mix_mute': {
-      const c = st.mixes[p.bus]?.channels[p.ch];
+      const c = at(at(st.mixes, p.bus)?.channels, p.ch);
       if (c) c.mute = p.on;
       break;
     }
     case 'mix_solo': {
-      const c = st.mixes[p.bus]?.channels[p.ch];
+      const c = at(at(st.mixes, p.bus)?.channels, p.ch);
       if (c) c.solo = p.on;
       break;
     }
@@ -57,32 +76,32 @@ export function applyParam(st: MotuState, p: Param): void {
       st.main.db = p.db;
       break;
     case 'preamp_gain': {
-      const a = st.preamps[p.ch];
+      const a = at(st.preamps, p.ch);
       if (a) a.gain_db = p.db;
       break;
     }
     case 'phantom': {
-      const a = st.preamps[p.ch];
+      const a = at(st.preamps, p.ch);
       if (a) a.phantom = p.on;
       break;
     }
     case 'pad': {
-      const a = st.preamps[p.ch];
+      const a = at(st.preamps, p.ch);
       if (a) a.pad = p.on;
       break;
     }
     case 'phase': {
-      const a = st.preamps[p.ch];
+      const a = at(st.preamps, p.ch);
       if (a) a.phase = p.on;
       break;
     }
     case 'eq_bypass': {
-      const c = st.channels[p.ch];
+      const c = at(st.channels, p.ch);
       if (c) c.eq.bypass = p.on;
       break;
     }
     case 'eq_band': {
-      const b = st.channels[p.ch]?.eq.bands[p.band];
+      const b = at(at(st.channels, p.ch)?.eq.bands, p.band);
       if (b) {
         b.enabled = p.enabled;
         b.freq_hz = p.freq_hz;
@@ -92,7 +111,7 @@ export function applyParam(st: MotuState, p: Param): void {
       break;
     }
     case 'hpf': {
-      const h = st.channels[p.ch]?.eq.hpf;
+      const h = at(st.channels, p.ch)?.eq.hpf;
       if (h) {
         h.enabled = p.enabled;
         h.freq_hz = p.freq_hz;
@@ -100,7 +119,7 @@ export function applyParam(st: MotuState, p: Param): void {
       break;
     }
     case 'comp': {
-      const c = st.channels[p.ch]?.comp;
+      const c = at(st.channels, p.ch)?.comp;
       if (c) {
         c.enabled = p.enabled;
         c.threshold_db = p.threshold_db;
@@ -112,7 +131,7 @@ export function applyParam(st: MotuState, p: Param): void {
       break;
     }
     case 'gate': {
-      const g = st.channels[p.ch]?.gate;
+      const g = at(st.channels, p.ch)?.gate;
       if (g) {
         g.enabled = p.enabled;
         g.threshold_db = p.threshold_db;
@@ -128,11 +147,11 @@ export function applyParam(st: MotuState, p: Param): void {
       st.reverb.predelay_ms = p.predelay_ms;
       break;
     case 'reverb_send':
-      if (p.ch >= 0 && p.ch < st.reverb.sends.length) st.reverb.sends[p.ch] = p.gain;
+      setAt(st.reverb.sends, p.ch, p.gain);
       break;
     case 'route': {
-      const row = st.routing.matrix[p.input];
-      if (row && p.output >= 0 && p.output < row.length) row[p.output] = p.on;
+      const row = at(st.routing.matrix, p.input);
+      if (row) setAt(row, p.output, p.on);
       break;
     }
     case 'dim':

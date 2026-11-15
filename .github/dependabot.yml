@@ -41,6 +41,7 @@ updates:
       interval: weekly
     ignore:
       # Its refs are toolchain names (stable, master, 1.85.0), not versions.
+      # It is pinned to a master-branch commit SHA; refresh that SHA by hand.
       - dependency-name: dtolnay/rust-toolchain
     groups:
       actions:
