@@ -15,7 +15,9 @@ pub struct Announcement {
 
 impl std::fmt::Debug for Announcement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Announcement").field("fullname", &self.fullname).finish_non_exhaustive()
+        f.debug_struct("Announcement")
+            .field("fullname", &self.fullname)
+            .finish_non_exhaustive()
     }
 }
 
@@ -60,8 +62,16 @@ pub fn announce(hostname: &str, port: u16) -> Option<Announcement> {
 }
 
 impl Announcement {
+    /// Unregister (sends the mDNS goodbye) and stop the daemon, waiting
+    /// briefly for each acknowledgement so the daemon never writes to a
+    /// dropped channel.
     pub fn stop(self) {
-        let _ = self.daemon.unregister(&self.fullname);
-        let _ = self.daemon.shutdown();
+        const ACK: std::time::Duration = std::time::Duration::from_millis(500);
+        if let Ok(rx) = self.daemon.unregister(&self.fullname) {
+            let _ = rx.recv_timeout(ACK);
+        }
+        if let Ok(rx) = self.daemon.shutdown() {
+            let _ = rx.recv_timeout(ACK);
+        }
     }
 }

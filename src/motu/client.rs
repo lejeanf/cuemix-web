@@ -3,9 +3,9 @@
 //! - connects to `ws://<motu_ip>:<port>` (binary frames from [`super::protocol`]);
 //! - on (re)connect applies **Option A - hardware priority**: a full state is
 //!   rebuilt from the frames the device sends during a sync window, then
-//!   [`DeviceEvent::Synced`] replaces the engine state. PROVISIONAL: the real
-//!   handshake/dump is not documented yet (see `docs/MOTU-PROTOCOL.md`);
-//!   until then every frame received during `sync_window` is applied on top of
+//!   [`DeviceEvent::Synced`] replaces the engine state. The device pushes its
+//!   full state unprompted on connect (`docs/MOTU-PROTOCOL.md`): every frame
+//!   is applied until `sync_window` passes without a non-meter frame (max 5 s), on top of
 //!   `MotuState::new(topology)`;
 //! - throttles outgoing commands **per parameter** ([`super::throttle`]) and
 //!   always delivers the last value;
@@ -44,8 +44,12 @@ pub enum ConnectionStatus {
     Demo,
 }
 
-/// Default time during which frames are collected to build the initial state.
+/// Initial sync ends after this long without a non-meter frame.
 pub const DEFAULT_SYNC_WINDOW: Duration = Duration::from_millis(500);
+/// Upper bound of the initial sync (the device streams meters forever).
+pub const SYNC_MAX: Duration = Duration::from_secs(5);
+/// Meter stream property (motu-mk5-linux `METERS_ID`; format still unknown).
+pub const METERS_PROP_ID: u16 = 6000;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(10);
@@ -299,12 +303,16 @@ async fn session_inner<C: PropCodec>(
     status: &mut StatusTracker,
 ) -> SessionEnd {
     // --- Option A: full sync (PROVISIONAL, see module docs) ---------------
+    // The device pushes its whole state unprompted on connect, then streams
+    // meters forever (docs/MOTU-PROTOCOL.md): the sync ends after
+    // `sync_window` without any non-meter frame, capped at SYNC_MAX.
     let mut state = MotuState::new(cfg.topology);
-    let sync_deadline = Instant::now() + cfg.sync_window;
+    let hard_deadline = Instant::now() + SYNC_MAX;
+    let mut quiet_deadline = Instant::now() + cfg.sync_window;
     loop {
         tokio::select! {
             () = shutdown.wait() => return SessionEnd::Stop,
-            () = sleep_until(sync_deadline) => break,
+            () = sleep_until(quiet_deadline.min(hard_deadline)) => break,
             cmd = link.commands.recv() => {
                 // State is about to be replaced by the hardware's: drop writes.
                 if cmd.is_none() {
@@ -313,6 +321,10 @@ async fn session_inner<C: PropCodec>(
             }
             msg = ws.next() => match msg {
                 Some(Ok(Message::Binary(bytes))) => {
+                    let is_meter = bytes.get(..2) == Some(&METERS_PROP_ID.to_be_bytes()[..]);
+                    if !is_meter {
+                        quiet_deadline = Instant::now() + cfg.sync_window;
+                    }
                     if let Some(param) = decode_bytes(codec, &bytes) {
                         if let Err(e) = state.apply(&param) {
                             tracing::debug!(?param, error = %e, "sync frame rejected by state");
@@ -323,6 +335,11 @@ async fn session_inner<C: PropCodec>(
                 Some(Ok(_)) => {}
             },
         }
+    }
+    if Instant::now() >= hard_deadline {
+        tracing::warn!(
+            "initial MOTU state dump did not settle within {SYNC_MAX:?}; using what was received"
+        );
     }
     if link
         .events

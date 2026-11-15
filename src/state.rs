@@ -31,8 +31,10 @@ pub struct Topology {
     pub mixes: u8,
     /// Mixer input channels (strips per mix).
     pub mixer_inputs: u16,
-    /// Mic/line preamps.
+    /// Inputs with gain + phase (mic and line preamps).
     pub preamps: u16,
+    /// Leading preamps that are mic inputs (only these have +48V and Pad).
+    pub mic_inputs: u16,
     /// Routing matrix sources (rows).
     pub routing_inputs: u16,
     /// Routing matrix destinations (columns).
@@ -42,8 +44,9 @@ pub struct Topology {
 impl Topology {
     pub const ULTRALITE_MK5: Topology = Topology {
         mixes: 7,
-        mixer_inputs: 18,
-        preamps: 2,
+        mixer_inputs: 32,
+        preamps: 8,
+        mic_inputs: 2,
         routing_inputs: 18,
         routing_outputs: 22,
     };
@@ -444,6 +447,12 @@ fn set<T: PartialEq>(field: &mut T, new: T) -> bool {
 }
 
 impl MotuState {
+    /// Preamps that have +48V / Pad (the first `topology.mic_inputs`).
+    fn mic_preamps(&mut self) -> &mut [Preamp] {
+        let n = usize::from(self.topology.mic_inputs).min(self.preamps.len());
+        self.preamps.get_mut(..n).unwrap_or_default()
+    }
+
     fn mix_channel(&mut self, bus: u8, ch: u16) -> Result<&mut MixChannel, StateError> {
         let mix = slot(&mut self.mixes, usize::from(bus), "mix")?;
         slot(&mut mix.channels, usize::from(ch), "mix channel")
@@ -486,14 +495,14 @@ impl MotuState {
             }
             P::Phantom { ch, on } => (
                 set(
-                    &mut slot(&mut self.preamps, usize::from(ch), "preamp")?.phantom,
+                    &mut slot(self.mic_preamps(), usize::from(ch), "mic preamp")?.phantom,
                     on,
                 ),
                 *param,
             ),
             P::Pad { ch, on } => (
                 set(
-                    &mut slot(&mut self.preamps, usize::from(ch), "preamp")?.pad,
+                    &mut slot(self.mic_preamps(), usize::from(ch), "mic preamp")?.pad,
                     on,
                 ),
                 *param,
@@ -599,10 +608,10 @@ impl MotuState {
             if all || x.gain_db != y.gain_db {
                 out.push(Param::PreampGain { ch, db: y.gain_db });
             }
-            if all || x.phantom != y.phantom {
+            if ch < target.topology.mic_inputs && (all || x.phantom != y.phantom) {
                 out.push(Param::Phantom { ch, on: y.phantom });
             }
-            if all || x.pad != y.pad {
+            if ch < target.topology.mic_inputs && (all || x.pad != y.pad) {
                 out.push(Param::Pad { ch, on: y.pad });
             }
             if all || x.phase != y.phase {
@@ -702,8 +711,8 @@ mod tests {
     fn default_topology_shapes_state() {
         let s = MotuState::default();
         assert_eq!(s.mixes.len(), 7);
-        assert!(s.mixes.iter().all(|m| m.channels.len() == 18));
-        assert_eq!(s.preamps.len(), 2);
+        assert!(s.mixes.iter().all(|m| m.channels.len() == 32));
+        assert_eq!(s.preamps.len(), 8);
         assert_eq!(s.routing.matrix.len(), 18);
         assert_eq!(s.routing.matrix[0].len(), 22);
     }
@@ -757,7 +766,7 @@ mod tests {
             Err(StateError::Index { what: "mix", .. })
         ));
         assert!(matches!(
-            s.apply(&Param::Phantom { ch: 2, on: true }),
+            s.apply(&Param::Phantom { ch: 8, on: true }),
             Err(StateError::Index { .. })
         ));
         assert!(matches!(
@@ -884,7 +893,8 @@ mod all_params_tests {
         let (mixes, inputs) = (usize::from(t.mixes), usize::from(t.mixer_inputs));
         let expected = mixes * inputs * 4 // vol, pan, mute, solo
             + 1 // main
-            + usize::from(t.preamps) * 4
+            + usize::from(t.preamps) * 2 // gain, phase
+            + usize::from(t.mic_inputs) * 2 // phantom, pad
             + inputs // eq bypass
             + usize::from(t.routing_inputs) * usize::from(t.routing_outputs)
             + 5; // control room
