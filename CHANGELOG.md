@@ -18,6 +18,13 @@ need attention. Preset files carry `schema_version`; see
   to start. The script now offers to source its bridge file (with a backup),
   stops otherwise, and checks the bridge exists after `ifreload`. The
   reverse-proxy note names the headers actually used (`X-Forwarded-Host`).
+- udev rule: pass the renamed interface (`$name`, e.g. `enx…`) to the bridge
+  helper. With `%k` the helper got the pre-rename `eth0`, failed, and the MOTU
+  link never joined the bridge (found on the first real hardware test).
+
+### Verified on hardware
+- An UltraLite-mk5 is discovered through its UDP announcement and accepts the
+  WebSocket connection on port 1280 without a path.
 
 ## [0.3.0] - 2026-11-14
 
