@@ -1,0 +1,52 @@
+version: 2
+
+# Weekly update PRs; security updates are additionally opened as soon as an
+# advisory is published (when Dependabot security updates are enabled in the
+# repository settings). Minor/patch bumps are grouped to limit PR noise.
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      rust-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # >= 8.8 pulls sha2 0.11 -> cpufeatures 0.3 (edition 2024) and breaks
+      # the former MSRV 1.80 (docs/ARCHITECTURE.md D14); revisit with MSRV 1.85.
+      - dependency-name: rust-embed
+        versions: [">= 8.8"]
+      - dependency-name: rust-embed-impl
+        versions: [">= 8.8"]
+      - dependency-name: rust-embed-utils
+        versions: [">= 8.8"]
+
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # svelte-check 4.x refuses TypeScript 7; keep ~6 until it supports it.
+      - dependency-name: typescript
+        versions: [">= 7"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    ignore:
+      # Its refs are toolchain names (stable, master, 1.85.0), not versions.
+      - dependency-name: dtolnay/rust-toolchain
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: "/deploy"
+    schedule:
+      interval: weekly

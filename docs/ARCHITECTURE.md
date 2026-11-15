@@ -8,7 +8,7 @@
 | | |
 |---|---|
 | Version du contrat | `0.3.0` (Phase 3 — interface ; params DSP/réverbe/horloge éditables) |
-| MSRV | Rust `1.80`, édition 2021 |
+| MSRV | Rust `1.85`, édition 2021 (relevée depuis 1.80, décision D18) |
 | Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` (embarqué via `rust-embed`) |
 
 ---
@@ -235,7 +235,7 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 
 * Ordre **non négociable** : `frontend` (`npm ci && npm run build`) **puis** `cargo build`
   (`rust-embed` sans `allow_missing` : pas de binaire sans UI).
-* `.cargo/config.toml` : résolution compatible MSRV 1.80.
+* `.cargo/config.toml` : résolution compatible MSRV 1.85 (`cargo update` choisit des versions compatibles).
 * `ci.yml` : frontend → rust (fmt, clippy `-D warnings`, tests) · msrv · `cargo audit` · gitleaks + RFC1918.
 * `release.yml` : musl x86_64/aarch64/armv7 (`cargo-zigbuild`), `.deb`, GitHub Release, image
   `ghcr.io` amd64/arm64 (distroless `nonroot`).
@@ -274,6 +274,7 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 | D15 | Compatibilité des données : présets versionnés (`schema_version`, v1), lecture tolérante (`serde(default)`, champs inconnus ignorés), format plus récent refusé clairement ; clés inconnues de `config.toml` = avertissement | Mises à jour et retours arrière sans perte de présets ni démarrage bloqué ; fixture figée `tests/fixtures/preset-v1.json` |
 | D16 | Mises à jour **manuelles** via `cuemix-update` (sha256, remplacement atomique, contrôle `/api/health`, retour arrière automatique) ; ni minuterie, ni bouton web, ni requête sortante vers GitHub (arbitrage mainteneur 2026-11-14) | Pas de redémarrage surprise en séance ; le serveur web non-root et sans authentification ne doit pas pouvoir déclencher une action root |
 | D17 | Version de crate = tag de release (vérifié par `release.yml`) ; tags avec `-` = pré-release (pas de `latest` Docker) | Le contrôle de santé de `cuemix-update` compare la version annoncée par `/api/health` |
+| D18 | MSRV relevée de 1.80 à **1.85** (arbitrage mainteneur 2026-11-14) ; job CI MSRV via `dtolnay/rust-toolchain@master` + `toolchain: "1.85"`, ignoré par Dependabot | Les mises à jour Dependabot (tokio 1.54, toml 1.x) exigent 1.85 ; binaires statiques : les utilisateurs ne compilent pas ; reste conforme à « MSRV 1.80+ » (HANDOFF) |
 
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
 

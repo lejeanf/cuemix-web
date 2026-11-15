@@ -92,7 +92,7 @@ impl MockMotu {
                             },
                             out = rx.recv() => match out {
                                 Ok(bytes) => {
-                                    if ws.send(Message::Binary(bytes)).await.is_err() {
+                                    if ws.send(Message::Binary(bytes.into())).await.is_err() {
                                         break;
                                     }
                                 }

@@ -31,7 +31,7 @@ Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`d
 
 Prerequisites:
 
-- Rust **1.80** or newer (MSRV, edition 2021)
+- Rust **1.85** or newer (MSRV, edition 2021)
 - Node.js **22**
 - GNU `make` (optional, but the recommended entry point)
 

@@ -52,7 +52,7 @@ pub fn link_local_interfaces(preferred: Option<&str>) -> std::io::Result<Vec<Lin
             }),
             _ => None,
         })
-        .filter(|i| preferred.map_or(true, |p| p.is_empty() || i.name == p))
+        .filter(|i| preferred.is_none_or(|p| p.is_empty() || i.name == p))
         .collect();
     Ok(found)
 }
@@ -75,7 +75,7 @@ pub fn parse_proc_net_arp(text: &str, iface: Option<&str>) -> Vec<Ipv4Addr> {
             let complete = u32::from_str_radix(flags.trim_start_matches("0x"), 16)
                 .map(|f| f != 0)
                 .unwrap_or(false);
-            let iface_ok = iface.map_or(true, |i| i.is_empty() || i == dev);
+            let iface_ok = iface.is_none_or(|i| i.is_empty() || i == dev);
             (complete && iface_ok).then_some(ip)
         })
         .collect()

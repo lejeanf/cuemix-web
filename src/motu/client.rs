@@ -388,7 +388,7 @@ async fn session_inner<C: PropCodec>(
             }
             () = pacer_due => {
                 if let Some(bytes) = pacer.pop_due(Instant::now(), |p| encode_frames(codec, p)) {
-                    let res = ws.send(Message::Binary(bytes)).await;
+                    let res = ws.send(Message::Binary(bytes.into())).await;
                     pacer.sent(Instant::now());
                     if let Err(e) = res {
                         tracing::warn!(error = %e, "send to MOTU failed");

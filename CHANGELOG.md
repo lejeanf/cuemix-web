@@ -29,8 +29,13 @@ verified on a real UltraLite-mk5.
   unit, udev rule, Docker image (amd64/arm64).
 - Updates: `cuemix-update` with sha256 verification, atomic swap, health
   check and automatic rollback; `proxmox-setup.sh --update`.
-- CI: tests, MSRV 1.80, secret scanning, shellcheck; security workflow (cargo
+- CI: tests, MSRV 1.85, secret scanning, shellcheck; security workflow (cargo
   audit, npm audit, dependency review, CodeQL) and Dependabot.
+
+### Changed
+- Minimum supported Rust version raised to **1.85** (dependency upgrades:
+  tokio 1.54, toml 1.x, tokio-tungstenite 0.29, rosc 0.11, thiserror 2,
+  if-addrs 0.15).
 
 ### Compatibility
 - Presets: format v1 (first versioned format).

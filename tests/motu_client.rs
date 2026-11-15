@@ -213,7 +213,7 @@ async fn device_frame_becomes_changed_event() {
         value: Value::Fixed(-6.0),
     };
     other
-        .send(Message::Binary(frame.encode().expect("encode")))
+        .send(Message::Binary(frame.encode().expect("encode").into()))
         .await
         .expect("send");
     let ev = h.wait_for(|e| matches!(e, DeviceEvent::Changed(_))).await;
@@ -323,7 +323,7 @@ async fn reconnects_after_drop_and_survives_garbage_frames() {
             vec![],
             valid,
         ] {
-            ws.send(Message::Binary(bytes)).await.expect("send");
+            ws.send(Message::Binary(bytes.into())).await.expect("send");
         }
         let _ = timeout(Duration::from_secs(3), ws.next()).await;
     });
@@ -396,7 +396,7 @@ async fn aggregate_pacer_spaces_a_burst_of_distinct_params() {
         let mut got: Vec<(tokio::time::Instant, Vec<u8>)> = Vec::new();
         while got.len() < usize::from(N) {
             match ws.next().await {
-                Some(Ok(Message::Binary(b))) => got.push((tokio::time::Instant::now(), b)),
+                Some(Ok(Message::Binary(b))) => got.push((tokio::time::Instant::now(), b.to_vec())),
                 Some(Ok(_)) => {}
                 _ => break,
             }
