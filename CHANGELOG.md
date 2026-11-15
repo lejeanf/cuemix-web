@@ -12,6 +12,15 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+### Added
+- The device is identified from its connect dump: model, firmware, channel
+  counts, stereo pairs and channel/mix names (Mic 1, Line 3…, Main 1-2,
+  Phones…). The UI sizes itself to the device and shows those names; the top
+  bar shows the model and firmware.
+- Mix faders, pan, mute and solo are read from the MOTU (layout
+  `bus × 32 + input`, from a real dump). Read-only: changes made in the UI are
+  not written to the device yet, and the controls say so.
+
 ### Fixed
 - Writes to the MOTU had no effect: the device ignores frames without a
   payload length field. Writes are now `[id][index][len u16][payload]`

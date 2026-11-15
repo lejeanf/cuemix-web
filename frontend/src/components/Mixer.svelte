@@ -13,12 +13,12 @@
 {#if st}
   <div class="mixer">
     <div class="buses" role="tablist" aria-label="Mix bus">
-      {#each st.mixes as mix, i (i)}
+      {#each st.mixes as _, i (i)}
         <button
           role="tab"
           aria-selected={store.bus === i}
           class:sel={store.bus === i}
-          onclick={() => (store.bus = i)}>{mix.name || `Mix ${i + 1}`}</button
+          onclick={() => (store.bus = i)}>{store.mixName(i)}</button
         >
       {/each}
     </div>

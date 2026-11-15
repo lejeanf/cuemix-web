@@ -29,7 +29,7 @@ Pas d'accès à `app.asar` de CueMix 5 : les IDs viennent de `motu-mk5-linux` qu
 Conversion volume (décision D8, unités natives) : `MainVol`/`PhonesVol` portent des **dB entiers -100..0** dans l'état ; le codec fait une copie directe `octet = -dB` (saturé à 0 dB : le trim ne sait qu'atténuer). La loi `0..1` n'existe qu'en OSC et dans l'UI. Non vérifié : si 100 = -inf ou -100 dB. Rappel de préset : trims et +48V ne sont **jamais** réécrits (règle 6 ci-dessous, arbitrage mainteneur).
 
 Non mappés (pas de trame) : `MixVol/MixPan/MixMute/MixSolo`, `Route`, `EqBypass`, `EqBand`, `Hpf`, `Comp`, `Gate`, `Reverb`, `ReverbSend`, `Clock`, `Dim`, `SpeakerB`, et tout canal hors plage documentée.
-- Mix : les propriétés existent (1016 fader, 1017 pan, 1018 solo, 1019 mute, 448 entrées = 32 entrées x 14 bus) mais **l'ordre des index (bus*32+in ou in*14+bus) n'est documenté nulle part**, ni la gestion du pan/stéréo sur 2 bus. Il faut une capture CueMix.
+- Mix (1016 fader 8.24 linéaire, 1017 pan 8.24 `0..1` avec 0,5 = centre, 1018 solo, 1019 mute ; 448 entrées) : **index = `bus × 32 + entrée`** (déduit du dump du 2026-11-15 : la diagonale « bus k ← retour USB k » tombe exactement sur `33k + 18`). Bus mono par paires : 0-1 Main 1-2, 2-3 Line 3-4, 4-5 Line 5-6, 6-7 Line 7-8, 8-9 Line 9-10, **10-11 Phones**, 12-13 Reverb. Une entrée mono est portée par le bus gauche du mix ; une paire stéréo par le bus gauche (entrée gauche) et le bus droit (entrée droite). **Lecture seule** dans cuemix-web : aucune écriture vérifiée. Le sens du pan (0 = gauche ?) n'est pas vérifié.
 - Routage : 5010 est une table de 80 octets de sémantique inconnue, pas une matrice booléenne.
 - EQ : 1003 = bypass **par bande** (32 = 4 bandes x 8 canaux, ordre inconnu) ; pas de bypass global.
 - Dim : aucun paramètre matériel (licanccc l'émule avec le trim). SpeakerB : 5015-5017 (`ab/a/b_enable`) de sémantique inconnue.
@@ -41,6 +41,10 @@ Non mappés (pas de trame) : `MixVol/MixPan/MixMute/MixSolo`, `Route`, `EqBypass
 - **Q1 (fréquences)** : EQ/HPF en **entier Int32 en Hz brut** (`input_eq_freq` 1004, `output_eq_freq` 1024), pas en 8.24. Gain EQ (1005) et largeur de bande en octaves (1006) sont en 8.24. HPF = un mode de bande (`input_eq_mode` 3 = highpass), pas de propriété dédiée. Source : mk5-linux `properties.rs`. À implémenter avec `ValueKind::U32` dès que le layout d'index des bandes est connu.
 - **Q2 (dimensions)** : entrées de mixage **32**, bus **14** (= 7 mixes stéréo, `mix_output_stereo` 14), préamps : gain sur **8** entrées (2 micros avec pad/48V + 6 lignes), EQ/compresseur sur 8 canaux, gate sur 2 ; noms : 18 entrées / 22 sorties (routage 18x22, cohérent avec `Topology` mais la table réelle est un patch de 80 octets), `output_trim` 12 sorties, EQ de sortie 3 bandes x 12. Appliqué : `Topology::ULTRALITE_MK5` = 32 entrées mixer, 8 préamplis, 2 entrées micro (décision D11).
 - **Q4 (volumes mix = gain linéaire 8.24 ?)** : **non confirmé, non réfuté**. `mix_fader` est de type Float (8.24) ; les sources ne disent pas si c'est linéaire ou dB (seul indice : `gate_threshold` "0=-inf, 1=0dB", donc plutôt linéaire). Par contre, volumes Main et Phones ne sont **pas** en 8.24 : octets d'atténuation en dB (voir ci-dessus), ce qui contredit l'hypothèse Q4 pour ces deux paramètres.
+
+## Dump de connexion (UltraLite-mk5, firmware 2.0.8+2568, capturé le 2026-11-15)
+
+Une trame par message WebSocket, environ 2 500 trames non-mètre. Le nombre d'entrées d'une propriété par canal donne les dimensions : `1000` = 32 entrées de mixer (18 physiques : 8 analogiques, S/PDIF 1-2, optique 1-8 ; puis 14 retours USB), `1001` = 14 bus mono (7 mix stéréo), `5001` = 8 préamplis, `5003` = 2 micros, `6` = 18 entrées, `7` = 22 sorties. `1000`/`1001` marquent le canal **gauche** de chaque paire stéréo. `5000` (output trim) a 16 entrées (casque = 10/11). Les noms `6`/`7` sont vides : CueMix calcule les noms par défaut (cuemix-web aussi, table par modèle). Écarts avec la table : `21` (modèle) fait 5 octets (`UL5E\0`), pas 32 ; `4` index 0 = version du firmware ; plusieurs propriétés ont des payloads `Int16` (2 octets : `8`, `1009`, `1010`, `1013`, `1014`, `5012`).
 
 ## Handshake / synchronisation complète
 
@@ -64,4 +68,4 @@ Inconnu. mk5-linux définit `METERS_ID = 6000` sans le décoder et ignore ce flu
 
 ## Inconnus à lever sur matériel
 
-Layout d'index des 1016-1019 ; layout EQ par bande/canal ; sémantique de 5010 (routage) et 5015-5017 ; plage réelle de gain ligne/micro par canal ; valeur 100 du trim ; linéarité de `mix_fader` ; chemin WebSocket selon firmware ; format des meters (6000).
+Écriture de la matrice de mix (layout de lecture connu) ; sens du pan ; layout EQ par bande/canal ; sémantique de 5010 (routage) et 5015-5017 ; plage réelle de gain ligne/micro par canal ; valeur 100 du trim ; linéarité de `mix_fader` ; chemin WebSocket selon firmware ; format des meters (6000).

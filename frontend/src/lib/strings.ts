@@ -13,6 +13,7 @@ export const S = {
   offlineBanner: 'Offline — reconnecting…',
   tabs: { mixer: 'Mixer', preamps: 'Preamps', routing: 'Routing', reverb: 'Reverb' },
   unmapped: 'Not mapped to the MOTU yet (state only)',
+  readOnly: 'Shows the MOTU setting; changes here are not sent to the MOTU yet',
   mute: 'Mute',
   solo: 'Solo',
   eq: 'EQ',

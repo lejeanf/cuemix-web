@@ -31,7 +31,7 @@
  │  apply(Param) → Param effectif → broadcast + DeviceLink      │
  │  presets (JSON) · labels.json · indicateur « ● Modifié »     │
  └──────────────────────────┬───────────────────────────────────┘
-          DeviceLink.commands │ ▲ DeviceLink.events (Synced/Changed/Meters/Status)
+          DeviceLink.commands │ ▲ DeviceLink.events (Identified/Synced/Changed/Meters/Status)
                               ▼ │
  ┌──────────────────────────────────────────────────────────────┐
  │ motu::client  — reconnexion, sync Option A, mode démo        │
@@ -55,7 +55,8 @@ changements venant du matériel sont appliqués et diffusés, **jamais renvoyés
 | `src/lib.rs` | Racine, lints `deny(unwrap_used, expect_used)` hors tests | ✅ |
 | `src/main.rs` | CLI, logs, orchestration (`JoinSet`), arrêt propre Ctrl-C/SIGTERM (3 s de grâce) | ✅ |
 | `src/config.rs` | `config.toml` + surcharges `CUEMIX_*` | ✅ |
-| `src/state.rs` | `MotuState`, `Topology`, `Param`, `Command`, `ServerEvent`, `diff`, `all_params` | ✅ |
+| `src/state.rs` | `MotuState`, `Topology`, `DeviceInfo`, `Param`, `Command`, `ServerEvent`, `diff`, `all_params` | ✅ |
+| `src/motu/identify.rs` | Identification de l'appareil (modèle, firmware, dimensions, paires stéréo, noms) et décodage de la matrice de mix depuis le dump de connexion | ✅ |
 | `src/engine.rs` | Acteur : `EngineHandle`, `Envelope{Origin,Target}`, `DeviceLink`, `Shutdown` | ✅ |
 | `src/presets.rs` | Présets (`<presets_dir>/<nom>.json`), `labels.json`, écritures atomiques | ✅ |
 | `src/motu/fader.rs` | Lois de fader `0..1` (mix et trims) — utilisées **uniquement aux bords** | ✅ |
@@ -110,7 +111,7 @@ conversion (une valeur invalide ne coupe jamais le son).
 
 ```text
 MotuState
-├── topology: { mixes: 7, mixer_inputs: 32, preamps: 8, mic_inputs: 2, routing: 18 × 22 }  (démo ; Q2)
+├── topology: { mixes: 7, mixer_inputs: 32, preamps: 8, mic_inputs: 2, routing: 18 × 22 }  (démo ; lue sur la MOTU à la connexion)
 ├── mixes[7]: { name, channels[32]: { gain, pan, mute, solo } }
 ├── main: { db }
 ├── preamps[8]: { gain_db, phantom, pad, phase }   (+48V / Pad : seulement les 2 entrées micro)
@@ -139,6 +140,10 @@ MotuState
   valeurs bornées via `apply`) ; **trims (main/casque) et +48V jamais rappelés** (arbitrage
   mainteneur, D13) ; tous les params mappés du préset sont envoyés (pas un diff contre un état
   matériel inconnu), puis `Snapshot`. `● Modifié` ignore trims et +48V.
+* `Identified(DeviceInfo)` (juste avant `Synced`) : modèle, firmware, dimensions comptées dans
+  le dump, paires stéréo et noms d'affichage. Topologie différente → l'état est reconstruit aux
+  dimensions de l'appareil. `DeviceInfo` va dans `SessionInfo.device` (pas dans les présets) ;
+  remis à `null` en mode démo.
 * `Synced(Vec<Param>)` : appliqué **par-dessus** l'état courant ; les champs non rapportés par
   la MOTU (non mappés) sont conservés.
 * Liste des présets en cache mémoire (aucune I/O disque par connexion client).
@@ -166,7 +171,7 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 {"event":"snapshot","state":{…},"session":{"active_preset":null,"modified":false,"connection":"demo"}}
 {"event":"changed","params":[{"param":"dim","on":true}]}
 {"event":"status","connection":"online"}
-{"event":"session","active_preset":"live","modified":true,"connection":"online"}
+{"event":"session","active_preset":"live","modified":true,"connection":"online","device":{"model":"UL5E","firmware":"2.0.8+2568","topology":{…},"input_names":["Mic 1",…],"mix_names":["Main 1-2",…],"stereo_inputs":[…],"stereo_buses":[…]}}
 {"event":"presets","names":["default","live"]}
 {"event":"labels","channels":{"2":{"name":"Vox","color":"#06B6D4"}}}
 {"event":"meters","levels":[0.0,0.12,…]}
@@ -221,9 +226,9 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
   contenant motu/ultralite **obligatoire**) → voisins ARP `169.254.x.x` sondés en TCP `:1280` ;
   **nos propres adresses sont exclues** ; le client essaie chaque candidat dans l'ordre.
 * **Option A — matériel prioritaire** : la MOTU pousse **spontanément tout son état** à la
-  connexion puis chaque changement. Le client applique chaque trame jusqu'à **500 ms sans trame
-  non-mètre** (les mètres, prop `6000`, défilent en continu), plafond **5 s**, puis
-  `Synced` → `Snapshot` à tous. On ne réécrit jamais l'état au matériel à la reconnexion.
+  connexion puis chaque changement. Le client collecte chaque trame jusqu'à **500 ms sans trame
+  non-mètre** (les mètres, prop `6000`, défilent en continu), plafond **5 s**, identifie
+  l'appareil (`Identified`), décode le dump avec ce layout, puis `Synced` → `Snapshot` à tous. On ne réécrit jamais l'état au matériel à la reconnexion.
 * **Mode démo** : MOTU absente → `Demo`, état en mémoire ; les commandes sont drainées.
 * **Throttling** : par paramètre, 1re valeur immédiate puis ≤ 1 / 25 ms, valeurs intermédiaires
   fusionnées, dernière garantie ; puis **cadenceur global ≥ 20 ms entre trames** (y compris les
@@ -282,12 +287,12 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 | # | Sujet | Arbitrage | État |
 |---|---|---|---|
 | Q1 | Encodage des fréquences EQ | Vérifier dans les sources | ✅ `Int32` Hz (props 1004/1024) ; gain/largeur EQ en `8.24` ; HPF = mode de bande 3. encodable via `ValueKind::U32` (existant) avec l'EQ |
-| Q2 | Dimensions | Défauts démo, topologie réelle à la connexion | 🟡 défauts mis à jour (D11) ; lecture de la topologie à la connexion à faire |
-| Q3 | Table `prop_id` | Depuis motu-mk5-linux | 🟡 65 propriétés ; mappés : gain/phase préamplis (8), pad/48V (2), main, casque, mono, talkback. **Non mappés** : matrice de mix (ordre d'index 1016–1019 inconnu), routing (5010 = table de 80 o), bypass EQ global (par bande), DIM (absent du matériel), A/B (5015–5017 inconnus), horloge (`clock`), réverbération (`reverb`, `reverb_send`), EQ/HPF/comp/gate |
+| Q2 | Dimensions | Défauts démo, topologie réelle à la connexion | ✅ comptées dans le dump de connexion (`motu::identify`) ; défauts D11 confirmés sur un mk5 |
+| Q3 | Table `prop_id` | Depuis motu-mk5-linux | 🟡 65 propriétés ; mappés : gain/phase préamplis (8), pad/48V (2), main, casque, mono, talkback. **En lecture seule** : matrice de mix 1016–1019 (`bus × 32 + entrée`, déduit du dump ; écriture non vérifiée). **Non mappés** : routing (5010 = table de 80 o), bypass EQ global (par bande), DIM (absent du matériel), A/B (5015–5017 inconnus), horloge (`clock`), réverbération (`reverb`, `reverb_send`), EQ/HPF/comp/gate |
 | Q4 | Volumes en gain linéaire `8.24` | Gain linéaire | 🟡 non confirmé ; seul indice : seuil de gate « 1 = 0 dB » |
 
 À vérifier **sur matériel** par le mainteneur (bloquant pour les faders de mix) :
 1. ~~Écriture avec ou sans champ longueur~~ — tranché le 2026-11-15 : champ longueur `u16` requis en écriture (`Frame::encode_write`).
-2. Ordre d'index des props 1016–1019 (32 entrées × 14 bus).
+2. Ordre d'index des props 1016–1019 : `bus × 32 + entrée` déduit du dump (lecture) ; à confirmer par une écriture avant d'activer l'écriture des faders.
 3. Chemin WebSocket selon firmware (`/` ou `/<serial>`, port 1280 ou 1281).
 4. Format des trames de mètres (prop 6000) ; valeur trim 100 = −100 dB ou −inf.

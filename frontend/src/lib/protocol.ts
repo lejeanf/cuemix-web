@@ -122,6 +122,22 @@ export interface SessionInfo {
   active_preset: string | null;
   modified: boolean;
   connection: ConnectionStatus;
+  /** What the connected MOTU reported about itself (null in demo mode). */
+  device?: DeviceInfo | null;
+}
+
+/** Identity and layout read from the MOTU's state dump on connect. */
+export interface DeviceInfo {
+  model: string;
+  firmware: string;
+  topology: Topology;
+  /** Per mixer input; empty string = no name known. */
+  input_names: string[];
+  /** Per stereo mix; empty string = no name known. */
+  mix_names: string[];
+  /** Per mixer input: true on the left channel of a stereo pair. */
+  stereo_inputs: boolean[];
+  stereo_buses: boolean[];
 }
 
 export interface ChannelLabel {

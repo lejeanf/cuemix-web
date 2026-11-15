@@ -13,7 +13,9 @@ High-performance **Rust** web controller and bidirectional **OSC** bridge for th
 Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`docs/MOTU-PROTOCOL.md`](docs/MOTU-PROTOCOL.md). Everything marked "mapped" is encoded in code but has not yet been verified on a device.
 
 - **Mapped:** preamp gain and phase (8 inputs), pad and 48 V phantom (2 mic inputs), main and headphone trims, mono, talkback.
-- **Not mapped yet:** mix faders, pan, mute and solo (index order of the mix properties unknown), routing (table semantics unknown), EQ bypass (per-band layout unknown), DIM (no hardware property), A/B / speaker B (properties 5015–5017 unknown).
+- **Read from the device, not written yet:** mix faders, pan, mute and solo. The UI shows the MOTU's mix; moving a mix control does not change the hardware yet.
+- **Detected on connect:** model, firmware, channel counts, stereo pairs and default channel/mix names (the UI sizes itself to the device).
+- **Not mapped yet:** routing (table semantics unknown), EQ bypass (per-band layout unknown), DIM (no hardware property), A/B / speaker B (properties 5015–5017 unknown).
 
 ## Features
 

@@ -33,7 +33,9 @@ use tokio::task::JoinHandle;
 use crate::motu::client::ConnectionStatus;
 use crate::motu::props;
 use crate::presets::{self, PresetStore};
-use crate::state::{Command, Labels, MotuState, Param, Preset, ServerEvent, SessionInfo, Topology};
+use crate::state::{
+    Command, DeviceInfo, Labels, MotuState, Param, Preset, ServerEvent, SessionInfo, Topology,
+};
 
 /// Capacity of the client → engine request queue.
 const REQUEST_QUEUE: usize = 1024;
@@ -87,6 +89,9 @@ pub enum DeviceEvent {
     /// applied on top of the live state; fields the device did not report
     /// (unmapped ones) keep their value.
     Synced(Vec<Param>),
+    /// What the device reported about itself, sent just before `Synced`.
+    /// A different topology rebuilds the state to the device's dimensions.
+    Identified(DeviceInfo),
     /// Changes made on the hardware side.
     Changed(Vec<Param>),
     Meters(Vec<f32>),
@@ -439,6 +444,24 @@ impl Engine {
     fn on_device(&mut self, event: DeviceEvent) {
         let origin = Origin::Hardware;
         match event {
+            DeviceEvent::Identified(info) => {
+                if info.topology != self.state.topology {
+                    tracing::info!(
+                        from = ?self.state.topology,
+                        to = ?info.topology,
+                        "device topology differs, state rebuilt"
+                    );
+                    self.state = MotuState::new(info.topology);
+                }
+                if self.session.device.as_ref() != Some(&info) {
+                    self.session.device = Some(info);
+                    self.emit(
+                        origin,
+                        Target::All,
+                        ServerEvent::Session(self.session.clone()),
+                    );
+                }
+            }
             DeviceEvent::Synced(params) => {
                 for p in &params {
                     if let Err(e) = self.state.apply(p) {
@@ -475,6 +498,15 @@ impl Engine {
                 if self.session.connection != connection {
                     self.session.connection = connection;
                     self.emit(origin, Target::All, ServerEvent::Status { connection });
+                    // Demo mode: no device behind the state any more.
+                    if connection == ConnectionStatus::Demo && self.session.device.take().is_some()
+                    {
+                        self.emit(
+                            origin,
+                            Target::All,
+                            ServerEvent::Session(self.session.clone()),
+                        );
+                    }
                 }
             }
         }
@@ -645,6 +677,53 @@ mod tests {
         assert!(sent.iter().all(|p| !p.excluded_from_recall()));
         assert!(sent.iter().all(props::is_mapped));
         assert!(sent.len() < 64, "only mapped params: {}", sent.len());
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn identified_device_reshapes_state_and_reaches_the_session() {
+        let (h, link, dir) = setup("ident").await;
+        let mut rx = h.subscribe();
+        let topology = Topology {
+            mixes: 2,
+            mixer_inputs: 4,
+            ..Topology::ULTRALITE_MK5
+        };
+        let info = DeviceInfo {
+            model: "TEST".into(),
+            topology,
+            ..DeviceInfo::default()
+        };
+        link.events
+            .send(DeviceEvent::Identified(info.clone()))
+            .await
+            .unwrap();
+        let ServerEvent::Session(session) = next(&mut rx).await.event else {
+            panic!("session")
+        };
+        assert_eq!(session.device, Some(info));
+        link.events.send(DeviceEvent::Synced(vec![])).await.unwrap();
+        let ServerEvent::Snapshot { state, .. } = next(&mut rx).await.event else {
+            panic!("snapshot")
+        };
+        assert_eq!(state.topology, topology);
+        assert_eq!(state.mixes.len(), 2);
+        assert_eq!(state.mixes[0].channels.len(), 4);
+        // Back to demo: the device identity is dropped.
+        link.events
+            .send(DeviceEvent::Status(ConnectionStatus::Online))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await;
+        link.events
+            .send(DeviceEvent::Status(ConnectionStatus::Demo))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await;
+        let ServerEvent::Session(session) = next(&mut rx).await.event else {
+            panic!("session")
+        };
+        assert_eq!(session.device, None);
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 

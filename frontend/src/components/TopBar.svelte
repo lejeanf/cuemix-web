@@ -43,7 +43,11 @@
 
 <header class="top" bind:this={root}>
   <span class="brand"
-    >{S.appName}{#if store.version}<span class="ver" title="Running version">v{store.version}</span>{/if}</span
+    >{S.appName}{#if store.version}<span class="ver" title="Running version">v{store.version}</span>{/if}{#if store.device}<span
+        class="ver"
+        title="Connected MOTU: model {store.device.model}, firmware {store.device.firmware}"
+        >{store.device.model} {store.device.firmware}</span
+      >{/if}</span
   >
   <span class="preset">
     {S.presetLabel}: <strong>{session.active_preset ?? S.noPreset}</strong>

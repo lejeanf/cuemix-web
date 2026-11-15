@@ -579,6 +579,32 @@ pub struct SessionInfo {
     pub active_preset: Option<String>,
     pub modified: bool,
     pub connection: ConnectionStatus,
+    /// What the connected device reported about itself; `None` in demo mode
+    /// or before the first sync.
+    #[serde(default)]
+    pub device: Option<DeviceInfo>,
+}
+
+/// Identity and layout of the connected device, read from its state dump on
+/// connect (`motu::identify`). Not part of presets: it describes the hardware.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeviceInfo {
+    /// Model code reported by the device (e.g. `UL5E`).
+    pub model: String,
+    /// Firmware version string.
+    pub firmware: String,
+    /// Dimensions counted from the dump.
+    pub topology: Topology,
+    /// Display name per mixer input (device names, else the model's defaults;
+    /// empty string = no name known).
+    pub input_names: Vec<String>,
+    /// Display name per stereo mix.
+    pub mix_names: Vec<String>,
+    /// Per mixer input: `true` on the left channel of a stereo pair.
+    pub stereo_inputs: Vec<bool>,
+    /// Per mono bus: `true` on the left bus of a stereo mix.
+    pub stereo_buses: Vec<bool>,
 }
 
 #[derive(Debug, Error, PartialEq)]

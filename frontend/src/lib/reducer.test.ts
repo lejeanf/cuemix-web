@@ -88,7 +88,21 @@ describe('applyEvent', () => {
   it('session', () => {
     const s = withSnapshot();
     applyEvent(s, { event: 'session', active_preset: 'b', modified: true, connection: 'online' });
-    expect(s.session).toEqual({ active_preset: 'b', modified: true, connection: 'online' });
+    expect(s.session).toEqual({ active_preset: 'b', modified: true, connection: 'online', device: null });
+  });
+  it('session carries the identified device', () => {
+    const s = withSnapshot();
+    const device = {
+      model: 'UL5E',
+      firmware: '2.0.8',
+      topology: s.state!.topology,
+      input_names: ['Mic 1'],
+      mix_names: ['Main 1-2'],
+      stereo_inputs: [false],
+      stereo_buses: [true, false],
+    };
+    applyEvent(s, { event: 'session', active_preset: null, modified: false, connection: 'online', device });
+    expect(s.session.device).toEqual(device);
   });
   it('presets / labels / meters / error', () => {
     const s = withSnapshot();

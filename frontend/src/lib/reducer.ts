@@ -193,6 +193,7 @@ export function applyEvent(s: ClientState, ev: ServerEvent): ClientState {
         active_preset: ev.active_preset,
         modified: ev.modified,
         connection: ev.connection,
+        device: ev.device ?? null,
       };
       break;
     case 'presets':

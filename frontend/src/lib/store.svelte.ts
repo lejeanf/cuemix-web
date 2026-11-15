@@ -1,12 +1,12 @@
 // Connection store: one WebSocket to `/ws`, reactive client state, optimistic
 // edits with a per-parameter 25 ms send throttle.
 import { meterBank } from './meters';
-import type { ChannelLabel, Command, EqBand, Param, ServerEvent, Compressor, Gate, Hpf } from './protocol';
+import type { ChannelLabel, Command, DeviceInfo, EqBand, Param, ServerEvent, Compressor, Gate, Hpf } from './protocol';
 import { DSP_LIMITS } from './protocol';
 import { applyEvent, applyParam, initialClientState, type ClientState } from './reducer';
 import { ParamSender } from './sender';
 import { clamp } from './validate';
-import { isHwMapped } from './hwmap';
+import { isHwMapped, isHwReadOnly } from './hwmap';
 import { S } from './strings';
 
 export type Link = 'offline' | 'connecting' | 'online' | 'demo';
@@ -69,14 +69,27 @@ class Store {
     return this.online && !isHwMapped(p);
   }
   hint(p: Param['param']): string | undefined {
-    return this.unmapped(p) ? S.unmapped : undefined;
+    if (!this.unmapped(p)) return undefined;
+    return this.online && this.device && isHwReadOnly(p) ? S.readOnly : S.unmapped;
+  }
+
+  /** What the connected MOTU reported about itself, or null. */
+  get device(): DeviceInfo | null {
+    return this.c.session.device ?? null;
+  }
+
+  /** Mix tab name: user-set name, else the device's name, else `Mix N`. */
+  mixName(i: number): string {
+    const own = this.c.state?.mixes[i]?.name ?? '';
+    if (own && own !== `Mix ${i + 1}`) return own;
+    return this.device?.mix_names[i] || own || `Mix ${i + 1}`;
   }
 
   label(ch: number): ChannelLabel | undefined {
     return this.c.labels.channels[String(ch)];
   }
   labelName(ch: number): string {
-    return this.label(ch)?.name ?? `In ${ch + 1}`;
+    return this.label(ch)?.name ?? (this.device?.input_names[ch] || `In ${ch + 1}`);
   }
 
   // ----------------------------------------------------------- lifecycle ---
