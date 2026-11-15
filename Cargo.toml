@@ -1,0 +1,70 @@
+[package]
+name = "cuemix-web"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Standalone web & bidirectional OSC controller for the MOTU UltraLite-mk5"
+license = "MIT"
+repository = "https://github.com/lejeanf/cuemix-web"
+readme = "README.md"
+keywords = ["motu", "audio", "osc", "mixer", "cuemix"]
+categories = ["multimedia::audio", "network-programming"]
+# Keep the published crate free of local/private files.
+exclude = ["config.toml", "*.local.toml", "deploy/*.env", "data/", "frontend/node_modules/"]
+
+[lib]
+name = "cuemix_web"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cuemix-web"
+path = "src/main.rs"
+
+[dependencies]
+# Runtime
+tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+# OSC over UDP
+rosc = "0.10"
+# Link-local discovery
+if-addrs = "0.13"
+# Phase 2 adds, when first used: axum (ws) for the JSON WebSocket server,
+# rust-embed for frontend/dist, mdns-sd for Zeroconf. Kept out until then so
+# the manifest has no unused dependencies.
+# Config, presets, labels, JSON contracts
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+# Errors & logs (no unwrap/expect in production code)
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+# Mock MOTU WebSocket server for integration tests (tests/). The MOTU client
+# (src/motu/client.rs, Phase 2) moves these two into [dependencies].
+tokio-tungstenite = "0.24"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+opt-level = 3
+panic = "abort"
+
+# cargo-deb packaging (used by .github/workflows/release.yml)
+[package.metadata.deb]
+maintainer = "cuemix-web contributors"
+section = "sound"
+priority = "optional"
+# Static musl binary: no shared-library dependencies to resolve.
+depends = ""
+extended-description = """\
+Standalone server controlling a MOTU UltraLite-mk5 over its USB CDC-Ethernet \
+link, with an embedded dark-theme web UI and a bidirectional OSC bridge."""
+assets = [
+    ["target/release/cuemix-web", "usr/bin/", "755"],
+    ["config.example.toml", "etc/cuemix-web/config.example.toml", "644"],
+    ["README.md", "usr/share/doc/cuemix-web/README.md", "644"],
+]
