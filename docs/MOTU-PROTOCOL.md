@@ -48,13 +48,13 @@ Non mappés (pas de trame) : `MixVol/MixPan/MixMute/MixSolo`, `Route`, `EqBypass
 2. WebSocket binaire sur `ws://<ip>:1280` (1281 sur certains Mac, et chemin `/<serial>` requis sur firmware récent d'après les commentaires du gist ; mk5-linux se connecte sans chemin avec le firmware 2.0.8).
 3. **Aucune requête de lecture** : à la connexion l'appareil pousse tout seul l'état complet (> 2400 propriétés, une trame par index), puis diffuse chaque changement (y compris ceux de la face avant / d'autres clients). Pas de subscribe.
 4. L'appareil envoie aussi en continu des mises à jour (meters) tant qu'il y a du signal : une synchro "jusqu'au silence" ne termine jamais ; mk5-linux borne la synchro initiale à 5 s (silence de 500 ms).
-5. Écriture : trames `[id][index][payload]` ; l'appareil ferme le WebSocket si les écritures vont plus vite qu'il ne les applique (mk5-linux espace de 20 ms ; notre throttle de 25 ms est compatible). Ne pas ré-écrire tout l'état à la reconnexion (rafale de 2375 écritures -> déconnexions).
+5. Écriture : trames `[id u16][index u16][len u16][payload]` (`Frame::encode_write`) — **le champ longueur est requis** (vérifié sur matériel le 2026-11-15 : sans lui, `5011` était émis mais jamais appliqué ; avec lui, le volume principal change). La lecture reste `[id][index][payload]` sans longueur ; l'appareil ferme le WebSocket si les écritures vont plus vite qu'il ne les applique (mk5-linux espace de 20 ms ; notre throttle de 25 ms est compatible). Ne pas ré-écrire tout l'état à la reconnexion (rafale de 2375 écritures -> déconnexions).
 6. Ne jamais restaurer `main_trim`/`output_trim` automatiquement (niveau d'écoute).
 
 ## Écart de format de trame (à arbitrer, `protocol.rs` non modifié)
 
 - Réception : `[id u16][index u16][payload]` conforme (mk5-linux ; licanccc lit la valeur en octet 4).
-- Émission : mk5-linux écrit `[id][index][payload]` **sans longueur** ; en revanche licanccc et le gist m1no écrivent `[id u16][index u16][len u16][payload]` (ex. `0404 0000 0001 01`). Les deux affirment fonctionner ; à trancher sur matériel. Si la longueur est requise en écriture, `Frame::encode` devra l'ajouter (non fait).
+- Émission (tranché le 2026-11-15 sur un UltraLite-mk5) : il faut écrire `[id u16][index u16][len u16][payload]` comme licanccc et le gist m1no (ex. `1393 0000 0001 2b` = main trim −43 dB). Le format sans longueur de mk5-linux est ignoré par l'appareil.
 - Types : les payloads `Int16` (2 octets) existent et n'ont pas de `ValueKind`. Le payload n'est pas autodécrit : sa taille dépend de la propriété (octet = 1, float 8.24 = 4, Int32 = 4, chaîne = 32).
 - Le mute des bus de mix est `1028` (index 0 = Main, 10 = Phones) d'après licanccc, absent de mk5-linux ; la numérotation 1016-1019 (mk5-linux) et 1028 viennent peut-être de versions de firmware/CueMix différentes.
 
@@ -64,4 +64,4 @@ Inconnu. mk5-linux définit `METERS_ID = 6000` sans le décoder et ignore ce flu
 
 ## Inconnus à lever sur matériel
 
-Layout d'index des 1016-1019 ; layout EQ par bande/canal ; sémantique de 5010 (routage) et 5015-5017 ; plage réelle de gain ligne/micro par canal ; valeur 100 du trim ; linéarité de `mix_fader` ; champ longueur en écriture ; chemin WebSocket selon firmware ; format des meters (6000).
+Layout d'index des 1016-1019 ; layout EQ par bande/canal ; sémantique de 5010 (routage) et 5015-5017 ; plage réelle de gain ligne/micro par canal ; valeur 100 du trim ; linéarité de `mix_fader` ; chemin WebSocket selon firmware ; format des meters (6000).

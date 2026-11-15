@@ -429,7 +429,7 @@ async fn aggregate_pacer_spaces_a_burst_of_distinct_params() {
     // Every channel arrived with its value.
     let mut seen = std::collections::HashSet::new();
     for (_, bytes) in &got {
-        let frame = Frame::decode(bytes, |_| ValueKind::Fixed).expect("decode");
+        let frame = Frame::decode_write(bytes, |_| ValueKind::Fixed).expect("decode");
         assert_eq!(frame.value, Value::Fixed(quantized(0.25)));
         seen.insert(frame.index);
     }
