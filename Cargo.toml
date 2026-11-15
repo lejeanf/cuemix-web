@@ -22,14 +22,19 @@ path = "src/main.rs"
 
 [dependencies]
 # Runtime
-tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# MOTU binary WebSocket client (ws://<MOTU_IP>:1280)
+tokio-tungstenite = "0.24"
+# HTTP + JSON WebSocket server for the frontend
+axum = { version = "0.8", features = ["ws"] }
+# Frontend bundle embedded in the binary (frontend/dist must exist at build time)
+rust-embed = { version = "8", features = ["mime-guess"] }
 # OSC over UDP
 rosc = "0.10"
-# Link-local discovery
+# Link-local discovery & Zeroconf
 if-addrs = "0.13"
-# Phase 2 adds, when first used: axum (ws) for the JSON WebSocket server,
-# rust-embed for frontend/dist, mdns-sd for Zeroconf. Kept out until then so
-# the manifest has no unused dependencies.
+mdns-sd = "0.11"
 # Config, presets, labels, JSON contracts
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -41,10 +46,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
-# Mock MOTU WebSocket server for integration tests (tests/). The MOTU client
-# (src/motu/client.rs, Phase 2) moves these two into [dependencies].
-tokio-tungstenite = "0.24"
-futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [profile.release]
 lto = "thin"

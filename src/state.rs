@@ -351,7 +351,21 @@ pub enum Param {
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
     Set(Param),
-    LoadPreset { name: String },
+    /// Recall `<presets_dir>/<name>.json`.
+    LoadPreset {
+        name: String,
+    },
+    /// Store the live state as `<presets_dir>/<name>.json` and make it active.
+    SavePreset {
+        name: String,
+    },
+    /// Ask for a [`ServerEvent::Presets`] listing.
+    ListPresets,
+    /// Rename / recolour a mixer input (`None` clears it) — persisted in `labels.json`.
+    SetLabel {
+        ch: u16,
+        label: Option<ChannelLabel>,
+    },
 }
 
 /// Everything the core broadcasts.
@@ -369,6 +383,15 @@ pub enum ServerEvent {
     Status { connection: ConnectionStatus },
     /// Session metadata (active preset, `● Modifié` flag).
     Session(SessionInfo),
+    /// Available preset names (sorted).
+    Presets { names: Vec<String> },
+    /// Full label set (sent on connect and after each change).
+    Labels(Labels),
+    /// Meter levels, linear peak `0.0..=1.0`, one per meter point (layout from
+    /// the property table). High rate: bridges may drop/decimate.
+    Meters { levels: Vec<f32> },
+    /// Request rejected; delivered only to the requesting client.
+    Error { message: String },
 }
 
 /// Top-bar data: active preset and whether the live state diverges from it.
@@ -515,6 +538,128 @@ impl MotuState {
             }
         };
         Ok(changed.then_some(effective))
+    }
+
+    /// Every [`Param`] needed to turn `self` into `target`, for the fields that
+    /// `Param` can address (used for preset recall). Shapes are compared
+    /// index-by-index over the overlap; extra rows/columns are ignored.
+    pub fn diff(&self, target: &MotuState) -> Vec<Param> {
+        self.params_between(target, false)
+    }
+
+    /// Every addressable [`Param`] with its current value (full OSC feedback
+    /// dump after a snapshot).
+    pub fn all_params(&self) -> Vec<Param> {
+        self.params_between(self, true)
+    }
+
+    fn params_between(&self, target: &MotuState, all: bool) -> Vec<Param> {
+        let mut out = Vec::new();
+        for (bus, (a, b)) in self.mixes.iter().zip(&target.mixes).enumerate() {
+            let Ok(bus) = u8::try_from(bus) else { break };
+            for (ch, (x, y)) in a.channels.iter().zip(&b.channels).enumerate() {
+                let Ok(ch) = u16::try_from(ch) else { break };
+                if all || x.vol != y.vol {
+                    out.push(Param::MixVol {
+                        bus,
+                        ch,
+                        value: y.vol,
+                    });
+                }
+                if all || x.pan != y.pan {
+                    out.push(Param::MixPan {
+                        bus,
+                        ch,
+                        value: y.pan,
+                    });
+                }
+                if all || x.mute != y.mute {
+                    out.push(Param::MixMute {
+                        bus,
+                        ch,
+                        on: y.mute,
+                    });
+                }
+                if all || x.solo != y.solo {
+                    out.push(Param::MixSolo {
+                        bus,
+                        ch,
+                        on: y.solo,
+                    });
+                }
+            }
+        }
+        if all || self.main.vol != target.main.vol {
+            out.push(Param::MainVol {
+                value: target.main.vol,
+            });
+        }
+        for (ch, (x, y)) in self.preamps.iter().zip(&target.preamps).enumerate() {
+            let Ok(ch) = u16::try_from(ch) else { break };
+            if all || x.gain_db != y.gain_db {
+                out.push(Param::PreampGain { ch, db: y.gain_db });
+            }
+            if all || x.phantom != y.phantom {
+                out.push(Param::Phantom { ch, on: y.phantom });
+            }
+            if all || x.pad != y.pad {
+                out.push(Param::Pad { ch, on: y.pad });
+            }
+            if all || x.phase != y.phase {
+                out.push(Param::Phase { ch, on: y.phase });
+            }
+        }
+        for (ch, (x, y)) in self.channels.iter().zip(&target.channels).enumerate() {
+            let Ok(ch) = u16::try_from(ch) else { break };
+            if all || x.eq.bypass != y.eq.bypass {
+                out.push(Param::EqBypass {
+                    ch,
+                    on: y.eq.bypass,
+                });
+            }
+        }
+        for (input, (ra, rb)) in self
+            .routing
+            .matrix
+            .iter()
+            .zip(&target.routing.matrix)
+            .enumerate()
+        {
+            let Ok(input) = u16::try_from(input) else {
+                break;
+            };
+            for (output, (x, y)) in ra.iter().zip(rb).enumerate() {
+                let Ok(output) = u16::try_from(output) else {
+                    break;
+                };
+                if all || x != y {
+                    out.push(Param::Route {
+                        input,
+                        output,
+                        on: *y,
+                    });
+                }
+            }
+        }
+        let (a, b) = (&self.control_room, &target.control_room);
+        if all || a.dim != b.dim {
+            out.push(Param::Dim { on: b.dim });
+        }
+        if all || a.mono != b.mono {
+            out.push(Param::Mono { on: b.mono });
+        }
+        if all || a.speaker_b != b.speaker_b {
+            out.push(Param::SpeakerB { on: b.speaker_b });
+        }
+        if all || a.talkback != b.talkback {
+            out.push(Param::Talkback { on: b.talkback });
+        }
+        if all || a.phones_vol != b.phones_vol {
+            out.push(Param::PhonesVol {
+                value: b.phones_vol,
+            });
+        }
+        out
     }
 }
 
@@ -683,5 +828,71 @@ mod tests {
         let text = serde_json::to_string(&ev).unwrap_or_default();
         let back: Result<ServerEvent, _> = serde_json::from_str(&text);
         assert_eq!(back.ok(), Some(ev));
+    }
+}
+
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+
+    #[test]
+    fn diff_replays_to_target() {
+        let base = MotuState::default();
+        let mut target = base.clone();
+        for p in [
+            Param::MixVol {
+                bus: 3,
+                ch: 5,
+                value: 0.2,
+            },
+            Param::MixMute {
+                bus: 0,
+                ch: 17,
+                on: true,
+            },
+            Param::Phantom { ch: 1, on: true },
+            Param::EqBypass { ch: 4, on: true },
+            Param::Route {
+                input: 2,
+                output: 9,
+                on: true,
+            },
+            Param::Talkback { on: true },
+            Param::PhonesVol { value: 0.1 },
+        ] {
+            assert!(target.apply(&p).is_ok());
+        }
+        let params = base.diff(&target);
+        assert_eq!(params.len(), 7);
+        let mut replay = base.clone();
+        for p in &params {
+            assert!(replay.apply(p).is_ok());
+        }
+        assert_eq!(replay, target);
+        assert!(target.diff(&target).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod all_params_tests {
+    use super::*;
+
+    #[test]
+    fn all_params_covers_every_addressable_field() {
+        let s = MotuState::default();
+        let t = s.topology;
+        let (mixes, inputs) = (usize::from(t.mixes), usize::from(t.mixer_inputs));
+        let expected = mixes * inputs * 4 // vol, pan, mute, solo
+            + 1 // main
+            + usize::from(t.preamps) * 4
+            + inputs // eq bypass
+            + usize::from(t.routing_inputs) * usize::from(t.routing_outputs)
+            + 5; // control room
+        let params = s.all_params();
+        assert_eq!(params.len(), expected);
+        let mut replay = MotuState::default();
+        for p in &params {
+            assert_eq!(replay.apply(p), Ok(None), "default values replay as no-ops");
+        }
     }
 }
