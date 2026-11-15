@@ -26,9 +26,18 @@ export function wsUrl(loc: Pick<Location, 'protocol' | 'host' | 'pathname'>): st
   return `${scheme}//${loc.host}${base}ws`;
 }
 
+/** `/api/health` URL relative to the page (works behind a proxy subpath). */
+export function healthUrl(loc: Pick<Location, 'pathname'>): string {
+  const base = loc.pathname.endsWith('/') ? loc.pathname : loc.pathname.replace(/[^/]*$/, '');
+  return `${base}api/health`;
+}
+
 class Store {
   c: ClientState = $state(initialClientState());
   socketOpen = $state(false);
+  /** Running server version (from `/api/health`), shown in the top bar. No
+   *  update check: the box never contacts GitHub (maintainer decision). */
+  version: string | null = $state(null);
   tab: Tab = $state('mixer');
   bus = $state(0);
   dspChannel: number | null = $state(null);
@@ -89,6 +98,16 @@ class Store {
     this.socketOpen = false;
   }
 
+  private async refreshVersion(): Promise<void> {
+    try {
+      const r = await fetch(healthUrl(location), { cache: 'no-store' });
+      const body = (await r.json()) as { version?: unknown };
+      this.version = typeof body.version === 'string' ? body.version : null;
+    } catch {
+      this.version = null;
+    }
+  }
+
   private connect(): void {
     if (this.stopped) return;
     const ws = new WebSocket(wsUrl(location));
@@ -96,6 +115,8 @@ class Store {
     ws.onopen = () => {
       this.attempt = 0;
       this.socketOpen = true;
+      // Re-read on every (re)connect: the server may have just been updated.
+      void this.refreshVersion();
     };
     ws.onmessage = (m) => {
       if (typeof m.data !== 'string') return;

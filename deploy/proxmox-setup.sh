@@ -21,6 +21,7 @@ ENV_FILE="${SCRIPT_DIR}/proxmox.env"
 UDEV_TEMPLATE="${SCRIPT_DIR}/99-motu-mk5.rules.template"
 UNIT_FILE="${SCRIPT_DIR}/cuemix-web.service"
 CONFIG_EXAMPLE="${REPO_DIR}/config.example.toml"
+UPDATE_SCRIPT="${SCRIPT_DIR}/cuemix-update.sh"
 
 HOST_HELPER="/usr/local/sbin/cuemix-motu-bridge"
 UDEV_RULE="/etc/udev/rules.d/99-motu-mk5.rules"
@@ -31,6 +32,9 @@ ROOTFS_GB="${ROOTFS_GB:-4}"
 
 DRY_RUN=0
 WORKDIR=""
+MODE="provision"
+CTID_ARG=""
+UPDATE_ARGS=()
 
 # ---------------------------------------------------------------------------
 # Logging (colors only on an interactive terminal, honours NO_COLOR)
@@ -78,10 +82,18 @@ MOTU USB CDC-Ethernet link to that bridge.
 
 Usage:
   sudo deploy/proxmox-setup.sh [--dry-run] [--help]
+  sudo deploy/proxmox-setup.sh --update [--pre | --version vX.Y.Z[-pre]]
+                               [--ctid N] [--dry-run]
 
 Options:
-  -n, --dry-run   Print every action without changing the system.
-  -h, --help      Show this help and exit.
+  -n, --dry-run     Print every action without changing the system.
+  -h, --help        Show this help and exit.
+  --update          Update cuemix-web inside the existing container: pushes the
+                    current cuemix-update.sh and runs it there. Does not touch
+                    bridges, udev rules or the container configuration.
+  --pre             With --update: also consider pre-releases.
+  --version vX.Y.Z  With --update: install this exact release tag.
+  --ctid N          With --update: container ID (default: CTID in proxmox.env).
 
 Settings are read from deploy/proxmox.env when it exists (copy
 deploy/proxmox.env.example and edit it). Otherwise they are asked for.
@@ -104,10 +116,27 @@ parse_args() {
     case "$1" in
       -h|--help) usage; exit 0 ;;
       -n|--dry-run) DRY_RUN=1 ;;
+      --update) MODE="update" ;;
+      --pre) UPDATE_ARGS+=(--pre) ;;
+      --version)
+        [[ $# -ge 2 ]] || die "--version requires a tag, e.g. --version v0.2.0"
+        UPDATE_ARGS+=(--version "$2")
+        shift
+        ;;
+      --ctid)
+        [[ $# -ge 2 ]] || die "--ctid requires a container ID"
+        CTID_ARG="$2"
+        shift
+        ;;
       *) log_err "unknown option: $1"; usage >&2; exit 2 ;;
     esac
     shift
   done
+  if [[ "${MODE}" != "update" ]]; then
+    if [[ "${#UPDATE_ARGS[@]}" -gt 0 || -n "${CTID_ARG}" ]]; then
+      die "--pre, --version and --ctid only apply together with --update"
+    fi
+  fi
 }
 
 require_root() {
@@ -135,6 +164,7 @@ preflight() {
   [[ -f "${UDEV_TEMPLATE}" ]] || die "missing ${UDEV_TEMPLATE} (run from a repository checkout)"
   [[ -f "${UNIT_FILE}" ]] || die "missing ${UNIT_FILE} (run from a repository checkout)"
   [[ -f "${CONFIG_EXAMPLE}" ]] || die "missing ${CONFIG_EXAMPLE} (run from a repository checkout)"
+  [[ -f "${UPDATE_SCRIPT}" ]] || die "missing ${UPDATE_SCRIPT} (run from a repository checkout)"
 
   if ! grep -qs '^[[:space:]]*source[[:space:]]\+/etc/network/interfaces\.d/' /etc/network/interfaces; then
     log_warn "/etc/network/interfaces does not source interfaces.d; the MOTU bridge config may not load"
@@ -534,8 +564,39 @@ provision_container() {
   run pct push "${CTID}" "${script}" /root/cuemix-provision.sh --perms 0700
   run pct push "${CTID}" "${CONFIG_EXAMPLE}" /root/cuemix-config.example.toml --perms 0644
   run pct push "${CTID}" "${UNIT_FILE}" /root/cuemix-web.service --perms 0644
+  run pct push "${CTID}" "${UPDATE_SCRIPT}" /usr/local/sbin/cuemix-update --perms 0755
   run pct exec "${CTID}" -- env CUEMIX_MOTU_IFACE=eth1 bash /root/cuemix-provision.sh
   run pct exec "${CTID}" -- rm -f /root/cuemix-provision.sh
+}
+
+# update_container : re-push the current cuemix-update.sh into the container
+# and run it there. Leaves bridges, udev rules and the container config alone.
+update_container() {
+  log_step "Update cuemix-web in the container"
+  command -v pct >/dev/null 2>&1 || die "pct not found: this is not a Proxmox VE host"
+  [[ -f "${UPDATE_SCRIPT}" ]] || die "missing ${UPDATE_SCRIPT} (run from a repository checkout)"
+  if [[ -f "${ENV_FILE}" ]]; then
+    log_info "loading ${ENV_FILE}"
+    # shellcheck source=/dev/null
+    source "${ENV_FILE}"
+  fi
+  local ctid="${CTID_ARG:-${CTID:-}}"
+  if ! [[ "${ctid}" =~ ^[0-9]+$ ]] || (( ctid < 100 )); then
+    die "no container ID: pass --ctid N or set CTID in ${ENV_FILE}"
+  fi
+  pct config "${ctid}" >/dev/null 2>&1 || die "container ${ctid} does not exist (see: pct list)"
+  if [[ "$(pct status "${ctid}" 2>/dev/null || true)" != "status: running" ]]; then
+    die "container ${ctid} is not running; start it with: pct start ${ctid}"
+  fi
+  log_info "container ${ctid} is running"
+
+  local dry_args=()
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    dry_args+=(--dry-run)
+  fi
+  run pct push "${ctid}" "${UPDATE_SCRIPT}" /usr/local/sbin/cuemix-update --perms 0755
+  run pct exec "${ctid}" -- /usr/local/sbin/cuemix-update "${dry_args[@]}" "${UPDATE_ARGS[@]}"
+  log_info "Update later with: ./deploy/proxmox-setup.sh --update  (or: pct exec ${ctid} -- cuemix-update)"
 }
 
 print_summary() {
@@ -558,6 +619,7 @@ HAProxy / reverse proxy notes (optional):
 Config: pct exec ${CTID} -- nano /etc/cuemix-web/config.toml
 Logs:   pct exec ${CTID} -- journalctl -u cuemix-web -f
 NOTE
+  log_info "Update later with: ./deploy/proxmox-setup.sh --update  (or: pct exec ${CTID} -- cuemix-update)"
 }
 
 # ---------------------------------------------------------------------------
@@ -569,6 +631,10 @@ main() {
   WORKDIR="$(mktemp -d)"
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     log_warn "dry run: no changes will be made"
+  fi
+  if [[ "${MODE}" == "update" ]]; then
+    update_container
+    return 0
   fi
   preflight
   load_config

@@ -42,7 +42,9 @@
 <svelte:window onpointerdown={outside} onkeydown={key} />
 
 <header class="top" bind:this={root}>
-  <span class="brand">{S.appName}</span>
+  <span class="brand"
+    >{S.appName}{#if store.version}<span class="ver" title="Running version">v{store.version}</span>{/if}</span
+  >
   <span class="preset">
     {S.presetLabel}: <strong>{session.active_preset ?? S.noPreset}</strong>
     {#if session.modified}<span class="modified">{S.modified}</span>{/if}
@@ -114,6 +116,12 @@
   }
   .brand {
     font-weight: 700;
+  }
+  .ver {
+    margin-left: 6px;
+    font-weight: 400;
+    font-size: 11px;
+    opacity: 0.6;
   }
   .preset {
     flex: 1;

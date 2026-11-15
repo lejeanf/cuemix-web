@@ -84,7 +84,7 @@ struct DumpQueue {
 impl DumpQueue {
     fn ready(&self, now: Instant) -> bool {
         self.last
-            .map_or(true, |l| now.saturating_duration_since(l) >= DUMP_INTERVAL)
+            .is_none_or(|l| now.saturating_duration_since(l) >= DUMP_INTERVAL)
     }
 
     /// `true`: send a dump to `peer` now. `false`: queued (at most once).

@@ -31,7 +31,7 @@ Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`d
 
 Prerequisites:
 
-- Rust **1.80** or newer (MSRV, edition 2021)
+- Rust **1.85** or newer (MSRV, edition 2021)
 - Node.js **22**
 - GNU `make` (optional, but the recommended entry point)
 
@@ -192,6 +192,33 @@ Release assets (`v*.*.*` tags) are built by `.github/workflows/release.yml`: sta
 - **Reverse proxy**: the `/ws` WebSocket needs an upgrade-aware proxy. Forward `X-Forwarded-For` and `X-Forwarded-Proto`, and set `[web] trust_forwarded_headers = true` and `allowed_origins` in `config.toml`.
 
 Both scripts are idempotent: an existing `config.toml` is never overwritten. The service is `deploy/cuemix-web.service`, and the udev rule template is `deploy/99-motu-mk5.rules.template`.
+
+## Updating
+
+Updates are **manual** (no automatic updates, no update button in the web UI, and the box never contacts GitHub on its own). The running version is shown next to the app name in the web UI and by `cuemix-web --version`. Release notes: [GitHub Releases](https://github.com/lejeanf/cuemix-web/releases) and [`CHANGELOG.md`](CHANGELOG.md).
+
+**Raspberry Pi / Linux** (installed by `linux-setup.sh`):
+
+```bash
+sudo cuemix-update --check      # installed vs latest; exit 10 if an update is available
+sudo cuemix-update              # install the latest stable release
+sudo cuemix-update --pre        # include release candidates
+sudo cuemix-update --version v0.3.0   # pin an exact version (up or down)
+sudo cuemix-update --rollback   # go back to the previous binary
+```
+
+**Proxmox VE** (from the host, in your checkout): `sudo deploy/proxmox-setup.sh --update` (same `--pre` / `--version` flags, `--ctid N` to pick the container). It only touches the binary inside the container — not bridges, udev or the container config. Inside the container, `cuemix-update` works as above (`pct exec <CTID> -- cuemix-update`).
+
+**Docker**: `docker compose pull && docker compose up -d` (or pin a version tag such as `ghcr.io/lejeanf/cuemix-web:0.3.0` in `docker-compose.yml`). `latest` only follows stable releases.
+
+How an update stays safe:
+
+- The download is verified (sha256) and the new binary must report the expected version before anything is replaced.
+- The binary is swapped atomically; the previous one is kept as `/usr/local/bin/cuemix-web.prev`.
+- After the restart, `/api/health` must answer with the new version within 15 s — otherwise the previous binary is restored automatically and the last service logs are printed.
+- `config.toml`, presets and labels are never touched. Presets carry a format version: presets saved by older versions keep loading; a preset saved by a newer version is refused with a clear message (after a rollback) instead of being misread. Unknown keys in `config.toml` (e.g. written for a newer version) are logged as warnings, not fatal.
+
+`cuemix-update` exit codes: `0` updated or already up to date, `10` update available (`--check`), `1` error (nothing changed), `2` usage error, `4` another update is running, `5` update failed and was rolled back, `6` rollback failed (manual attention needed).
 
 ## Security
 
