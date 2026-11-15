@@ -1,0 +1,73 @@
+[package]
+name = "cuemix-web"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Standalone web & bidirectional OSC controller for the MOTU UltraLite-mk5"
+license = "MIT"
+repository = "https://github.com/lejeanf/cuemix-web"
+readme = "README.md"
+keywords = ["motu", "audio", "osc", "mixer", "cuemix"]
+categories = ["multimedia::audio", "network-programming"]
+# Keep the published crate free of local/private files.
+exclude = ["config.toml", "*.local.toml", "deploy/*.env", "data/", "frontend/node_modules/"]
+
+[lib]
+name = "cuemix_web"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cuemix-web"
+path = "src/main.rs"
+
+[dependencies]
+# Runtime
+tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# MOTU binary WebSocket client (ws://<MOTU_IP>:1280)
+tokio-tungstenite = "0.24"
+# HTTP + JSON WebSocket server for the frontend
+axum = { version = "0.8", features = ["ws"] }
+# Frontend bundle embedded in the binary (frontend/dist must exist at build time).
+# Locked to 8.7.2 (+ rust-embed-impl/utils 8.7.2): >= 8.8 pulls sha2 0.11 ->
+# cpufeatures 0.3 (edition 2024, Rust >= 1.85) and breaks MSRV 1.80.
+rust-embed = { version = "8", features = ["mime-guess"] }
+# OSC over UDP
+rosc = "0.10"
+# Link-local discovery & Zeroconf
+if-addrs = "0.13"
+mdns-sd = "0.11"
+# Config, presets, labels, JSON contracts
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+# Errors & logs (no unwrap/expect in production code)
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+opt-level = 3
+panic = "abort"
+
+# cargo-deb packaging (used by .github/workflows/release.yml)
+[package.metadata.deb]
+maintainer = "cuemix-web contributors"
+section = "sound"
+priority = "optional"
+# Static musl binary: no shared-library dependencies to resolve.
+depends = ""
+extended-description = """\
+Standalone server controlling a MOTU UltraLite-mk5 over its USB CDC-Ethernet \
+link, with an embedded dark-theme web UI and a bidirectional OSC bridge."""
+assets = [
+    ["target/release/cuemix-web", "usr/bin/", "755"],
+    ["config.example.toml", "etc/cuemix-web/config.example.toml", "644"],
+    ["README.md", "usr/share/doc/cuemix-web/README.md", "644"],
+]

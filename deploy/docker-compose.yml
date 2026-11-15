@@ -1,0 +1,15 @@
+services:
+  cuemix-web:
+    image: ghcr.io/lejeanf/cuemix-web:latest
+    container_name: cuemix-web
+    # Host networking is required: the MOTU interface lives on the link-local
+    # 169.254.0.0/16 subnet and discovery relies on mDNS multicast, neither of
+    # which works through Docker's bridge NAT.
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./config:/etc/cuemix-web:ro
+      - cuemix-data:/var/lib/cuemix-web
+
+volumes:
+  cuemix-data:

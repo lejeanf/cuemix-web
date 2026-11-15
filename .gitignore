@@ -1,6 +1,11 @@
 # --- Secrets & Local Private Config ---
 config.toml
+*.local.toml
+.env
+*.pem
+*.key
 *.env
+deploy/*.env
 !*.env.example
 deploy/proxmox.env
 data/labels.json
@@ -22,3 +27,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# --- Claude Code local worktrees & settings ---
+.claude/

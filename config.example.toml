@@ -1,15 +1,49 @@
+# Example configuration for cuemix-web.
+# Copy to config.toml (git-ignored) or *.local.toml and adjust.
+# Values here are neutral placeholders (RFC 5737 192.0.2.x, loopback, link-local).
+
 [network]
+# Address the HTTP/WebSocket server binds to (host:port).
 http_bind = "0.0.0.0:8080"
+# Address the OSC listener binds to (UDP host:port).
 osc_listen = "0.0.0.0:8000"
+# UDP targets that receive OSC feedback. Committed examples use 127.0.0.1 or 192.0.2.x only.
 osc_feedback_targets = ["127.0.0.1:9000"]
+# Network interface carrying the MOTU link-local (169.254.0.0/16) subnet.
 motu_interface = "eth1"
+# mDNS hostname announced on the local network.
 mdns_hostname = "cuemix-web"
 
+[motu]
+# MOTU device IP. Empty = auto-discovery via link-local/mDNS/ARP probe.
+# Example override: 169.254.10.20
+ip = ""
+# TCP port of the MOTU WebSocket interface.
+port = 1280
+
+# [osc] — no keys of its own:
+# The OSC listen address is set in [network] (osc_listen).
+# Feedback targets (osc_feedback_targets) must use 127.0.0.1 or 192.0.2.x example
+# addresses only in committed files; real controller addresses belong in config.toml.
+
 [engine]
+# Maximum messages per second sent to the MOTU (per-parameter throttle).
 throttle_hz = 40
+# Connection-time sync policy; "hardware_priority" makes the device state win.
 sync_mode = "hardware_priority"
+# Switch to a simulated in-memory state when the MOTU is absent or unplugged.
 offline_demo_fallback = true
 
 [storage]
+# Directory where presets are stored (server-side path).
 presets_dir = "/var/lib/cuemix-web/presets"
+# Path of the labels JSON file (server-side path).
 labels_file = "/var/lib/cuemix-web/labels.json"
+
+[web]
+# Use X-Forwarded-For (rightmost entry) for client IPs in logs. Enable only behind
+# a reverse proxy (HAProxy / pfSense); leave false when exposed directly.
+trust_forwarded_headers = false
+# Extra origins allowed to open the /ws WebSocket (same-origin is always allowed).
+# Example behind a proxy: ["https://mixer.example.com"]
+allowed_origins = []
