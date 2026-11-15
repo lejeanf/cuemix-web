@@ -28,7 +28,7 @@ Pas d'accès à `app.asar` de CueMix 5 : les IDs viennent de `motu-mk5-linux` qu
 
 Conversion volume (décision D8, unités natives) : `MainVol`/`PhonesVol` portent des **dB entiers -100..0** dans l'état ; le codec fait une copie directe `octet = -dB` (saturé à 0 dB : le trim ne sait qu'atténuer). La loi `0..1` n'existe qu'en OSC et dans l'UI. Non vérifié : si 100 = -inf ou -100 dB. Rappel de préset : trims et +48V ne sont **jamais** réécrits (règle 6 ci-dessous, arbitrage mainteneur).
 
-Non mappés (pas de trame) : `MixVol/MixPan/MixMute/MixSolo`, `Route`, `EqBypass`, `Dim`, `SpeakerB`, et tout canal hors plage documentée.
+Non mappés (pas de trame) : `MixVol/MixPan/MixMute/MixSolo`, `Route`, `EqBypass`, `EqBand`, `Hpf`, `Comp`, `Gate`, `Reverb`, `ReverbSend`, `Clock`, `Dim`, `SpeakerB`, et tout canal hors plage documentée.
 - Mix : les propriétés existent (1016 fader, 1017 pan, 1018 solo, 1019 mute, 448 entrées = 32 entrées x 14 bus) mais **l'ordre des index (bus*32+in ou in*14+bus) n'est documenté nulle part**, ni la gestion du pan/stéréo sur 2 bus. Il faut une capture CueMix.
 - Routage : 5010 est une table de 80 octets de sémantique inconnue, pas une matrice booléenne.
 - EQ : 1003 = bypass **par bande** (32 = 4 bandes x 8 canaux, ordre inconnu) ; pas de bypass global.

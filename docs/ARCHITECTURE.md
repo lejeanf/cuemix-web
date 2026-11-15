@@ -115,7 +115,7 @@ MotuState
 ├── main: { db }
 ├── preamps[8]: { gain_db, phantom, pad, phase }   (+48V / Pad : seulement les 2 entrées micro)
 ├── channels[32]: { eq: { bypass, hpf, bands[4] }, comp, gate }
-├── reverb: { enabled, return_vol, time_s, predelay_ms, sends[32] }   (non mappé)
+├── reverb: { enabled, return_gain, time_s, predelay_ms, sends[32] }   (non mappé)
 ├── routing: { matrix[input][output]: bool }                          (non mappé)
 ├── control_room: { dim, mono, speaker_b, talkback, phones_db }
 └── clock: { sample_rate, source }
@@ -211,7 +211,7 @@ configurées + pairs, **sauf l'émetteur** ; bundles découpés ≤ 8 KiB. Non t
 ### 3.7 Configuration (`config.rs`)
 
 Fichier : `--config` → `$CUEMIX_CONFIG` → `./config.toml` → `/etc/cuemix-web/config.toml` ;
-absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUEMIX_HTTP_BIND`,
+absent = défauts, invalide = erreur, clés inconnues signalées par un avertissement (D15). Surcharges `CUEMIX_HTTP_BIND`,
 `CUEMIX_OSC_LISTEN`, `CUEMIX_MOTU_IP`. `throttle_hz = 40` → 25 ms.
 
 ## 4. Comportements moteur
@@ -236,7 +236,8 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 * Ordre **non négociable** : `frontend` (`npm ci && npm run build`) **puis** `cargo build`
   (`rust-embed` sans `allow_missing` : pas de binaire sans UI).
 * `.cargo/config.toml` : résolution compatible MSRV 1.85 (`cargo update` choisit des versions compatibles).
-* `ci.yml` : frontend → rust (fmt, clippy `-D warnings`, tests) · msrv · `cargo audit` · gitleaks + RFC1918.
+* `ci.yml` : frontend → rust (fmt, clippy `-D warnings`, tests) · msrv · shell (shellcheck) · gitleaks + RFC1918.
+* `security.yml` : `cargo audit` · `npm audit` · dependency-review (PR) · CodeQL ; actions tierces épinglées par SHA.
 * `release.yml` : musl x86_64/aarch64/armv7 (`cargo-zigbuild`), `.deb`, GitHub Release, image
   `ghcr.io` amd64/arm64 (distroless `nonroot`).
 
@@ -270,7 +271,7 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 | D11 | Topologie démo 32 entrées mixer / 8 préamplis / 2 micros | Sources motu-mk5-linux (Q2) |
 | D12 | Pas d'écho `changed` vers l'émetteur (Web et OSC) | Évite le « tremblement » des faders pendant le geste |
 | D13 | Rappel de préset sans trims ni +48V (arbitrage mainteneur, audit n°9) | Sécurité des écoutes et du matériel ; motu-mk5-linux le déconseille |
-| D14 | `rust-embed` verrouillé en 8.7.2 dans `Cargo.lock` | ≥ 8.8 tire `cpufeatures 0.3` (édition 2024) et casse la MSRV 1.80 |
+| D14 | `rust-embed` verrouillé en 8.7.2 dans `Cargo.lock` | ≥ 8.8 tire `cpufeatures 0.3` (édition 2024) et cassait l'ancienne MSRV 1.80 ; à réévaluer depuis D18 (MSRV 1.85) |
 | D15 | Compatibilité des données : présets versionnés (`schema_version`, v1), lecture tolérante (`serde(default)`, champs inconnus ignorés), format plus récent refusé clairement ; clés inconnues de `config.toml` = avertissement | Mises à jour et retours arrière sans perte de présets ni démarrage bloqué ; fixture figée `tests/fixtures/preset-v1.json` |
 | D16 | Mises à jour **manuelles** via `cuemix-update` (sha256, remplacement atomique, contrôle `/api/health`, retour arrière automatique) ; ni minuterie, ni bouton web, ni requête sortante vers GitHub (arbitrage mainteneur 2026-11-14) | Pas de redémarrage surprise en séance ; le serveur web non-root et sans authentification ne doit pas pouvoir déclencher une action root |
 | D17 | Version de crate = tag de release (vérifié par `release.yml`) ; tags avec `-` = pré-release (pas de `latest` Docker) | Le contrôle de santé de `cuemix-update` compare la version annoncée par `/api/health` |
@@ -280,9 +281,9 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 
 | # | Sujet | Arbitrage | État |
 |---|---|---|---|
-| Q1 | Encodage des fréquences EQ | Vérifier dans les sources | ✅ `Int32` Hz (props 1004/1024) ; gain/largeur EQ en `8.24` ; HPF = mode de bande 3. `ValueKind::I32` à ajouter avec l'EQ |
+| Q1 | Encodage des fréquences EQ | Vérifier dans les sources | ✅ `Int32` Hz (props 1004/1024) ; gain/largeur EQ en `8.24` ; HPF = mode de bande 3. encodable via `ValueKind::U32` (existant) avec l'EQ |
 | Q2 | Dimensions | Défauts démo, topologie réelle à la connexion | 🟡 défauts mis à jour (D11) ; lecture de la topologie à la connexion à faire |
-| Q3 | Table `prop_id` | Depuis motu-mk5-linux | 🟡 65 propriétés ; mappés : gain/phase préamplis (8), pad/48V (2), main, casque, mono, talkback. **Non mappés** : matrice de mix (ordre d'index 1016–1019 inconnu), routing (5010 = table de 80 o), bypass EQ global (par bande), DIM (absent du matériel), A/B (5015–5017 inconnus) |
+| Q3 | Table `prop_id` | Depuis motu-mk5-linux | 🟡 65 propriétés ; mappés : gain/phase préamplis (8), pad/48V (2), main, casque, mono, talkback. **Non mappés** : matrice de mix (ordre d'index 1016–1019 inconnu), routing (5010 = table de 80 o), bypass EQ global (par bande), DIM (absent du matériel), A/B (5015–5017 inconnus), horloge (`clock`), réverbération (`reverb`, `reverb_send`), EQ/HPF/comp/gate |
 | Q4 | Volumes en gain linéaire `8.24` | Gain linéaire | 🟡 non confirmé ; seul indice : seuil de gate « 1 = 0 dB » |
 
 À vérifier **sur matériel** par le mainteneur (bloquant pour les faders de mix) :
