@@ -213,11 +213,11 @@ impl Default for Gate {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Reverb {
     pub enabled: bool,
-    /// Normalised return fader position.
-    pub return_vol: f64,
+    /// Return level, linear gain `0.0..=MIX_GAIN_MAX` (native unit, D8).
+    pub return_gain: f64,
     pub time_s: f64,
     pub predelay_ms: f64,
-    /// Per mixer-input send level (normalised fader position).
+    /// Per mixer-input send level, linear gain `0.0..=MIX_GAIN_MAX`.
     pub sends: Vec<f64>,
 }
 
@@ -286,7 +286,7 @@ impl MotuState {
             channels: vec![ChannelDsp::default(); inputs],
             reverb: Reverb {
                 enabled: false,
-                return_vol: 0.0,
+                return_gain: 0.0,
                 time_s: 2.0,
                 predelay_ms: 20.0,
                 sends: vec![0.0; inputs],
@@ -400,6 +400,70 @@ pub enum Param {
     PhonesVol {
         db: f64,
     },
+    // --- DSP, reverb, clock (Phase 3). Set-style: each variant carries the
+    // whole block so one message fully describes it. No hardware mapping yet
+    // (state, presets and UI only); ranges in `dsp_limits`.
+    /// One EQ band (`band` 0..=3).
+    EqBand {
+        ch: u16,
+        band: u8,
+        enabled: bool,
+        freq_hz: f64,
+        gain_db: f64,
+        q: f64,
+    },
+    Hpf {
+        ch: u16,
+        enabled: bool,
+        freq_hz: f64,
+    },
+    Comp {
+        ch: u16,
+        enabled: bool,
+        threshold_db: f64,
+        ratio: f64,
+        attack_ms: f64,
+        release_ms: f64,
+        gain_db: f64,
+    },
+    Gate {
+        ch: u16,
+        enabled: bool,
+        threshold_db: f64,
+        attack_ms: f64,
+        release_ms: f64,
+    },
+    /// Reverb block; `return_gain` linear (`0.0..=MIX_GAIN_MAX`).
+    Reverb {
+        enabled: bool,
+        return_gain: f64,
+        time_s: f64,
+        predelay_ms: f64,
+    },
+    /// Per-input reverb send, linear gain.
+    ReverbSend {
+        ch: u16,
+        gain: f64,
+    },
+    Clock {
+        sample_rate: SampleRate,
+        source: ClockSource,
+    },
+}
+
+/// Accepted ranges for the DSP / reverb params (values are clamped into them).
+pub mod dsp_limits {
+    pub const FREQ_HZ: (f64, f64) = (20.0, 20_000.0);
+    pub const EQ_GAIN_DB: (f64, f64) = (-20.0, 20.0);
+    pub const EQ_Q: (f64, f64) = (0.1, 10.0);
+    pub const COMP_THRESHOLD_DB: (f64, f64) = (-60.0, 0.0);
+    pub const COMP_RATIO: (f64, f64) = (1.0, 20.0);
+    pub const COMP_GAIN_DB: (f64, f64) = (0.0, 24.0);
+    pub const GATE_THRESHOLD_DB: (f64, f64) = (-80.0, 0.0);
+    pub const ATTACK_MS: (f64, f64) = (0.1, 200.0);
+    pub const RELEASE_MS: (f64, f64) = (10.0, 2_000.0);
+    pub const REVERB_TIME_S: (f64, f64) = (0.1, 10.0);
+    pub const REVERB_PREDELAY_MS: (f64, f64) = (0.0, 200.0);
 }
 
 /// Everything a Web or OSC client may request.
@@ -541,6 +605,33 @@ impl MotuState {
     }
 }
 
+/// Reject non-finite, then clamp into `(min, max)`.
+fn range(value: f64, what: &'static str, (min, max): (f64, f64)) -> Result<f64, StateError> {
+    Ok(finite(value, what)?.clamp(min, max))
+}
+
+fn comp_param(ch: u16, c: &Compressor) -> Param {
+    Param::Comp {
+        ch,
+        enabled: c.enabled,
+        threshold_db: c.threshold_db,
+        ratio: c.ratio,
+        attack_ms: c.attack_ms,
+        release_ms: c.release_ms,
+        gain_db: c.gain_db,
+    }
+}
+
+fn gate_param(ch: u16, g: &Gate) -> Param {
+    Param::Gate {
+        ch,
+        enabled: g.enabled,
+        threshold_db: g.threshold_db,
+        attack_ms: g.attack_ms,
+        release_ms: g.release_ms,
+    }
+}
+
 /// Round to the hardware's whole-dB resolution, then clamp.
 fn whole_db(db: f64, min: f64, max: f64) -> f64 {
     db.round().clamp(min, max)
@@ -679,6 +770,131 @@ impl MotuState {
                     P::PhonesVol { db: v },
                 )
             }
+            P::EqBand {
+                ch,
+                band,
+                enabled,
+                freq_hz,
+                gain_db,
+                q,
+            } => {
+                let new = EqBand {
+                    enabled,
+                    freq_hz: range(freq_hz, "eq_band", dsp_limits::FREQ_HZ)?,
+                    gain_db: range(gain_db, "eq_band", dsp_limits::EQ_GAIN_DB)?,
+                    q: range(q, "eq_band", dsp_limits::EQ_Q)?,
+                };
+                let dsp = slot(&mut self.channels, usize::from(ch), "channel")?;
+                let slot_band = slot(&mut dsp.eq.bands, usize::from(band), "eq band")?;
+                (
+                    set(slot_band, new),
+                    P::EqBand {
+                        ch,
+                        band,
+                        enabled,
+                        freq_hz: new.freq_hz,
+                        gain_db: new.gain_db,
+                        q: new.q,
+                    },
+                )
+            }
+            P::Hpf {
+                ch,
+                enabled,
+                freq_hz,
+            } => {
+                let new = Hpf {
+                    enabled,
+                    freq_hz: range(freq_hz, "hpf", dsp_limits::FREQ_HZ)?,
+                };
+                let dsp = slot(&mut self.channels, usize::from(ch), "channel")?;
+                (
+                    set(&mut dsp.eq.hpf, new),
+                    P::Hpf {
+                        ch,
+                        enabled,
+                        freq_hz: new.freq_hz,
+                    },
+                )
+            }
+            P::Comp {
+                ch,
+                enabled,
+                threshold_db,
+                ratio,
+                attack_ms,
+                release_ms,
+                gain_db,
+            } => {
+                let new = Compressor {
+                    enabled,
+                    threshold_db: range(threshold_db, "comp", dsp_limits::COMP_THRESHOLD_DB)?,
+                    ratio: range(ratio, "comp", dsp_limits::COMP_RATIO)?,
+                    attack_ms: range(attack_ms, "comp", dsp_limits::ATTACK_MS)?,
+                    release_ms: range(release_ms, "comp", dsp_limits::RELEASE_MS)?,
+                    gain_db: range(gain_db, "comp", dsp_limits::COMP_GAIN_DB)?,
+                };
+                let dsp = slot(&mut self.channels, usize::from(ch), "channel")?;
+                (set(&mut dsp.comp, new), comp_param(ch, &new))
+            }
+            P::Gate {
+                ch,
+                enabled,
+                threshold_db,
+                attack_ms,
+                release_ms,
+            } => {
+                let new = Gate {
+                    enabled,
+                    threshold_db: range(threshold_db, "gate", dsp_limits::GATE_THRESHOLD_DB)?,
+                    attack_ms: range(attack_ms, "gate", dsp_limits::ATTACK_MS)?,
+                    release_ms: range(release_ms, "gate", dsp_limits::RELEASE_MS)?,
+                };
+                let dsp = slot(&mut self.channels, usize::from(ch), "channel")?;
+                (set(&mut dsp.gate, new), gate_param(ch, &new))
+            }
+            P::Reverb {
+                enabled,
+                return_gain,
+                time_s,
+                predelay_ms,
+            } => {
+                let return_gain = range(return_gain, "reverb", (0.0, MIX_GAIN_MAX))?;
+                let time_s = range(time_s, "reverb", dsp_limits::REVERB_TIME_S)?;
+                let predelay_ms = range(predelay_ms, "reverb", dsp_limits::REVERB_PREDELAY_MS)?;
+                let r = &mut self.reverb;
+                let changed = set(&mut r.enabled, enabled)
+                    | set(&mut r.return_gain, return_gain)
+                    | set(&mut r.time_s, time_s)
+                    | set(&mut r.predelay_ms, predelay_ms);
+                (
+                    changed,
+                    P::Reverb {
+                        enabled,
+                        return_gain,
+                        time_s,
+                        predelay_ms,
+                    },
+                )
+            }
+            P::ReverbSend { ch, gain } => {
+                let v = range(gain, "reverb_send", (0.0, MIX_GAIN_MAX))?;
+                (
+                    set(
+                        slot(&mut self.reverb.sends, usize::from(ch), "reverb send")?,
+                        v,
+                    ),
+                    P::ReverbSend { ch, gain: v },
+                )
+            }
+            P::Clock {
+                sample_rate,
+                source,
+            } => {
+                let changed = set(&mut self.clock.sample_rate, sample_rate)
+                    | set(&mut self.clock.source, source);
+                (changed, *param)
+            }
         };
         Ok(changed.then_some(effective))
     }
@@ -758,6 +974,58 @@ impl MotuState {
                     on: y.eq.bypass,
                 });
             }
+            for (band, (bx, by)) in x.eq.bands.iter().zip(&y.eq.bands).enumerate() {
+                let Ok(band) = u8::try_from(band) else { break };
+                if all || bx != by {
+                    out.push(Param::EqBand {
+                        ch,
+                        band,
+                        enabled: by.enabled,
+                        freq_hz: by.freq_hz,
+                        gain_db: by.gain_db,
+                        q: by.q,
+                    });
+                }
+            }
+            if all || x.eq.hpf != y.eq.hpf {
+                out.push(Param::Hpf {
+                    ch,
+                    enabled: y.eq.hpf.enabled,
+                    freq_hz: y.eq.hpf.freq_hz,
+                });
+            }
+            if all || x.comp != y.comp {
+                out.push(comp_param(ch, &y.comp));
+            }
+            if all || x.gate != y.gate {
+                out.push(gate_param(ch, &y.gate));
+            }
+        }
+        let (ra, rb) = (&self.reverb, &target.reverb);
+        if all
+            || ra.enabled != rb.enabled
+            || ra.return_gain != rb.return_gain
+            || ra.time_s != rb.time_s
+            || ra.predelay_ms != rb.predelay_ms
+        {
+            out.push(Param::Reverb {
+                enabled: rb.enabled,
+                return_gain: rb.return_gain,
+                time_s: rb.time_s,
+                predelay_ms: rb.predelay_ms,
+            });
+        }
+        for (ch, (x, y)) in ra.sends.iter().zip(&rb.sends).enumerate() {
+            let Ok(ch) = u16::try_from(ch) else { break };
+            if all || x != y {
+                out.push(Param::ReverbSend { ch, gain: *y });
+            }
+        }
+        if all || self.clock != target.clock {
+            out.push(Param::Clock {
+                sample_rate: target.clock.sample_rate,
+                source: target.clock.source,
+            });
         }
         for (input, (ra, rb)) in self
             .routing
@@ -1066,7 +1334,9 @@ mod all_params_tests {
             + 1 // main
             + usize::from(t.preamps) * 2 // gain, phase
             + usize::from(t.mic_inputs) * 2 // phantom, pad
-            + inputs // eq bypass
+            + inputs * (1 + 4 + 1 + 1 + 1) // eq bypass, 4 bands, hpf, comp, gate
+            + 1 + inputs // reverb block + sends
+            + 1 // clock
             + usize::from(t.routing_inputs) * usize::from(t.routing_outputs)
             + 5; // control room
         let params = s.all_params();
@@ -1201,5 +1471,88 @@ mod recall_tests {
         ] {
             assert!(bad.validate().is_err(), "{bad:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod dsp_param_tests {
+    use super::*;
+
+    #[test]
+    fn dsp_params_clamp_validate_and_replay() {
+        let mut s = MotuState::default();
+        let r = s.apply(&Param::EqBand {
+            ch: 3,
+            band: 2,
+            enabled: true,
+            freq_hz: 50_000.0,
+            gain_db: -40.0,
+            q: 1.5,
+        });
+        assert_eq!(
+            r,
+            Ok(Some(Param::EqBand {
+                ch: 3,
+                band: 2,
+                enabled: true,
+                freq_hz: 20_000.0,
+                gain_db: -20.0,
+                q: 1.5
+            }))
+        );
+        assert!(matches!(
+            s.apply(&Param::EqBand {
+                ch: 0,
+                band: 4,
+                enabled: true,
+                freq_hz: 100.0,
+                gain_db: 0.0,
+                q: 1.0
+            }),
+            Err(StateError::Index {
+                what: "eq band",
+                ..
+            })
+        ));
+        assert_eq!(
+            s.apply(&Param::Comp {
+                ch: 0,
+                enabled: true,
+                threshold_db: f64::NAN,
+                ratio: 2.0,
+                attack_ms: 5.0,
+                release_ms: 50.0,
+                gain_db: 0.0
+            }),
+            Err(StateError::NonFinite("comp"))
+        );
+        let _ = s.apply(&Param::Reverb {
+            enabled: true,
+            return_gain: 0.5,
+            time_s: 99.0,
+            predelay_ms: 10.0,
+        });
+        assert_eq!(s.reverb.time_s, 10.0);
+        let _ = s.apply(&Param::ReverbSend { ch: 31, gain: 0.25 });
+        let _ = s.apply(&Param::Clock {
+            sample_rate: SampleRate::Hz96000,
+            source: ClockSource::Optical,
+        });
+
+        // A preset recall replays every DSP change exactly.
+        let mut replay = MotuState::default();
+        for p in MotuState::default().diff(&s) {
+            assert!(replay.apply(&p).is_ok());
+        }
+        assert_eq!(replay, s);
+        let json = serde_json::to_value(Param::Clock {
+            sample_rate: SampleRate::Hz48000,
+            source: ClockSource::Internal,
+        })
+        .unwrap_or_default();
+        assert_eq!(
+            json,
+            serde_json::json!({"param":"clock","sample_rate":"48000","source":"internal"})
+        );
     }
 }

@@ -292,7 +292,7 @@ impl OscBridge {
         };
         match env.event {
             ServerEvent::Changed { params } => {
-                let msgs: Vec<OscMessage> = params.iter().map(address::feedback).collect();
+                let msgs: Vec<OscMessage> = params.iter().filter_map(address::feedback).collect();
                 let datagrams = encode_chunks(&msgs);
                 for to in self.recipients(peers, origin_peer) {
                     self.send_all(&datagrams, to).await;
@@ -342,7 +342,7 @@ impl OscBridge {
 }
 
 fn dump_datagrams(params: &[Param]) -> Vec<Vec<u8>> {
-    let msgs: Vec<OscMessage> = params.iter().map(address::feedback).collect();
+    let msgs: Vec<OscMessage> = params.iter().filter_map(address::feedback).collect();
     encode_chunks(&msgs)
 }
 
@@ -494,7 +494,12 @@ mod tests {
             flatten(&p, &mut v);
             n += v.len();
         }
-        assert_eq!(n, params.len());
+        // DSP / reverb / clock params have no OSC address.
+        let osc_addressable = params
+            .iter()
+            .filter(|p| address::feedback(p).is_some())
+            .count();
+        assert_eq!(n, osc_addressable);
     }
 
     #[test]

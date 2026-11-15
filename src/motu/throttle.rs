@@ -41,6 +41,13 @@ pub fn key_of(p: &Param) -> ParamKey {
         P::SpeakerB { .. } => ParamKey("speaker_b", 0, 0),
         P::Talkback { .. } => ParamKey("talkback", 0, 0),
         P::PhonesVol { .. } => ParamKey("phones_vol", 0, 0),
+        P::EqBand { ch, band, .. } => ParamKey("eq_band", ch.into(), band.into()),
+        P::Hpf { ch, .. } => ParamKey("hpf", ch.into(), 0),
+        P::Comp { ch, .. } => ParamKey("comp", ch.into(), 0),
+        P::Gate { ch, .. } => ParamKey("gate", ch.into(), 0),
+        P::Reverb { .. } => ParamKey("reverb", 0, 0),
+        P::ReverbSend { ch, .. } => ParamKey("reverb_send", ch.into(), 0),
+        P::Clock { .. } => ParamKey("clock", 0, 0),
     }
 }
 
