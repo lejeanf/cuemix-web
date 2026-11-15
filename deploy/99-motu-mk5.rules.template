@@ -10,5 +10,9 @@
 # the kernel name no longer exists (seen on Proxmox VE 7.4).
 #
 # 07fd is the MOTU USB vendor id; the device is exposed as a CDC-Ethernet
-# interface (driver cdc_ether). ATTRS and DRIVERS also match parent devices.
-ACTION=="add", SUBSYSTEM=="net", ATTRS{idVendor}=="07fd", DRIVERS=="cdc_ether", RUN+="@HELPER@ $name"
+# interface (driver cdc_ether). Match on the ENV keys the usb_id builtin sets
+# for net devices (75-net-description.rules), not on ATTRS{idVendor} plus
+# DRIVERS: udev requires all ATTRS/DRIVERS keys to match ONE parent, and the
+# vendor id (USB device) and the driver (USB interface) live on different
+# parents, so that combination never matched (seen with udevadm test).
+ACTION=="add", SUBSYSTEM=="net", ENV{ID_VENDOR_ID}=="07fd", ENV{ID_USB_DRIVER}=="cdc_ether", RUN+="@HELPER@ $name"
