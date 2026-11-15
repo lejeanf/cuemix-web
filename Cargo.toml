@@ -25,7 +25,7 @@ path = "src/main.rs"
 tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 # MOTU binary WebSocket client (ws://<MOTU_IP>:1280)
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.29"
 # HTTP + JSON WebSocket server for the frontend
 axum = { version = "0.8", features = ["ws"] }
 # Frontend bundle embedded in the binary (frontend/dist must exist at build time).
