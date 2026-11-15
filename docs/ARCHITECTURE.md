@@ -235,11 +235,11 @@ parsé par un test unitaire pour rester valide. `throttle_hz = 40` → intervall
 | D6 | Code Rust à la racine (HANDOFF §7), pas de `backend/` | HANDOFF fait foi ; Makefile existant cohérent |
 | D7 | Dépendances ajoutées au premier usage | Manifeste sans dépendance morte (lint cargo) |
 
-## 8. Questions ouvertes (`needs-human-review`)
+## 8. Questions matériel — arbitrages du mainteneur (2026-11-14)
 
-| # | Question | Impact |
-|---|---|---|
-| Q1 | HANDOFF §2.2 dit que les **fréquences** sont en `8.24`, or `8.24` plafonne à ~128 : 20 kHz est irreprésentable. Encodage réel (kHz ? log ? normalisé ?) | EQ/HPF, Phase 2 — `to_fixed_8_24(20000.0)` renvoie une erreur |
-| Q2 | Dimensions réelles UltraLite-mk5 (entrées mixer, sources/destinations routing, nb préamplis) | `Topology::ULTRALITE_MK5` provisoire |
-| Q3 | Table `prop_id` → `ValueKind` (extraction `motu-mk5-linux` / `app.asar`) | `motu::client`, Phase 2 |
-| Q4 | Grandeur envoyée pour les volumes : gain linéaire `8.24` (hypothèse) ou dB ? | Conversion `fader::pos_to_gain` vs `pos_to_db` |
+| # | Question | Arbitrage | Conséquence Phase 2 |
+|---|---|---|---|
+| Q1 | HANDOFF §2.2 dit que les **fréquences** sont en `8.24`, or `8.24` plafonne à ~128 : 20 kHz est irreprésentable | **Vérifier dans les sources** (`motu-mk5-linux`, `app.asar` CueMix 5) avant d'implémenter l'EQ | Les fréquences EQ/HPF restent **hors protocole binaire** tant que l'encodage réel n'est pas établi ; `to_fixed_8_24(20000.0)` continue de renvoyer une erreur |
+| Q2 | Dimensions réelles UltraLite-mk5 | **Garder les valeurs par défaut** pour le mode démo, **lire la topologie réelle à la connexion** (Option A) | `Topology::ULTRALITE_MK5` = valeurs démo ; `motu::client` remplace la topologie par celle du matériel puis diffuse un `snapshot` |
+| Q3 | Table `prop_id` → `ValueKind` | **Extraire depuis `motu-mk5-linux`** (open source) | Chaque entrée porte un marqueur « non vérifié sur matériel » jusqu'au test par le mainteneur |
+| Q4 | Grandeur envoyée pour les volumes | **Gain linéaire `8.24`** (`fader::pos_to_gain`, 0 dB = `0x01000000`) | Hypothèse maintenue tant que l'extraction Q3 ou un test matériel ne la contredit pas |
