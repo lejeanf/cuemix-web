@@ -56,10 +56,11 @@ jobs:
         with:
           name: frontend-dist
           path: frontend/dist
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
+          toolchain: stable
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -79,10 +80,10 @@ jobs:
           path: frontend/dist
       # Toolchain passed as an input, not as the action ref: Dependabot treats a
       # ref like @1.85.0 as a version and "bumps" it to a nonexistent Rust.
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: "1.85"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo check --locked --all-targets
 
   shell:
