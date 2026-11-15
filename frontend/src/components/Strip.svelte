@@ -21,6 +21,12 @@
   const off = $derived(!store.ready);
   let editing = $state(false);
 
+  /** A stereo strip drives both halves of its pair (the device stores them separately). */
+  function both(send: (c: number) => void): void {
+    send(ch);
+    if (pair !== undefined) send(pair);
+  }
+
   const panText = (v: number) => (Math.abs(v) < 0.005 ? 'C' : v < 0 ? `L${Math.round(-v * 100)}` : `R${Math.round(v * 100)}`);
 </script>
 
@@ -57,7 +63,7 @@
         mark={0.75}
         disabled={off}
         hint={store.hint('mix_vol')}
-        onchange={(p, f) => store.set({ param: 'mix_vol', bus, ch, gain: posToGain(p) }, f)}
+        onchange={(p, f) => both((c) => store.set({ param: 'mix_vol', bus, ch: c, gain: posToGain(p) }, f))}
       />
       <Meter index={ch} label="Meter {name}" />
     </div>
@@ -78,7 +84,7 @@
         disabled={off}
         data-unmapped={store.unmapped('mix_mute') ? '' : undefined}
         title={store.hint('mix_mute')}
-        onclick={() => store.set({ param: 'mix_mute', bus, ch, on: !mc.mute }, true)}>M</button
+        onclick={() => both((c) => store.set({ param: 'mix_mute', bus, ch: c, on: !mc.mute }, true))}>M</button
       >
       <button
         class="b amber"
@@ -88,7 +94,7 @@
         disabled={off}
         data-unmapped={store.unmapped('mix_solo') ? '' : undefined}
         title={store.hint('mix_solo')}
-        onclick={() => store.set({ param: 'mix_solo', bus, ch, on: !mc.solo }, true)}>S</button
+        onclick={() => both((c) => store.set({ param: 'mix_solo', bus, ch: c, on: !mc.solo }, true))}>S</button
       >
     </div>
     {#if dsp}

@@ -11,20 +11,21 @@ export const HW_MAPPED_PARAMS: ReadonlySet<ParamName> = new Set<ParamName>([
   'output_trim',
   'mono',
   'talkback',
+  // Mix matrix: written with the layout read from the device on connect.
+  'mix_vol',
+  'mix_pan',
+  'mix_mute',
+  'mix_solo',
 ]);
 
 export const isHwMapped = (p: ParamName): boolean => HW_MAPPED_PARAMS.has(p);
 
 /**
  * Params read from the MOTU (shown as the hardware has them) but not written yet:
- * the mix matrix, and the DSP / reverb / clock params whose encoders exist in
+ * the DSP / reverb / clock params whose encoders exist in
  * `src/motu/props.rs` but are not active (writes get enabled one feature at a time).
  */
 export const HW_READ_ONLY_PARAMS: ReadonlySet<ParamName> = new Set<ParamName>([
-  'mix_vol',
-  'mix_pan',
-  'mix_mute',
-  'mix_solo',
   'input_eq_mode',
   'input_eq_bypass',
   'input_eq_freq',

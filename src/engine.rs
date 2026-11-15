@@ -364,9 +364,15 @@ impl Engine {
                     };
                     // Trims and +48V are never recalled (maintainer ruling).
                     next.keep_excluded_from(&self.state);
-                    // The hardware state may be unknown (unmapped / not yet
-                    // synced): send every mapped param, not a diff.
-                    for p in next.all_params() {
+                    // With an identified device the live state mirrors the
+                    // hardware (read back on connect): send only what differs.
+                    // Otherwise (demo, not yet synced) send every mapped param.
+                    let params = if self.session.device.is_some() {
+                        self.state.diff(&next)
+                    } else {
+                        next.all_params()
+                    };
+                    for p in params {
                         if !p.excluded_from_recall() {
                             self.forward(p);
                         }
@@ -575,7 +581,20 @@ mod tests {
                 }]
             }
         );
-        // Mix faders have no hardware mapping yet: never queued (audit #2).
+        // Mix faders are mapped (the client encodes them with the device layout).
+        assert_eq!(
+            link.commands.try_recv().ok(),
+            Some(Param::MixVol {
+                bus: 0,
+                ch: 0,
+                gain: crate::state::MIX_GAIN_MAX
+            })
+        );
+        // Params without a hardware counterpart are never queued (audit #2).
+        h.command(o, Command::Set(Param::Dim { on: true }))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await;
         assert!(link.commands.try_recv().is_err());
         h.command(o, Command::Set(Param::MainVol { db: -6.4 }))
             .await
@@ -676,7 +695,58 @@ mod tests {
         assert!(sent.contains(&Param::Mono { on: false }));
         assert!(sent.iter().all(|p| !p.excluded_from_recall()));
         assert!(sent.iter().all(props::is_mapped));
-        assert!(sent.len() < 64, "only mapped params: {}", sent.len());
+        // No device identified (demo): the whole mapped state is sent.
+        assert!(sent.iter().any(|p| matches!(p, Param::MixVol { .. })));
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn recall_with_an_identified_device_sends_only_the_difference() {
+        let (h, mut link, dir) = setup("recall-diff").await;
+        let mut rx = h.subscribe();
+        let o = Origin::System;
+        link.events
+            .send(DeviceEvent::Identified(DeviceInfo {
+                topology: Topology::ULTRALITE_MK5,
+                ..DeviceInfo::default()
+            }))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await; // session with the device
+        h.command(
+            o,
+            Command::SavePreset {
+                name: "base".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let _ = next(&mut rx).await; // session
+        let _ = next(&mut rx).await; // presets
+        h.command(o, Command::Set(Param::Mono { on: true }))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await; // changed
+        let _ = next(&mut rx).await; // session (modified)
+        while link.commands.try_recv().is_ok() {}
+        h.command(
+            o,
+            Command::LoadPreset {
+                name: "base".into(),
+            },
+        )
+        .await
+        .unwrap();
+        loop {
+            if matches!(next(&mut rx).await.event, ServerEvent::Snapshot { .. }) {
+                break;
+            }
+        }
+        let mut sent = Vec::new();
+        while let Ok(p) = link.commands.try_recv() {
+            sent.push(p);
+        }
+        assert_eq!(sent, vec![Param::Mono { on: false }]);
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 

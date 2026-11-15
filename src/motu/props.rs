@@ -383,7 +383,12 @@ pub fn encode(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
 /// Does `param` have a hardware mapping? Unmapped params never reach the
 /// device queue (audit #2).
 pub fn is_mapped(param: &Param) -> bool {
-    encode(param).is_ok_and(|f| !f.is_empty())
+    // Mix params need the device layout (`motu::identify::encode_mix`): they
+    // are mapped once a device is identified; without one the client drops them.
+    matches!(
+        param,
+        Param::MixVol { .. } | Param::MixPan { .. } | Param::MixMute { .. } | Param::MixSolo { .. }
+    ) || encode(param).is_ok_and(|f| !f.is_empty())
 }
 
 // ---------------------------------------------------------------------------

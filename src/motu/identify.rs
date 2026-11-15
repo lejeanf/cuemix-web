@@ -172,6 +172,50 @@ fn is_right_of_pair(stereo_inputs: &[bool], input: usize) -> bool {
     input % 2 == 1 && stereo_inputs.get(input - 1).copied().unwrap_or(false)
 }
 
+/// Mix param → its frame in the mix matrix (inverse of [`decode_mix`]).
+/// `None` when the param is not a mix param or falls outside the layout.
+///
+/// Write layout = read layout: verified for reading on hardware, writes still
+/// to be confirmed on the card. Pan is written as `0..1` with 0.5 = centre;
+/// which end is left is not verified yet.
+pub fn encode_mix(param: &Param, device: &DeviceInfo) -> Option<Frame> {
+    let (mix, ch) = match *param {
+        Param::MixVol { bus, ch, .. }
+        | Param::MixPan { bus, ch, .. }
+        | Param::MixMute { bus, ch, .. }
+        | Param::MixSolo { bus, ch, .. } => (bus, ch),
+        _ => return None,
+    };
+    if mix >= device.topology.mixes || ch >= device.topology.mixer_inputs {
+        return None;
+    }
+    let inputs = usize::from(device.topology.mixer_inputs);
+    let input = usize::from(ch);
+    let left_bus = usize::from(mix) * 2;
+    if !device.stereo_buses.get(left_bus).copied().unwrap_or(false) {
+        return None;
+    }
+    let bus = left_bus + usize::from(is_right_of_pair(&device.stereo_inputs, input));
+    let index = u16::try_from(bus * inputs + input).ok()?;
+    let (prop_id, value) = match *param {
+        Param::MixVol { gain, .. } if gain.is_finite() => {
+            (P_MIX_FADER, Value::Fixed(gain.clamp(0.0, MIX_GAIN_MAX)))
+        }
+        Param::MixPan { value, .. } if value.is_finite() => (
+            P_MIX_PAN,
+            Value::Fixed((value.clamp(-1.0, 1.0) + 1.0) / 2.0),
+        ),
+        Param::MixMute { on, .. } => (P_MIX_MUTE, Value::U8(u8::from(on))),
+        Param::MixSolo { on, .. } => (P_MIX_SOLO, Value::U8(u8::from(on))),
+        _ => return None,
+    };
+    Some(Frame {
+        prop_id,
+        index,
+        value,
+    })
+}
+
 /// Mix-matrix frame (`1016`..=`1019`) → param, given the device layout.
 /// `None` for frames that do not drive a strip (e.g. a mono input on the
 /// right bus) or that fall outside the layout.
@@ -366,6 +410,91 @@ mod tests {
         );
         // Out of the matrix.
         assert_eq!(decode_mix(&fixed(P_MIX_FADER, 14 * 32, 1.0), &info), None);
+    }
+
+    #[test]
+    fn mix_writes_mirror_the_read_layout() {
+        let info = identify(&mk5_dump()).expect("identified");
+        for p in [
+            Param::MixVol {
+                bus: 0,
+                ch: 2,
+                gain: 1.0,
+            },
+            Param::MixVol {
+                bus: 0,
+                ch: 18,
+                gain: 0.5,
+            },
+            Param::MixVol {
+                bus: 0,
+                ch: 19,
+                gain: 0.25,
+            },
+            Param::MixVol {
+                bus: 5,
+                ch: 28,
+                gain: 1.0,
+            },
+            Param::MixPan {
+                bus: 1,
+                ch: 3,
+                value: -1.0,
+            },
+            Param::MixPan {
+                bus: 1,
+                ch: 3,
+                value: 0.0,
+            },
+            Param::MixMute {
+                bus: 6,
+                ch: 0,
+                on: true,
+            },
+            Param::MixSolo {
+                bus: 2,
+                ch: 31,
+                on: false,
+            },
+        ] {
+            let f = encode_mix(&p, &info).expect("encodable");
+            assert_eq!(decode_mix(&f, &info), Some(p), "{p:?}");
+        }
+        // USB Main 1-2 right channel lands on the right bus of Main.
+        let f = encode_mix(
+            &Param::MixVol {
+                bus: 0,
+                ch: 19,
+                gain: 1.0,
+            },
+            &info,
+        )
+        .expect("enc");
+        assert_eq!(f.index, 32 + 19);
+        // Out of range / not a mix param.
+        assert_eq!(
+            encode_mix(
+                &Param::MixVol {
+                    bus: 7,
+                    ch: 0,
+                    gain: 1.0
+                },
+                &info
+            ),
+            None
+        );
+        assert_eq!(
+            encode_mix(
+                &Param::MixVol {
+                    bus: 0,
+                    ch: 32,
+                    gain: 1.0
+                },
+                &info
+            ),
+            None
+        );
+        assert_eq!(encode_mix(&Param::Mono { on: true }, &info), None);
     }
 
     #[test]

@@ -73,6 +73,15 @@ pub trait PropCodec: Send + Sync + 'static {
     fn identify(&self, _frames: &[Vec<u8>]) -> Option<DeviceInfo> {
         None
     }
+    /// Like [`PropCodec::encode`], with the identified device layout (needed
+    /// for the mix matrix).
+    fn encode_with(
+        &self,
+        param: &Param,
+        _device: Option<&DeviceInfo>,
+    ) -> Result<Vec<Frame>, ProtocolError> {
+        self.encode(param)
+    }
     /// Like [`PropCodec::decode`], with the identified device layout.
     fn decode_with(&self, frame: &Frame, _device: Option<&DeviceInfo>) -> Option<Param> {
         self.decode(frame)
@@ -95,6 +104,22 @@ impl PropCodec for DefaultCodec {
     }
     fn identify(&self, frames: &[Vec<u8>]) -> Option<DeviceInfo> {
         super::identify::identify(frames)
+    }
+    fn encode_with(
+        &self,
+        param: &Param,
+        device: Option<&DeviceInfo>,
+    ) -> Result<Vec<Frame>, ProtocolError> {
+        match (param, device) {
+            (
+                Param::MixVol { .. }
+                | Param::MixPan { .. }
+                | Param::MixMute { .. }
+                | Param::MixSolo { .. },
+                Some(d),
+            ) => Ok(identify::encode_mix(param, d).into_iter().collect()),
+            _ => super::props::encode(param),
+        }
     }
     fn decode_with(&self, frame: &Frame, device: Option<&DeviceInfo>) -> Option<Param> {
         match (frame.prop_id, device) {
@@ -306,8 +331,12 @@ fn decode_bytes<C: PropCodec>(
 }
 
 /// Wire bytes of every frame of `param` (unencodable parts are logged and dropped).
-fn encode_frames<C: PropCodec>(codec: &C, param: &Param) -> Vec<Vec<u8>> {
-    let frames = match codec.encode(param) {
+fn encode_frames<C: PropCodec>(
+    codec: &C,
+    param: &Param,
+    device: Option<&DeviceInfo>,
+) -> Vec<Vec<u8>> {
+    let frames = match codec.encode_with(param, device) {
         Ok(f) => f,
         Err(e) => {
             tracing::warn!(?param, error = %e, "cannot encode parameter, dropped");
@@ -437,7 +466,7 @@ async fn session_inner<C: PropCodec>(
                 }
             }
             () = pacer_due => {
-                if let Some(bytes) = pacer.pop_due(Instant::now(), |p| encode_frames(codec, p)) {
+                if let Some(bytes) = pacer.pop_due(Instant::now(), |p| encode_frames(codec, p, device.as_ref())) {
                     let res = ws.send(Message::Binary(bytes.into())).await;
                     pacer.sent(Instant::now());
                     if let Err(e) = res {

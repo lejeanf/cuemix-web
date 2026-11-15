@@ -24,9 +24,9 @@ need attention. Preset files carry `schema_version`; see
   and a trim per analog output (new `output_trim` param, prop 5000 indices
   0-9, OSC `/output/{n}/trim`). Output trims are calibration: like the other
   trims they are stored in presets but never recalled.
-- Mix faders, pan, mute and solo are read from the MOTU (layout
-  `bus × 32 + input`, from a real dump). Read-only: changes made in the UI are
-  not written to the device yet, and the controls say so.
+- Mix faders, pan, mute and solo are read from and written to the MOTU
+  (layout `bus × 32 + input`, from a real dump). A stereo strip moves both
+  halves of its pair. Pan direction is still to be confirmed on a card.
 - DSP, reverb and clock are read from the MOTU (layouts from a real connect
   dump): input EQ on analog inputs 1-8 (4 bands: type, bypass, frequency,
   gain, bandwidth; props 1002-1006, index `ch × 4 + band`), compressor on
@@ -45,6 +45,9 @@ need attention. Preset files carry `schema_version`; see
 - Output tab: compact output EQ (pick an output, curve + band table).
 
 ### Changed
+- Preset recall with an identified MOTU sends only the parameters that differ
+  from the live state (which mirrors the hardware), instead of every mapped
+  parameter.
 - **Preset format v2** (`schema_version: 2`). The DSP and reverb part of the
   state now matches the hardware: `input_eq`, `compressors`, `gates`,
   `output_eq` and a `reverb` block with decay / damping / pre-delay / width /

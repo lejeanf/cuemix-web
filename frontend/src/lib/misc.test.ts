@@ -130,8 +130,10 @@ describe('meters', () => {
 
 describe('hardware mapping list', () => {
   it('matches ARCHITECTURE §8', () => {
-    for (const p of ['preamp_gain', 'phase', 'pad', 'phantom', 'main_vol', 'phones_vol', 'mono', 'talkback'] as const) expect(isHwMapped(p)).toBe(true);
-    expect(isHwMapped('mix_vol')).toBe(false);
+    for (const p of ['preamp_gain', 'phase', 'pad', 'phantom', 'main_vol', 'phones_vol', 'output_trim', 'mono', 'talkback', 'mix_vol', 'mix_pan', 'mix_mute', 'mix_solo'] as const)
+      expect(isHwMapped(p)).toBe(true);
+    expect(isHwMapped('dim')).toBe(false);
+    expect(isHwReadOnly('mix_vol')).toBe(false);
   });
   it('DSP, reverb and clock are read from the MOTU but not written yet', () => {
     for (const p of ['input_eq_freq', 'output_eq_gain', 'comp_makeup', 'gate_bypass', 'reverb_decay', 'sample_rate', 'clock_source'] as const) {

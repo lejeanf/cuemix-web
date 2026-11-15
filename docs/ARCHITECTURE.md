@@ -150,8 +150,9 @@ MotuState
   matériel ; si elle est pleine, le param est **abandonné** (log `warn`).
 * Rappel de préset : refusé si la topologie diffère ; fichier **normalisé** (forme vérifiée,
   valeurs bornées via `apply`) ; **trims (main/casque) et +48V jamais rappelés** (arbitrage
-  mainteneur, D13) ; tous les params mappés du préset sont envoyés (pas un diff contre un état
-  matériel inconnu), puis `Snapshot`. `● Modifié` ignore trims et +48V.
+  mainteneur, D13) ; MOTU identifiée (état relu à la connexion) → seul le **diff** est envoyé
+  (le mix complet ferait ~900 écritures, ~22 s au rythme du pacer) ; sinon (démo, pas encore
+  synchronisé) tous les params mappés du préset, puis `Snapshot`. `● Modifié` ignore trims et +48V.
 * `Identified(DeviceInfo)` (juste avant `Synced`) : modèle, firmware, dimensions comptées dans
   le dump, paires stéréo et noms d'affichage. Topologie différente → l'état est reconstruit aux
   dimensions de l'appareil. `DeviceInfo` va dans `SessionInfo.device` (pas dans les présets) ;
@@ -315,7 +316,7 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 |---|---|---|---|
 | Q1 | Encodage des fréquences EQ | Vérifier dans les sources | ✅ `Int32` Hz (props 1004/1024) ; gain/largeur EQ en `8.24` ; HPF = mode de bande 3 ; **lu** depuis le dump (index `ch × 4 + bande` en entrée, `sortie × 3 + bande` en sortie) ; encodeur prêt, non actif |
 | Q2 | Dimensions | Défauts démo, topologie réelle à la connexion | ✅ comptées dans le dump de connexion (`motu::identify`) ; défauts D11 confirmés sur un mk5 |
-| Q3 | Table `prop_id` | Depuis motu-mk5-linux | 🟡 65 propriétés ; mappés : gain/phase préamplis (8), pad/48V (2), main, casque, mono, talkback. **En lecture seule** : matrice de mix 1016–1019 (`bus × 32 + entrée`, déduit du dump ; écriture non vérifiée). **En lecture seule (écriture non active)** : EQ d'entrée 1002–1006 (8 × 4), EQ de sortie 1022–1026 (12 × 3), gate 1007–1010 (2), compresseur 1011–1015 + 1021 (8), réverbe 1030–1034, horloge 10/11 (layouts lus dans le dump du 2026-11-15). **Non mappés** : routing (5010 = table de 80 o), DIM (absent du matériel), A/B (5015–5017 inconnus), niveau de sortie des bus (1027) |
+| Q3 | Table `prop_id` | Depuis motu-mk5-linux | 🟡 65 propriétés ; mappés : gain/phase préamplis (8), pad/48V (2), main, casque, trims de sortie (10), mono, talkback, matrice de mix 1016–1019 (`bus × 32 + entrée`, layout lu dans le dump ; écrite avec `motu::identify::encode_mix`, sens du pan à confirmer). **En lecture seule (écriture non active)** : EQ d'entrée 1002–1006 (8 × 4), EQ de sortie 1022–1026 (12 × 3), gate 1007–1010 (2), compresseur 1011–1015 + 1021 (8), réverbe 1030–1034, horloge 10/11 (layouts lus dans le dump du 2026-11-15). **Non mappés** : routing (5010 = table de 80 o), DIM (absent du matériel), A/B (5015–5017 inconnus), niveau de sortie des bus (1027) |
 | Q4 | Volumes en gain linéaire `8.24` | Gain linéaire | 🟡 non confirmé ; seul indice : seuil de gate « 1 = 0 dB » |
 
 À vérifier **sur matériel** par le mainteneur (bloquant pour les faders de mix) :
