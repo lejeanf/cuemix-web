@@ -12,3 +12,13 @@ regex = '''\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\
 paths = [
     '''docs/HANDOFF\.md''',
 ]
+
+# Two unpushed feature-branch commits carried generic RFC1918 *test fixtures*
+# (not the maintainer's network) in src/web/server.rs; they were replaced by
+# RFC 5737 addresses in the following commit. Scoped to these exact commits.
+[allowlist]
+description = "Historical test fixtures replaced by RFC 5737 addresses"
+commits = [
+    "ee6c8394852a59e6b07efa624fa9ffdae5dc850c",
+    "875d164b62286b20256bf0c4a09db89d40df01a5",
+]

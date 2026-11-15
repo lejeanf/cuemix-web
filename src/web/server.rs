@@ -374,16 +374,16 @@ mod tests {
 
     #[test]
     fn client_ip_prefers_forwarded_only_when_trusted() {
-        let peer: SocketAddr = "10.0.0.1:5000".parse().unwrap();
+        let peer: SocketAddr = "192.0.2.1:5000".parse().unwrap();
         let mut h = HeaderMap::new();
         h.insert(
             "x-forwarded-for",
-            HeaderValue::from_static("192.168.1.9, 10.0.0.7"),
+            HeaderValue::from_static("203.0.113.9, 198.51.100.7"),
         );
-        assert_eq!(client_ip(peer, &h, true).to_string(), "10.0.0.7");
-        assert_eq!(client_ip(peer, &h, false).to_string(), "10.0.0.1");
+        assert_eq!(client_ip(peer, &h, true).to_string(), "198.51.100.7");
+        assert_eq!(client_ip(peer, &h, false).to_string(), "192.0.2.1");
         h.insert("x-forwarded-for", HeaderValue::from_static("garbage"));
-        assert_eq!(client_ip(peer, &h, true).to_string(), "10.0.0.1");
+        assert_eq!(client_ip(peer, &h, true).to_string(), "192.0.2.1");
     }
 
     fn hm(pairs: &[(&'static str, &'static str)]) -> HeaderMap {

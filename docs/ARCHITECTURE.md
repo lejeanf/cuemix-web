@@ -7,7 +7,7 @@
 
 | | |
 |---|---|
-| Version du contrat | `0.2.0` (Phase 2 — moteur & passerelles) |
+| Version du contrat | `0.2.1` (Phase 2 — moteur & passerelles, audit architect-guardian corrigé) |
 | MSRV | Rust `1.80`, édition 2021 |
 | Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` (embarqué via `rust-embed`) |
 
@@ -133,8 +133,17 @@ MotuState
   broadcast 4096 (`Lagged` → le client se resynchronise via `initial_events()`).
 * `Envelope { origin: Web(id) | Osc(addr) | Hardware | System, target: All | Only(origin), event }`.
   Les réponses (`Presets` sur `ListPresets`) et les `Error` ne vont qu'à l'émetteur.
-* Rappel de préset : refusé si la topologie diffère ; sinon le `diff` est envoyé au matériel,
-  puis `Snapshot`. `● Modifié` = `Preset::is_modified(&live)`, `Session` diffusé à chaque bascule.
+* Seuls les `Param` **mappés matériellement** (`motu::props::is_mapped`) entrent dans la file
+  matériel ; si elle est pleine, le param est **abandonné** (log `warn`).
+* Rappel de préset : refusé si la topologie diffère ; fichier **normalisé** (forme vérifiée,
+  valeurs bornées via `apply`) ; **trims (main/casque) et +48V jamais rappelés** (arbitrage
+  mainteneur, D13) ; tous les params mappés du préset sont envoyés (pas un diff contre un état
+  matériel inconnu), puis `Snapshot`. `● Modifié` ignore trims et +48V.
+* `Synced(Vec<Param>)` : appliqué **par-dessus** l'état courant ; les champs non rapportés par
+  la MOTU (non mappés) sont conservés.
+* Liste des présets en cache mémoire (aucune I/O disque par connexion client).
+* Labels : nom 1–64 caractères imprimables, couleur `#RRGGBB` ; écriture `fsync` + renommage ;
+  retour arrière et erreur si l'écriture échoue.
 
 ### 3.5 Contrat JSON WebSocket (`/ws`)
 
@@ -185,8 +194,10 @@ qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants �
 | `/controlroom/phones/vol` | float `0..1` | `phones_vol` (trim) — extension à HANDOFF §3.1 |
 | `/preset/load` | string | `Command::LoadPreset` |
 
-Pont OSC : tout pair ayant envoyé un message valide est enregistré (TTL 10 min, 64 max) et
-reçoit un **dump complet** à son premier message ; le feedback `changed` va aux cibles
+Pont OSC : un pair est enregistré (TTL 10 min, 64 max, **8 nouveaux / 10 s**) dès qu'un message
+est accepté, et reçoit un **dump complet** — dumps limités à **1 / s au total** (anti-amplification
+UDP) ; `/sync` (sans argument) en redemande un ; bundles imbriqués > 8 niveaux rejetés avant
+décodage ; le feedback `changed` va aux cibles
 configurées + pairs, **sauf l'émetteur** ; bundles découpés ≤ 8 KiB. Non transmis en OSC :
 `presets`, `labels`, `meters`, `status`, `session`, `error`.
 
@@ -198,17 +209,20 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 
 ## 4. Comportements moteur
 
-* **Découverte** : `[motu].ip` explicite → mDNS `_http._tcp` filtré (provisoire) → `/proc/net/arp`
-  (voisins `169.254.x.x`) + sonde TCP `:1280` (500 ms). La MOTU s'annonce en réalité par
-  **multicast UDP JSON sur 1280** (MOTU-PROTOCOL.md) — à implémenter (§8).
+* **Découverte** : `[motu].ip` explicite (seul) ; sinon liste ordonnée de candidats — annonce
+  UDP JSON sur `:1280` (provisoire, 1,5 s, groupe multicast non documenté) → mDNS (nom
+  contenant motu/ultralite **obligatoire**) → voisins ARP `169.254.x.x` sondés en TCP `:1280` ;
+  **nos propres adresses sont exclues** ; le client essaie chaque candidat dans l'ordre.
 * **Option A — matériel prioritaire** : la MOTU pousse **spontanément tout son état** à la
   connexion puis chaque changement. Le client applique chaque trame jusqu'à **500 ms sans trame
   non-mètre** (les mètres, prop `6000`, défilent en continu), plafond **5 s**, puis
   `Synced` → `Snapshot` à tous. On ne réécrit jamais l'état au matériel à la reconnexion.
 * **Mode démo** : MOTU absente → `Demo`, état en mémoire ; les commandes sont drainées.
-* **Throttling** : 1re valeur d'un paramètre envoyée immédiatement, puis ≤ 1 / 25 ms, valeurs
-  intermédiaires fusionnées, dernière garantie (la MOTU ferme la socket si on écrit trop vite ;
-  motu-mk5-linux espace de 20 ms).
+* **Throttling** : par paramètre, 1re valeur immédiate puis ≤ 1 / 25 ms, valeurs intermédiaires
+  fusionnées, dernière garantie ; puis **cadenceur global ≥ 20 ms entre trames** (y compris les
+  params multi-trames et les rafales de rappel) — la MOTU ferme la socket si on écrit trop vite.
+* **Statut** : `Connecting` seulement au 1er essai et après une perte de connexion ; `Demo`
+  pendant les nouvelles tentatives.
 
 ## 5. Chaîne de build & CI
 
@@ -224,6 +238,10 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 * Aucun `unwrap`/`expect` en production ; trames et JSON malformés → erreurs, jamais de panique.
 * Noms de présets validés (`[A-Za-z0-9 _.-]{1,64}`, pas de `.` initial) : pas de traversée.
 * Serveur web : seuls les fichiers embarqués sont servis (`..`, `\`, NUL → `index.html`).
+* `/ws` : en-tête `Origin` vérifié (même hôte que `Host`, ou `web.allowed_origins`), sinon 403
+  (anti-détournement cross-site) ; envois bornés à 2 s (un client bloqué est déconnecté) ;
+  `X-Forwarded-For` : entrée la plus à droite, seulement si `trust_forwarded_headers` (défaut `false`).
+* **Pas d'authentification** : n'exposer que sur un LAN de confiance ou derrière un proxy authentifiant.
 * Fichiers locaux git-ignorés : `config.toml`, `*.local.toml`, `deploy/*.env`, `.env`, `*.pem`,
   `*.key`, `data/labels.json`, `data/presets/*.json`, `.claude/`.
 * `.gitleaks.toml` : règles par défaut + RFC1918 ; exemples en `192.0.2.x`/`127.0.0.1`/`169.254.x.x`.
@@ -244,6 +262,8 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 | D10 | Sync Option A par fenêtre de silence non-mètre (500 ms, max 5 s) | La MOTU pousse son état sans requête (MOTU-PROTOCOL.md) |
 | D11 | Topologie démo 32 entrées mixer / 8 préamplis / 2 micros | Sources motu-mk5-linux (Q2) |
 | D12 | Pas d'écho `changed` vers l'émetteur (Web et OSC) | Évite le « tremblement » des faders pendant le geste |
+| D13 | Rappel de préset sans trims ni +48V (arbitrage mainteneur, audit n°9) | Sécurité des écoutes et du matériel ; motu-mk5-linux le déconseille |
+| D14 | `rust-embed` verrouillé en 8.7.2 dans `Cargo.lock` | ≥ 8.8 tire `cpufeatures 0.3` (édition 2024) et casse la MSRV 1.80 |
 
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
 
