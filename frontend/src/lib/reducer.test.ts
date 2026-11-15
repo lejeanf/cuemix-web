@@ -19,6 +19,7 @@ function mkState(): MotuState {
     reverb: { enabled: false, return_gain: 1, time_s: 2, predelay_ms: 0, sends: [0, 0] },
     routing: { matrix: [[false, false], [false, false]] },
     control_room: { dim: false, mono: false, speaker_b: false, talkback: false, phones_db: -20 },
+    output_trims: [0, 0],
     clock: { sample_rate: '48000', source: 'internal' },
   };
 }
@@ -89,6 +90,12 @@ describe('applyEvent', () => {
     const s = withSnapshot();
     applyEvent(s, { event: 'session', active_preset: 'b', modified: true, connection: 'online' });
     expect(s.session).toEqual({ active_preset: 'b', modified: true, connection: 'online', device: null });
+  });
+  it('output_trim updates in range and ignores out-of-range indices', () => {
+    const s = withSnapshot();
+    applyEvent(s, { event: 'changed', params: [{ param: 'output_trim', ch: 1, db: -6 }] });
+    applyEvent(s, { event: 'changed', params: [{ param: 'output_trim', ch: 9, db: -6 }] });
+    expect(s.state!.output_trims).toEqual([0, -6]);
   });
   it('session carries the identified device', () => {
     const s = withSnapshot();

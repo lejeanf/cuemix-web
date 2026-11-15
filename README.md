@@ -12,7 +12,7 @@ High-performance **Rust** web controller and bidirectional **OSC** bridge for th
 
 Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`docs/MOTU-PROTOCOL.md`](docs/MOTU-PROTOCOL.md). Everything marked "mapped" is encoded in code but has not yet been verified on a device.
 
-- **Mapped:** preamp gain and phase (8 inputs), pad and 48 V phantom (2 mic inputs), main and headphone trims, mono, talkback.
+- **Mapped:** preamp gain and phase (8 inputs), pad and 48 V phantom (2 mic inputs), main and headphone trims, analog output trims (outputs 1–10), mono, talkback.
 - **Read from the device, not written yet:** mix faders, pan, mute and solo. The UI shows the MOTU's mix; moving a mix control does not change the hardware yet.
 - **Detected on connect:** model, firmware, channel counts, stereo pairs and default channel/mix names (the UI sizes itself to the device).
 - **Not mapped yet:** routing (table semantics unknown), EQ bypass (per-band layout unknown), DIM (no hardware property), A/B / speaker B (properties 5015–5017 unknown).
@@ -138,6 +138,7 @@ UDP `:8000`. **Indices are 1-based on the wire** (the server converts them to 0-
 | `/routing/in/{in}/out/{out}` | int | `route` |
 | `/controlroom/dim` · `/mono` · `/ab` · `/talkback` | int | `dim` · `mono` · `speaker_b` · `talkback` |
 | `/controlroom/phones/vol` | float `0..1` | `phones_vol` (trim; extension to the original spec, needed by the Control Room bar) |
+| `/output/{n}/trim` | float `0..1` | `output_trim` of analog output `n` (1–10; trim law like the phones) |
 | `/preset/load` | string | `load_preset`, by name |
 | `/sync` | none | the bridge replies with a full feedback dump to the sender (rate-limited to 1/s) |
 

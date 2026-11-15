@@ -169,6 +169,9 @@ export function applyParam(st: MotuState, p: Param): void {
     case 'phones_vol':
       st.control_room.phones_db = p.db;
       break;
+    case 'output_trim':
+      if (st.output_trims) setAt(st.output_trims, p.ch, p.db);
+      break;
     case 'clock':
       st.clock.sample_rate = p.sample_rate;
       st.clock.source = p.source;

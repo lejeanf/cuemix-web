@@ -5,6 +5,7 @@
   import TopBar from './components/TopBar.svelte';
   import Mixer from './components/Mixer.svelte';
   import Preamps from './components/Preamps.svelte';
+  import Output from './components/Output.svelte';
   import Routing from './components/Routing.svelte';
   import Reverb from './components/Reverb.svelte';
   import ControlRoom from './components/ControlRoom.svelte';
@@ -15,7 +16,7 @@
     return () => store.stop();
   });
 
-  const tabs: Tab[] = ['mixer', 'preamps', 'routing', 'reverb'];
+  const tabs: Tab[] = ['mixer', 'input', 'output', 'routing', 'reverb'];
 </script>
 
 <div class="app">
@@ -34,8 +35,10 @@
   <main class="view">
     {#if store.tab === 'mixer'}
       <Mixer />
-    {:else if store.tab === 'preamps'}
+    {:else if store.tab === 'input'}
       <Preamps />
+    {:else if store.tab === 'output'}
+      <Output />
     {:else if store.tab === 'routing'}
       <Routing />
     {:else}

@@ -204,6 +204,7 @@ qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants �
 | `/routing/in/{in}/out/{out}` | int | `route` |
 | `/controlroom/dim` · `/mono` · `/ab` · `/talkback` | int | `dim` · `mono` · `speaker_b` · `talkback` |
 | `/controlroom/phones/vol` | float `0..1` | `phones_vol` (trim) — extension à HANDOFF §3.1 |
+| `/output/{n}/trim` | float `0..1` | `output_trim` (sortie analogique `n`, 1–10) — onglet Output |
 | `/preset/load` | string | `Command::LoadPreset` |
 
 Pont OSC : un pair est enregistré (TTL 10 min, 64 max, **8 nouveaux / 10 s**) dès qu'un message

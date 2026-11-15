@@ -74,6 +74,8 @@ const N_INPUTS: u16 = 8;
 const N_MICS: u16 = 2;
 /// Output trim indices of the headphone pair (left, right).
 const PHONES_L: u16 = 10;
+/// Analog line outputs with a trim, before the phones pair (indices 0..=9).
+const N_LINE_OUTPUTS: u16 = 10;
 const PHONES_R: u16 = 11;
 /// Mic input gain ceiling in dB (line inputs stop at 20 dB).
 const GAIN_MAX_DB: f64 = 74.0;
@@ -311,6 +313,12 @@ pub fn encode(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
                 })
                 .collect()
         }
+        // Same property as the phones trim (5000), analog outputs 0..=9.
+        Param::OutputTrim { ch, db } if ch < N_LINE_OUTPUTS => vec![Frame {
+            prop_id: P_OUTPUT_TRIM,
+            index: ch,
+            value: Value::U8(db_to_trim(db)?),
+        }],
         Param::Mono { on } => vec![bool_frame(P_MONO, 0, on)],
         Param::Talkback { on } => vec![bool_frame(P_TALKBACK_ENABLE, 0, on)],
         // Unmapped: index layout undocumented (MixVol/MixPan/MixMute/MixSolo,
@@ -350,6 +358,10 @@ pub fn decode(frame: &Frame) -> Option<Param> {
         P_OUTPUT_TRIM if ch == PHONES_L => Some(Param::PhonesVol {
             db: trim_to_db(byte),
         }),
+        P_OUTPUT_TRIM if ch < N_LINE_OUTPUTS => Some(Param::OutputTrim {
+            ch,
+            db: trim_to_db(byte),
+        }),
         P_MONO if ch == 0 => Some(Param::Mono { on }),
         P_TALKBACK_ENABLE if ch == 0 => Some(Param::Talkback { on }),
         _ => None,
@@ -387,6 +399,11 @@ mod tests {
         for on in [false, true] {
             v.push(Param::Mono { on });
             v.push(Param::Talkback { on });
+        }
+        for ch in 0..N_LINE_OUTPUTS {
+            for db in [0.0, -12.0, -100.0] {
+                v.push(Param::OutputTrim { ch, db });
+            }
         }
         v
     }

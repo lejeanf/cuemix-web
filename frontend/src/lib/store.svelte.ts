@@ -10,7 +10,7 @@ import { isHwMapped, isHwReadOnly } from './hwmap';
 import { S } from './strings';
 
 export type Link = 'offline' | 'connecting' | 'online' | 'demo';
-export type Tab = 'mixer' | 'preamps' | 'routing' | 'reverb';
+export type Tab = 'mixer' | 'input' | 'output' | 'routing' | 'reverb';
 
 export const RECONNECT_MIN_MS = 500;
 export const RECONNECT_MAX_MS = 8000;

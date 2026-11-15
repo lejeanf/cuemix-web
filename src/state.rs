@@ -74,6 +74,9 @@ pub struct MotuState {
     pub reverb: Reverb,
     pub routing: Routing,
     pub control_room: ControlRoom,
+    /// Analog line output trims in whole dB (`OUTPUT_TRIMS` entries, 0 dB =
+    /// no attenuation). Calibration, not recalled by presets.
+    pub output_trims: Vec<f64>,
     pub clock: Clock,
 }
 
@@ -356,6 +359,7 @@ impl MotuState {
                     usize::from(topology.routing_inputs)
                 ],
             },
+            output_trims: vec![0.0; OUTPUT_TRIMS],
             control_room: ControlRoom {
                 dim: false,
                 mono: false,
@@ -383,6 +387,8 @@ impl Default for MotuState {
 
 /// Preamp gain range in dB (UltraLite-mk5 hardware: 0..74, U8 whole dB).
 pub const PREAMP_GAIN_MAX_DB: f64 = 74.0;
+/// Analog line outputs with a trim (UltraLite-mk5: Main 1-2 and Line 3-10).
+pub const OUTPUT_TRIMS: usize = 10;
 /// Lowest trim (main / phones) in dB (U8 attenuation 0..100).
 pub const TRIM_MIN_DB: f64 = -100.0;
 /// Highest mix fader gain: +12 dB (`10^(12/20)`), the top of the fader law.
@@ -457,6 +463,12 @@ pub enum Param {
     },
     /// Whole dB, clamped to `TRIM_MIN_DB..=0.0`.
     PhonesVol {
+        db: f64,
+    },
+    /// Trim of one analog line output (`ch` 0 = output 1), whole dB clamped
+    /// to `TRIM_MIN_DB..=0.0`.
+    OutputTrim {
+        ch: u16,
         db: f64,
     },
     // --- DSP, reverb, clock (Phase 3). Set-style: each variant carries the
@@ -637,7 +649,10 @@ impl Param {
     pub fn excluded_from_recall(&self) -> bool {
         matches!(
             self,
-            Param::MainVol { .. } | Param::PhonesVol { .. } | Param::Phantom { .. }
+            Param::MainVol { .. }
+                | Param::PhonesVol { .. }
+                | Param::OutputTrim { .. }
+                | Param::Phantom { .. }
         )
     }
 }
@@ -660,6 +675,7 @@ impl MotuState {
             "mix channels",
         )?;
         ok(self.preamps.len() == usize::from(t.preamps), "preamps")?;
+        ok(self.output_trims.len() == OUTPUT_TRIMS, "output trims")?;
         ok(t.mic_inputs <= t.preamps, "mic_inputs")?;
         ok(self.channels.len() == inputs, "channels")?;
         ok(self.reverb.sends.len() == inputs, "reverb sends")?;
@@ -679,6 +695,10 @@ impl MotuState {
 
     /// Validate shape and clamp every addressable value through [`Self::apply`].
     pub fn normalized(mut self) -> Result<Self, StateError> {
+        // Presets saved before output trims existed.
+        if self.output_trims.is_empty() {
+            self.output_trims = vec![0.0; OUTPUT_TRIMS];
+        }
         self.check_shape()?;
         for p in self.all_params() {
             self.apply(&p)?;
@@ -690,6 +710,7 @@ impl MotuState {
     pub fn keep_excluded_from(&mut self, live: &MotuState) {
         self.main.db = live.main.db;
         self.control_room.phones_db = live.control_room.phones_db;
+        self.output_trims.clone_from(&live.output_trims);
         for (mine, theirs) in self.preamps.iter_mut().zip(&live.preamps) {
             mine.phantom = theirs.phantom;
         }
@@ -859,6 +880,16 @@ impl MotuState {
                 (
                     set(&mut self.control_room.phones_db, v),
                     P::PhonesVol { db: v },
+                )
+            }
+            P::OutputTrim { ch, db } => {
+                let v = whole_db(finite(db, "output_trim")?, TRIM_MIN_DB, 0.0);
+                (
+                    set(
+                        slot(&mut self.output_trims, usize::from(ch), "output trim")?,
+                        v,
+                    ),
+                    P::OutputTrim { ch, db: v },
                 )
             }
             P::EqBand {
@@ -1157,6 +1188,17 @@ impl MotuState {
         if all || a.phones_db != b.phones_db {
             out.push(Param::PhonesVol { db: b.phones_db });
         }
+        for (ch, (x, y)) in self
+            .output_trims
+            .iter()
+            .zip(&target.output_trims)
+            .enumerate()
+        {
+            let Ok(ch) = u16::try_from(ch) else { break };
+            if all || x != y {
+                out.push(Param::OutputTrim { ch, db: *y });
+            }
+        }
         out
     }
 }
@@ -1423,6 +1465,38 @@ mod diff_tests {
 }
 
 #[cfg(test)]
+mod output_trim_tests {
+    use super::*;
+
+    #[test]
+    fn output_trims_clamp_and_are_not_recalled() {
+        let mut s = MotuState::default();
+        assert_eq!(
+            s.apply(&Param::OutputTrim { ch: 2, db: -7.4 }),
+            Ok(Some(Param::OutputTrim { ch: 2, db: -7.0 }))
+        );
+        assert_eq!(
+            s.apply(&Param::OutputTrim { ch: 3, db: 5.0 }),
+            Ok(None),
+            "trims only attenuate: +5 dB clamps to the current 0 dB"
+        );
+        assert!(s.apply(&Param::OutputTrim { ch: 99, db: 0.0 }).is_err());
+        assert!(Param::OutputTrim { ch: 0, db: 0.0 }.excluded_from_recall());
+        let mut preset = MotuState::default();
+        preset.keep_excluded_from(&s);
+        assert_eq!(preset.output_trims[2], -7.0);
+    }
+
+    #[test]
+    fn presets_without_output_trims_still_load() {
+        let mut old = MotuState::default();
+        old.output_trims.clear();
+        let n = old.normalized().unwrap_or_default();
+        assert_eq!(n.output_trims, vec![0.0; OUTPUT_TRIMS]);
+    }
+}
+
+#[cfg(test)]
 mod all_params_tests {
     use super::*;
 
@@ -1439,7 +1513,8 @@ mod all_params_tests {
             + 1 + inputs // reverb block + sends
             + 1 // clock
             + usize::from(t.routing_inputs) * usize::from(t.routing_outputs)
-            + 5; // control room
+            + 5 // control room
+            + OUTPUT_TRIMS;
         let params = s.all_params();
         assert_eq!(params.len(), expected);
         let mut replay = MotuState::default();

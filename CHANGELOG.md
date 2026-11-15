@@ -19,6 +19,11 @@ need attention. Preset files carry `schema_version`; see
   the device, shows one strip per stereo pair (flagging pairs whose halves
   differ on the device), lists the mixes like CueMix (Main, Phones, Line 3-4…)
   and shows the model and firmware in the top bar.
+- Input and Output tabs, as in CueMix 5. Input is the former Preamps view.
+  Output groups the monitor level, A/B, mono and talkback, the phones level,
+  and a trim per analog output (new `output_trim` param, prop 5000 indices
+  0-9, OSC `/output/{n}/trim`). Output trims are calibration: like the other
+  trims they are stored in presets but never recalled.
 - Mix faders, pan, mute and solo are read from the MOTU (layout
   `bus × 32 + input`, from a real dump). Read-only: changes made in the UI are
   not written to the device yet, and the controls say so.

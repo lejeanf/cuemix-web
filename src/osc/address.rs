@@ -158,6 +158,10 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
         ["controlroom", "phones", "vol"] => Param::PhonesVol {
             db: fader::trim_pos_to_db(arg_f64(addr, args)?, TRIM_MIN_DB),
         },
+        ["output", ch, "trim"] => Param::OutputTrim {
+            ch: index_u16(ch, addr)?,
+            db: fader::trim_pos_to_db(arg_f64(addr, args)?, TRIM_MIN_DB),
+        },
         ["preset", "load"] => match single(addr, args)? {
             OscType::String(name) => return Ok(Command::LoadPreset { name: name.clone() }),
             _ => return Err(OscError::ArgType(addr.to_owned())),
@@ -203,6 +207,10 @@ pub fn feedback(param: &Param) -> Option<OscMessage> {
         Param::Talkback { on } => ("/controlroom/talkback".to_owned(), b(on)),
         Param::PhonesVol { db } => (
             "/controlroom/phones/vol".to_owned(),
+            f(fader::trim_db_to_pos(db)),
+        ),
+        Param::OutputTrim { ch, db } => (
+            format!("/output/{}/trim", n(ch)),
             f(fader::trim_db_to_pos(db)),
         ),
         Param::EqBand { .. }

@@ -23,6 +23,7 @@ Pas d'accès à `app.asar` de CueMix 5 : les IDs viennent de `motu-mk5-linux` qu
 | `Phantom{ch}` | 5004 | `ch` (0..1) | U8 | 0/1 | mk5-linux |
 | `MainVol{db}` | 5011 `main_trim` | 0 | U8 | atténuation 0..100 = 0..-100 dB | mk5-linux + licanccc |
 | `PhonesVol{db}` | 5000 `output_trim` | écriture 10 et 11 (2 trames) ; lecture 10 seulement | U8 | idem | mk5-linux + licanccc |
+| `OutputTrim{ch,db}` | 5000 `output_trim` | `ch` 0..=9 (sorties analogiques 1-10, comme l'onglet Output de CueMix 5) | U8 | idem | mk5-linux + dump du 2026-11-15 |
 | `Mono{on}` | 5018 | 0 | U8 | 0/1 (paramètre caché dans CueMix) | mk5-linux + licanccc |
 | `Talkback{on}` | 5027 | 0 | U8 | 0/1 | mk5-linux |
 

@@ -115,6 +115,8 @@ export interface MotuState {
   reverb: Reverb;
   routing: { /** matrix[input][output] */ matrix: boolean[][] };
   control_room: ControlRoom;
+  /** Analog line output trims, whole dB -100..0 (index 0 = output 1). */
+  output_trims: number[];
   clock: { sample_rate: SampleRate; source: ClockSource };
 }
 
@@ -175,6 +177,7 @@ export type Param =
   | { param: 'speaker_b'; on: boolean }
   | { param: 'talkback'; on: boolean }
   | { param: 'phones_vol'; db: number }
+  | { param: 'output_trim'; ch: number; db: number }
   | ({ param: 'eq_band'; ch: number; band: number } & EqBand)
   | ({ param: 'hpf'; ch: number } & Hpf)
   | ({ param: 'comp'; ch: number } & Compressor)

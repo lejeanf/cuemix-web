@@ -8,6 +8,7 @@ export const HW_MAPPED_PARAMS: ReadonlySet<ParamName> = new Set<ParamName>([
   'phantom',
   'main_vol',
   'phones_vol',
+  'output_trim',
   'mono',
   'talkback',
 ]);
