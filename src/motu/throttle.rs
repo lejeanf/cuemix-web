@@ -132,12 +132,16 @@ mod tests {
     const IV: Duration = Duration::from_millis(25);
 
     fn vol(ch: u16, value: f64) -> Param {
-        Param::MixVol { bus: 0, ch, value }
+        Param::MixVol {
+            bus: 0,
+            ch,
+            gain: value,
+        }
     }
 
     fn value_of(p: &Param) -> f64 {
         match p {
-            Param::MixVol { value, .. } => *value,
+            Param::MixVol { gain, .. } => *gain,
             _ => f64::NAN,
         }
     }
@@ -172,11 +176,11 @@ mod tests {
                 Param::MixVol {
                     bus: 1,
                     ch: 1,
-                    value: 0.3
+                    gain: 0.3
                 }
             )
             .is_some());
-        assert!(t.push(now, Param::MainVol { value: 0.5 }).is_some());
+        assert!(t.push(now, Param::MainVol { db: -6.0 }).is_some());
         assert!(t.push(now, vol(1, 0.9)).is_none());
     }
 

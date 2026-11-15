@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::motu::client::ConnectionStatus;
-use crate::motu::fader;
 
 /// Hardware dimensions. Values for the UltraLite-mk5 are **provisional** until
 /// confirmed against the device (open question Q2 in `docs/ARCHITECTURE.md`).
@@ -84,8 +83,9 @@ pub struct Mix {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MixChannel {
-    /// Normalised fader position `0.0..=1.0` (see [`fader`]; `0.75` = 0 dB).
-    pub vol: f64,
+    /// Linear gain, `0.0..=MIX_GAIN_MAX` (`1.0` = 0 dB) — MOTU native (8.24).
+    /// The `0..1` fader position exists only at the edges (OSC, UI widget).
+    pub gain: f64,
     /// `-1.0` (L) ..= `1.0` (R), `0.0` = centre.
     pub pan: f64,
     pub mute: bool,
@@ -95,7 +95,7 @@ pub struct MixChannel {
 impl Default for MixChannel {
     fn default() -> Self {
         Self {
-            vol: fader::UNITY_POS,
+            gain: 1.0,
             pan: 0.0,
             mute: false,
             solo: false,
@@ -105,13 +105,13 @@ impl Default for MixChannel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MainOut {
-    /// Normalised fader position `0.0..=1.0`.
-    pub vol: f64,
+    /// Main trim, whole dB `TRIM_MIN_DB..=0.0` — MOTU native (U8 attenuation).
+    pub db: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct Preamp {
-    /// `0.0..=60.0` dB.
+    /// Whole dB `0.0..=PREAMP_GAIN_MAX_DB` — MOTU native (U8).
     pub gain_db: f64,
     pub phantom: bool,
     pub pad: bool,
@@ -235,8 +235,8 @@ pub struct ControlRoom {
     /// `false` = speakers A, `true` = speakers B.
     pub speaker_b: bool,
     pub talkback: bool,
-    /// Headphone fader position, normalised.
-    pub phones_vol: f64,
+    /// Headphone trim, whole dB `TRIM_MIN_DB..=0.0` — MOTU native (U8 attenuation).
+    pub phones_db: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -281,9 +281,7 @@ impl MotuState {
                     channels: vec![MixChannel::default(); inputs],
                 })
                 .collect(),
-            main: MainOut {
-                vol: fader::UNITY_POS,
-            },
+            main: MainOut { db: 0.0 },
             preamps: vec![Preamp::default(); usize::from(topology.preamps)],
             channels: vec![ChannelDsp::default(); inputs],
             reverb: Reverb {
@@ -304,7 +302,7 @@ impl MotuState {
                 mono: false,
                 speaker_b: false,
                 talkback: false,
-                phones_vol: fader::UNITY_POS,
+                phones_db: 0.0,
             },
             clock: Clock {
                 sample_rate: SampleRate::Hz48000,
@@ -324,29 +322,84 @@ impl Default for MotuState {
 // Commands & events
 // ---------------------------------------------------------------------------
 
-/// Preamp gain range in dB.
-pub const PREAMP_GAIN_MAX_DB: f64 = 60.0;
+/// Preamp gain range in dB (UltraLite-mk5 hardware: 0..74, U8 whole dB).
+pub const PREAMP_GAIN_MAX_DB: f64 = 74.0;
+/// Lowest trim (main / phones) in dB (U8 attenuation 0..100).
+pub const TRIM_MIN_DB: f64 = -100.0;
+/// Highest mix fader gain: +12 dB (`10^(12/20)`), the top of the fader law.
+pub const MIX_GAIN_MAX: f64 = 3.981_071_705_534_972;
 
-/// One set-style parameter (0-based indices). JSON: `{"param":"mix_vol","bus":0,"ch":3,"value":0.75}`.
+/// One set-style parameter (0-based indices). JSON: `{"param":"mix_vol","bus":0,"ch":3,"gain":1.0}`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "param", rename_all = "snake_case")]
 pub enum Param {
-    MixVol { bus: u8, ch: u16, value: f64 },
-    MixPan { bus: u8, ch: u16, value: f64 },
-    MixMute { bus: u8, ch: u16, on: bool },
-    MixSolo { bus: u8, ch: u16, on: bool },
-    MainVol { value: f64 },
-    PreampGain { ch: u16, db: f64 },
-    Phantom { ch: u16, on: bool },
-    Pad { ch: u16, on: bool },
-    Phase { ch: u16, on: bool },
-    EqBypass { ch: u16, on: bool },
-    Route { input: u16, output: u16, on: bool },
-    Dim { on: bool },
-    Mono { on: bool },
-    SpeakerB { on: bool },
-    Talkback { on: bool },
-    PhonesVol { value: f64 },
+    /// Linear gain, clamped to `0.0..=MIX_GAIN_MAX`.
+    MixVol {
+        bus: u8,
+        ch: u16,
+        gain: f64,
+    },
+    MixPan {
+        bus: u8,
+        ch: u16,
+        value: f64,
+    },
+    MixMute {
+        bus: u8,
+        ch: u16,
+        on: bool,
+    },
+    MixSolo {
+        bus: u8,
+        ch: u16,
+        on: bool,
+    },
+    /// Whole dB, clamped to `TRIM_MIN_DB..=0.0`.
+    MainVol {
+        db: f64,
+    },
+    /// Whole dB, clamped to `0.0..=PREAMP_GAIN_MAX_DB`.
+    PreampGain {
+        ch: u16,
+        db: f64,
+    },
+    Phantom {
+        ch: u16,
+        on: bool,
+    },
+    Pad {
+        ch: u16,
+        on: bool,
+    },
+    Phase {
+        ch: u16,
+        on: bool,
+    },
+    EqBypass {
+        ch: u16,
+        on: bool,
+    },
+    Route {
+        input: u16,
+        output: u16,
+        on: bool,
+    },
+    Dim {
+        on: bool,
+    },
+    Mono {
+        on: bool,
+    },
+    SpeakerB {
+        on: bool,
+    },
+    Talkback {
+        on: bool,
+    },
+    /// Whole dB, clamped to `TRIM_MIN_DB..=0.0`.
+    PhonesVol {
+        db: f64,
+    },
 }
 
 /// Everything a Web or OSC client may request.
@@ -417,6 +470,11 @@ pub enum StateError {
     },
 }
 
+/// Round to the hardware's whole-dB resolution, then clamp.
+fn whole_db(db: f64, min: f64, max: f64) -> f64 {
+    db.round().clamp(min, max)
+}
+
 fn finite(value: f64, what: &'static str) -> Result<f64, StateError> {
     if value.is_finite() {
         Ok(value)
@@ -463,11 +521,11 @@ impl MotuState {
     pub fn apply(&mut self, param: &Param) -> Result<Option<Param>, StateError> {
         use Param as P;
         let (changed, effective) = match *param {
-            P::MixVol { bus, ch, value } => {
-                let v = finite(value, "mix_vol")?.clamp(0.0, 1.0);
+            P::MixVol { bus, ch, gain } => {
+                let v = finite(gain, "mix_vol")?.clamp(0.0, MIX_GAIN_MAX);
                 (
-                    set(&mut self.mix_channel(bus, ch)?.vol, v),
-                    P::MixVol { bus, ch, value: v },
+                    set(&mut self.mix_channel(bus, ch)?.gain, v),
+                    P::MixVol { bus, ch, gain: v },
                 )
             }
             P::MixPan { bus, ch, value } => {
@@ -479,12 +537,12 @@ impl MotuState {
             }
             P::MixMute { bus, ch, on } => (set(&mut self.mix_channel(bus, ch)?.mute, on), *param),
             P::MixSolo { bus, ch, on } => (set(&mut self.mix_channel(bus, ch)?.solo, on), *param),
-            P::MainVol { value } => {
-                let v = finite(value, "main_vol")?.clamp(0.0, 1.0);
-                (set(&mut self.main.vol, v), P::MainVol { value: v })
+            P::MainVol { db } => {
+                let v = whole_db(finite(db, "main_vol")?, TRIM_MIN_DB, 0.0);
+                (set(&mut self.main.db, v), P::MainVol { db: v })
             }
             P::PreampGain { ch, db } => {
-                let v = finite(db, "preamp_gain")?.clamp(0.0, PREAMP_GAIN_MAX_DB);
+                let v = whole_db(finite(db, "preamp_gain")?, 0.0, PREAMP_GAIN_MAX_DB);
                 (
                     set(
                         &mut slot(&mut self.preamps, usize::from(ch), "preamp")?.gain_db,
@@ -538,11 +596,11 @@ impl MotuState {
             P::Mono { on } => (set(&mut self.control_room.mono, on), *param),
             P::SpeakerB { on } => (set(&mut self.control_room.speaker_b, on), *param),
             P::Talkback { on } => (set(&mut self.control_room.talkback, on), *param),
-            P::PhonesVol { value } => {
-                let v = finite(value, "phones_vol")?.clamp(0.0, 1.0);
+            P::PhonesVol { db } => {
+                let v = whole_db(finite(db, "phones_vol")?, TRIM_MIN_DB, 0.0);
                 (
-                    set(&mut self.control_room.phones_vol, v),
-                    P::PhonesVol { value: v },
+                    set(&mut self.control_room.phones_db, v),
+                    P::PhonesVol { db: v },
                 )
             }
         };
@@ -568,11 +626,11 @@ impl MotuState {
             let Ok(bus) = u8::try_from(bus) else { break };
             for (ch, (x, y)) in a.channels.iter().zip(&b.channels).enumerate() {
                 let Ok(ch) = u16::try_from(ch) else { break };
-                if all || x.vol != y.vol {
+                if all || x.gain != y.gain {
                     out.push(Param::MixVol {
                         bus,
                         ch,
-                        value: y.vol,
+                        gain: y.gain,
                     });
                 }
                 if all || x.pan != y.pan {
@@ -598,10 +656,8 @@ impl MotuState {
                 }
             }
         }
-        if all || self.main.vol != target.main.vol {
-            out.push(Param::MainVol {
-                value: target.main.vol,
-            });
+        if all || self.main.db != target.main.db {
+            out.push(Param::MainVol { db: target.main.db });
         }
         for (ch, (x, y)) in self.preamps.iter().zip(&target.preamps).enumerate() {
             let Ok(ch) = u16::try_from(ch) else { break };
@@ -663,10 +719,8 @@ impl MotuState {
         if all || a.talkback != b.talkback {
             out.push(Param::Talkback { on: b.talkback });
         }
-        if all || a.phones_vol != b.phones_vol {
-            out.push(Param::PhonesVol {
-                value: b.phones_vol,
-            });
+        if all || a.phones_db != b.phones_db {
+            out.push(Param::PhonesVol { db: b.phones_db });
         }
         out
     }
@@ -723,17 +777,33 @@ mod tests {
         let r = s.apply(&Param::MixVol {
             bus: 1,
             ch: 2,
-            value: 1.7,
+            gain: 9.0,
         });
         assert_eq!(
             r,
             Ok(Some(Param::MixVol {
                 bus: 1,
                 ch: 2,
-                value: 1.0
+                gain: MIX_GAIN_MAX
             }))
         );
-        assert_eq!(s.mixes[1].channels[2].vol, 1.0);
+        assert_eq!(s.mixes[1].channels[2].gain, MIX_GAIN_MAX);
+        assert_eq!(
+            s.apply(&Param::MainVol { db: -12.4 }),
+            Ok(Some(Param::MainVol { db: -12.0 })),
+            "trims are whole dB"
+        );
+        assert_eq!(
+            s.apply(&Param::PhonesVol { db: -300.0 }),
+            Ok(Some(Param::PhonesVol { db: TRIM_MIN_DB }))
+        );
+        assert_eq!(
+            s.apply(&Param::PreampGain { ch: 3, db: 80.0 }),
+            Ok(Some(Param::PreampGain {
+                ch: 3,
+                db: PREAMP_GAIN_MAX_DB
+            }))
+        );
         let r = s.apply(&Param::PreampGain { ch: 0, db: -5.0 });
         assert_eq!(r, Ok(None), "already 0 dB after clamping");
     }
@@ -754,7 +824,7 @@ mod tests {
     fn apply_rejects_bad_input() {
         let mut s = MotuState::default();
         assert_eq!(
-            s.apply(&Param::MainVol { value: f64::NAN }),
+            s.apply(&Param::MainVol { db: f64::NAN }),
             Err(StateError::NonFinite("main_vol"))
         );
         assert!(matches!(
@@ -801,12 +871,12 @@ mod tests {
         let cmd = Command::Set(Param::MixVol {
             bus: 0,
             ch: 3,
-            value: 0.75,
+            gain: 0.5,
         });
         let json = serde_json::to_value(&cmd).unwrap_or_default();
         assert_eq!(
             json,
-            serde_json::json!({"cmd":"set","param":"mix_vol","bus":0,"ch":3,"value":0.75})
+            serde_json::json!({"cmd":"set","param":"mix_vol","bus":0,"ch":3,"gain":0.5})
         );
         let load: Command = serde_json::from_str(r#"{"cmd":"load_preset","name":"live"}"#)
             .unwrap_or(Command::LoadPreset {
@@ -852,7 +922,7 @@ mod diff_tests {
             Param::MixVol {
                 bus: 3,
                 ch: 5,
-                value: 0.2,
+                gain: 0.2,
             },
             Param::MixMute {
                 bus: 0,
@@ -867,7 +937,7 @@ mod diff_tests {
                 on: true,
             },
             Param::Talkback { on: true },
-            Param::PhonesVol { value: 0.1 },
+            Param::PhonesVol { db: -12.0 },
         ] {
             assert!(target.apply(&p).is_ok());
         }
@@ -904,5 +974,34 @@ mod all_params_tests {
         for p in &params {
             assert_eq!(replay.apply(p), Ok(None), "default values replay as no-ops");
         }
+    }
+}
+
+#[cfg(test)]
+mod native_unit_tests {
+    use super::*;
+    use crate::motu::fader;
+
+    #[test]
+    fn mix_gain_max_matches_fader_law() {
+        assert!((MIX_GAIN_MAX - fader::max_gain()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn native_json_shapes() {
+        let main = serde_json::to_value(Param::MainVol { db: -6.0 }).unwrap_or_default();
+        assert_eq!(main, serde_json::json!({"param":"main_vol","db":-6.0}));
+        let phones = serde_json::to_value(Param::PhonesVol { db: 0.0 }).unwrap_or_default();
+        assert_eq!(phones, serde_json::json!({"param":"phones_vol","db":0.0}));
+        let mix = serde_json::to_value(Param::MixVol {
+            bus: 0,
+            ch: 0,
+            gain: 1.0,
+        })
+        .unwrap_or_default();
+        assert_eq!(
+            mix,
+            serde_json::json!({"param":"mix_vol","bus":0,"ch":0,"gain":1.0})
+        );
     }
 }

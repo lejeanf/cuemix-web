@@ -22,7 +22,6 @@
 //! - `Int16`/`Array` properties of the device cannot be carried by
 //!   [`ValueKind`] and are therefore absent from [`ENTRIES`].
 
-use super::fader;
 use super::protocol::{Frame, ProtocolError, Value, ValueKind};
 use crate::state::Param;
 
@@ -260,20 +259,18 @@ fn require_finite(v: f64) -> Result<f64, ProtocolError> {
     }
 }
 
-/// Normalised fader position → trim attenuation byte (`0` = 0 dB, `100` = -100 dB).
-/// Trim can only attenuate, so positions above unity (0.75) saturate at 0 dB.
-fn pos_to_trim(pos: f64) -> Result<u8, ProtocolError> {
-    let db = fader::pos_to_db(require_finite(pos)?);
-    if db == f64::NEG_INFINITY {
-        return Ok(TRIM_MAX);
-    }
-    let att = (-db.min(0.0)).round().clamp(0.0, f64::from(TRIM_MAX));
+/// Trim in dB (≤ 0, native unit of the state) → attenuation byte
+/// (`0` = 0 dB, `100` = -100 dB).
+fn db_to_trim(db: f64) -> Result<u8, ProtocolError> {
+    let att = (-require_finite(db)?.min(0.0))
+        .round()
+        .clamp(0.0, f64::from(TRIM_MAX));
     // `att` is an integer in 0..=100: the cast is exact.
     Ok(att as u8)
 }
 
-fn trim_to_pos(trim: u8) -> f64 {
-    fader::db_to_pos(-f64::from(trim.min(TRIM_MAX)))
+fn trim_to_db(trim: u8) -> f64 {
+    -f64::from(trim.min(TRIM_MAX))
 }
 
 /// Effective param → frames. Empty = no known hardware mapping (yet).
@@ -291,13 +288,13 @@ pub fn encode(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
         Param::Phase { ch, on } if ch < N_INPUTS => vec![bool_frame(P_INPUT_PHASE, ch, on)],
         Param::Pad { ch, on } if ch < N_MICS => vec![bool_frame(P_INPUT_PAD, ch, on)],
         Param::Phantom { ch, on } if ch < N_MICS => vec![bool_frame(P_INPUT_48V, ch, on)],
-        Param::MainVol { value } => vec![Frame {
+        Param::MainVol { db } => vec![Frame {
             prop_id: P_MAIN_TRIM,
             index: 0,
-            value: Value::U8(pos_to_trim(value)?),
+            value: Value::U8(db_to_trim(db)?),
         }],
-        Param::PhonesVol { value } => {
-            let trim = pos_to_trim(value)?;
+        Param::PhonesVol { db } => {
+            let trim = db_to_trim(db)?;
             [PHONES_L, PHONES_R]
                 .into_iter()
                 .map(|index| Frame {
@@ -333,10 +330,10 @@ pub fn decode(frame: &Frame) -> Option<Param> {
         P_INPUT_PAD if ch < N_MICS => Some(Param::Pad { ch, on }),
         P_INPUT_48V if ch < N_MICS => Some(Param::Phantom { ch, on }),
         P_MAIN_TRIM if ch == 0 => Some(Param::MainVol {
-            value: trim_to_pos(byte),
+            db: trim_to_db(byte),
         }),
         P_OUTPUT_TRIM if ch == PHONES_L || ch == PHONES_R => Some(Param::PhonesVol {
-            value: trim_to_pos(byte),
+            db: trim_to_db(byte),
         }),
         P_MONO if ch == 0 => Some(Param::Mono { on }),
         P_TALKBACK_ENABLE if ch == 0 => Some(Param::Talkback { on }),
@@ -387,24 +384,24 @@ mod tests {
 
     #[test]
     fn trim_volumes_round_trip_on_whole_db() {
-        // Unity and every whole-dB attenuation survive; above unity saturates.
+        // Native dB in, native byte out: every whole-dB attenuation is exact.
         for att in 0..=100u8 {
-            let pos = trim_to_pos(att);
-            assert_eq!(pos_to_trim(pos), Ok(att), "att {att}");
-            let main = encode(&Param::MainVol { value: pos }).unwrap();
+            let db = trim_to_db(att);
+            assert_eq!(db_to_trim(db), Ok(att), "att {att}");
+            let main = encode(&Param::MainVol { db }).unwrap();
             assert_eq!(main.len(), 1);
             assert_eq!(main[0].value, Value::U8(att));
-            assert_eq!(decode(&main[0]), Some(Param::MainVol { value: pos }));
-            let ph = encode(&Param::PhonesVol { value: pos }).unwrap();
+            assert_eq!(decode(&main[0]), Some(Param::MainVol { db }));
+            let ph = encode(&Param::PhonesVol { db }).unwrap();
             assert_eq!(ph.len(), 2);
             assert_eq!((ph[0].index, ph[1].index), (PHONES_L, PHONES_R));
             for f in &ph {
-                assert_eq!(decode(f), Some(Param::PhonesVol { value: pos }));
+                assert_eq!(decode(f), Some(Param::PhonesVol { db }));
             }
         }
-        assert_eq!(pos_to_trim(0.75), Ok(0));
-        assert_eq!(pos_to_trim(1.0), Ok(0));
-        assert_eq!(pos_to_trim(0.0), Ok(100));
+        assert_eq!(db_to_trim(6.0), Ok(0), "no boost: saturates at 0 dB");
+        assert_eq!(db_to_trim(-250.0), Ok(100));
+        assert_eq!(db_to_trim(-6.4), Ok(6));
     }
 
     #[test]
@@ -413,7 +410,7 @@ mod tests {
             Param::MixVol {
                 bus: 0,
                 ch: 0,
-                value: 0.5,
+                gain: 0.5,
             },
             Param::MixPan {
                 bus: 0,
@@ -459,9 +456,7 @@ mod tests {
             Err(ProtocolError::NonFinite(_))
         ));
         assert!(matches!(
-            encode(&Param::MainVol {
-                value: f64::INFINITY
-            }),
+            encode(&Param::MainVol { db: f64::INFINITY }),
             Err(ProtocolError::NonFinite(_))
         ));
         // Out-of-range finite values are clamped, not rejected.
@@ -548,7 +543,7 @@ mod tests {
             let _ = encode(&Param::MixVol {
                 bus: u8::MAX,
                 ch,
-                value: 1.0,
+                gain: 1.0,
             });
         }
     }

@@ -473,7 +473,7 @@ mod tests {
             Command::Set(Param::MixVol {
                 bus: 0,
                 ch: 0,
-                value: 2.0,
+                gain: 9.0,
             }),
         )
         .await
@@ -487,7 +487,7 @@ mod tests {
                 params: vec![Param::MixVol {
                     bus: 0,
                     ch: 0,
-                    value: 1.0
+                    gain: crate::state::MIX_GAIN_MAX
                 }]
             }
         );
@@ -496,7 +496,7 @@ mod tests {
             Some(Param::MixVol {
                 bus: 0,
                 ch: 0,
-                value: 1.0
+                gain: crate::state::MIX_GAIN_MAX
             })
         );
         let _ = tokio::fs::remove_dir_all(dir).await;

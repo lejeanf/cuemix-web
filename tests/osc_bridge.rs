@@ -1,5 +1,6 @@
 //! OSC bridge over real UDP on loopback.
 
+use cuemix_web::motu::fader::pos_to_gain;
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -118,7 +119,7 @@ async fn a_osc_message_reaches_engine() {
         vec![Param::MixVol {
             bus: 0,
             ch: 0,
-            value: 0.5
+            gain: pos_to_gain(0.5)
         }]
     );
 }
@@ -188,12 +189,12 @@ async fn d_bundle_applies_both() {
     assert!(seen.contains(&Param::MixVol {
         bus: 0,
         ch: 0,
-        value: 0.25
+        gain: pos_to_gain(0.25)
     }));
     assert!(seen.contains(&Param::MixVol {
         bus: 0,
         ch: 1,
-        value: 0.5
+        gain: pos_to_gain(0.5)
     }));
 }
 
@@ -213,7 +214,7 @@ async fn e_garbage_and_unknown_do_not_break_bridge() {
         vec![Param::MixVol {
             bus: 0,
             ch: 0,
-            value: f64::from(0.6_f32)
+            gain: pos_to_gain(f64::from(0.6_f32))
         }]
     );
 }

@@ -23,7 +23,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 const T: Duration = Duration::from_secs(5);
 const PROP_MIX_VOL: u16 = 0x0001; // index = bus * 64 + ch, Fixed
-const PROP_MAIN_VOL: u16 = 0x0002; // index 0, Fixed
+const PROP_MAIN_VOL: u16 = 0x0002; // index 0, Fixed carrying dB (test-only codec)
 const PROP_TALKBACK: u16 = 0x2001; // index 0, U8
 
 #[derive(Debug, Clone, Copy)]
@@ -36,15 +36,15 @@ impl PropCodec for TestCodec {
 
     fn encode(&self, param: &Param) -> Result<Vec<Frame>, ProtocolError> {
         Ok(match *param {
-            Param::MixVol { bus, ch, value } => vec![Frame {
+            Param::MixVol { bus, ch, gain } => vec![Frame {
                 prop_id: PROP_MIX_VOL,
                 index: u16::from(bus) * 64 + ch,
-                value: Value::Fixed(value),
+                value: Value::Fixed(gain),
             }],
-            Param::MainVol { value } => vec![Frame {
+            Param::MainVol { db } => vec![Frame {
                 prop_id: PROP_MAIN_VOL,
                 index: 0,
-                value: Value::Fixed(value),
+                value: Value::Fixed(db),
             }],
             Param::Talkback { on } => vec![Frame {
                 prop_id: PROP_TALKBACK,
@@ -60,9 +60,9 @@ impl PropCodec for TestCodec {
             (PROP_MIX_VOL, Value::Fixed(v)) => Some(Param::MixVol {
                 bus: u8::try_from(frame.index / 64).ok()?,
                 ch: frame.index % 64,
-                value: *v,
+                gain: *v,
             }),
-            (PROP_MAIN_VOL, Value::Fixed(v)) => Some(Param::MainVol { value: *v }),
+            (PROP_MAIN_VOL, Value::Fixed(v)) => Some(Param::MainVol { db: *v }),
             (PROP_TALKBACK, Value::U8(v)) => Some(Param::Talkback { on: *v != 0 }),
             _ => None,
         }
@@ -176,7 +176,7 @@ async fn engine_param_reaches_the_device() {
         .send(Param::MixVol {
             bus: 2,
             ch: 5,
-            value: 0.5,
+            gain: 0.5,
         })
         .await
         .expect("send");
@@ -210,17 +210,14 @@ async fn device_frame_becomes_changed_event() {
     let frame = Frame {
         prop_id: PROP_MAIN_VOL,
         index: 0,
-        value: Value::Fixed(0.25),
+        value: Value::Fixed(-6.0),
     };
     other
         .send(Message::Binary(frame.encode().expect("encode")))
         .await
         .expect("send");
     let ev = h.wait_for(|e| matches!(e, DeviceEvent::Changed(_))).await;
-    assert_eq!(
-        ev,
-        DeviceEvent::Changed(vec![Param::MainVol { value: 0.25 }])
-    );
+    assert_eq!(ev, DeviceEvent::Changed(vec![Param::MainVol { db: -6.0 }]));
     h.stop().await;
 }
 
@@ -250,7 +247,7 @@ async fn rapid_fader_updates_are_throttled_and_final_value_wins() {
             .send(Param::MixVol {
                 bus: 0,
                 ch: 3,
-                value: f64::from(i) / 200.0,
+                gain: f64::from(i) / 200.0,
             })
             .await
             .expect("send");
@@ -313,7 +310,7 @@ async fn reconnects_after_drop_and_survives_garbage_frames() {
         let valid = Frame {
             prop_id: PROP_MAIN_VOL,
             index: 0,
-            value: Value::Fixed(0.75),
+            value: Value::Fixed(-12.0),
         }
         .encode()
         .expect("encode");
@@ -338,10 +335,7 @@ async fn reconnects_after_drop_and_survives_garbage_frames() {
     h.wait_for(|e| matches!(e, DeviceEvent::Status(ConnectionStatus::Online)))
         .await;
     let ev = h.wait_for(|e| matches!(e, DeviceEvent::Changed(_))).await;
-    assert_eq!(
-        ev,
-        DeviceEvent::Changed(vec![Param::MainVol { value: 0.75 }])
-    );
+    assert_eq!(ev, DeviceEvent::Changed(vec![Param::MainVol { db: -12.0 }]));
     h.stop().await;
     server.abort();
 }

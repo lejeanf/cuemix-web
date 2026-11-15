@@ -4,12 +4,18 @@
 //! they are converted to the 0-based indices of [`crate::state`] here and
 //! nowhere else. Boolean controls accept `int`, `float` (≥ 0.5 = on) and the
 //! OSC `T`/`F` types; feedback is always sent as `int` 0/1. Continuous
-//! controls accept `float`, `double` or `int`; feedback is `float`.
+//! controls accept `float`, `double` or `int` (NaN/inf rejected); feedback is `float`.
+//!
+//! Volumes: the engine works in MOTU native units (mix fader = linear gain,
+//! main/phones = whole dB). OSC keeps the HANDOFF `0..1` fader position and
+//! converts here with [`fader`]: mix faders `0.75` = 0 dB / `1.0` = +12 dB;
+//! trims (main, phones) `1.0` = 0 dB, same taper, floor `TRIM_MIN_DB`.
 
 use rosc::{OscMessage, OscType};
 use thiserror::Error;
 
-use crate::state::{Command, Param};
+use crate::motu::fader;
+use crate::state::{Command, Param, TRIM_MIN_DB};
 
 #[derive(Debug, Error, PartialEq)]
 pub enum OscError {
@@ -44,8 +50,8 @@ fn single<'a>(addr: &str, args: &'a [OscType]) -> Result<&'a OscType, OscError> 
 
 fn arg_f64(addr: &str, args: &[OscType]) -> Result<f64, OscError> {
     match single(addr, args)? {
-        OscType::Float(f) => Ok(f64::from(*f)),
-        OscType::Double(d) => Ok(*d),
+        OscType::Float(f) if f.is_finite() => Ok(f64::from(*f)),
+        OscType::Double(d) if d.is_finite() => Ok(*d),
         OscType::Int(i) => Ok(f64::from(*i)),
         _ => Err(OscError::ArgType(addr.to_owned())),
     }
@@ -70,7 +76,7 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
 
     let param = match segs.as_slice() {
         ["mix", "main", "vol"] => Param::MainVol {
-            value: arg_f64(addr, args)?,
+            db: fader::trim_pos_to_db(arg_f64(addr, args)?, TRIM_MIN_DB),
         },
         ["mix", bus, "ch", ch, leaf] => {
             let (bus, ch) = (index_u8(bus, addr)?, index_u16(ch, addr)?);
@@ -78,7 +84,7 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
                 "vol" => Param::MixVol {
                     bus,
                     ch,
-                    value: arg_f64(addr, args)?,
+                    gain: fader::pos_to_gain(arg_f64(addr, args)?),
                 },
                 "pan" => Param::MixPan {
                     bus,
@@ -142,7 +148,7 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
             on: arg_bool(addr, args)?,
         },
         ["controlroom", "phones", "vol"] => Param::PhonesVol {
-            value: arg_f64(addr, args)?,
+            db: fader::trim_pos_to_db(arg_f64(addr, args)?, TRIM_MIN_DB),
         },
         ["preset", "load"] => match single(addr, args)? {
             OscType::String(name) => return Ok(Command::LoadPreset { name: name.clone() }),
@@ -160,9 +166,10 @@ pub fn feedback(param: &Param) -> OscMessage {
     // OSC floats are 32-bit; precision loss is expected and harmless here.
     let f = |v: f64| OscType::Float(v as f32);
     let (addr, arg) = match *param {
-        Param::MixVol { bus, ch, value } => {
-            (format!("/mix/{}/ch/{}/vol", n(bus.into()), n(ch)), f(value))
-        }
+        Param::MixVol { bus, ch, gain } => (
+            format!("/mix/{}/ch/{}/vol", n(bus.into()), n(ch)),
+            f(fader::gain_to_pos(gain)),
+        ),
         Param::MixPan { bus, ch, value } => {
             (format!("/mix/{}/ch/{}/pan", n(bus.into()), n(ch)), f(value))
         }
@@ -172,7 +179,7 @@ pub fn feedback(param: &Param) -> OscMessage {
         Param::MixSolo { bus, ch, on } => {
             (format!("/mix/{}/ch/{}/solo", n(bus.into()), n(ch)), b(on))
         }
-        Param::MainVol { value } => ("/mix/main/vol".to_owned(), f(value)),
+        Param::MainVol { db } => ("/mix/main/vol".to_owned(), f(fader::trim_db_to_pos(db))),
         Param::PreampGain { ch, db } => (format!("/preamp/{}/gain", n(ch)), f(db)),
         Param::Phantom { ch, on } => (format!("/preamp/{}/48v", n(ch)), b(on)),
         Param::Pad { ch, on } => (format!("/preamp/{}/pad", n(ch)), b(on)),
@@ -185,7 +192,10 @@ pub fn feedback(param: &Param) -> OscMessage {
         Param::Mono { on } => ("/controlroom/mono".to_owned(), b(on)),
         Param::SpeakerB { on } => ("/controlroom/ab".to_owned(), b(on)),
         Param::Talkback { on } => ("/controlroom/talkback".to_owned(), b(on)),
-        Param::PhonesVol { value } => ("/controlroom/phones/vol".to_owned(), f(value)),
+        Param::PhonesVol { db } => (
+            "/controlroom/phones/vol".to_owned(),
+            f(fader::trim_db_to_pos(db)),
+        ),
     };
     OscMessage {
         addr,
@@ -212,7 +222,7 @@ mod tests {
                 Param::MixVol {
                     bus: 0,
                     ch: 2,
-                    value: 0.75,
+                    gain: 1.0,
                 },
             ),
             (
@@ -240,8 +250,8 @@ mod tests {
                 },
             ),
             (
-                msg("/mix/main/vol", OscType::Float(0.5)),
-                Param::MainVol { value: 0.5 },
+                msg("/mix/main/vol", OscType::Float(1.0)),
+                Param::MainVol { db: 0.0 },
             ),
             (
                 msg("/preamp/1/gain", OscType::Float(30.0)),
@@ -305,7 +315,7 @@ mod tests {
             Param::MixVol {
                 bus: 6,
                 ch: 17,
-                value: 0.25,
+                gain: 1.0,
             },
             Param::MixMute {
                 bus: 0,
@@ -319,11 +329,59 @@ mod tests {
             },
             Param::PreampGain { ch: 1, db: 42.0 },
             Param::SpeakerB { on: true },
-            Param::PhonesVol { value: 0.5 },
+            Param::PhonesVol { db: 0.0 },
         ];
         for p in params {
             assert_eq!(parse(&feedback(&p)), Ok(Command::Set(p)));
         }
+    }
+
+    #[test]
+    fn volume_edges_use_the_fader_laws() {
+        let vol = |p: f32| parse(&msg("/mix/1/ch/1/vol", OscType::Float(p)));
+        assert_eq!(
+            vol(0.0),
+            Ok(Command::Set(Param::MixVol {
+                bus: 0,
+                ch: 0,
+                gain: 0.0
+            }))
+        );
+        let Ok(Command::Set(Param::MixVol { gain, .. })) = vol(1.0) else {
+            panic!()
+        };
+        assert!((gain - fader::max_gain()).abs() < 1e-9, "+12 dB at the top");
+        let main = |p: f32| parse(&msg("/mix/main/vol", OscType::Float(p)));
+        assert_eq!(
+            main(0.0),
+            Ok(Command::Set(Param::MainVol { db: TRIM_MIN_DB }))
+        );
+        let Ok(Command::Set(Param::MainVol { db })) = main(0.5) else {
+            panic!()
+        };
+        assert!((-30.0..-25.0).contains(&db), "{db}");
+        // Feedback: positions round-trip within f32 precision.
+        for db in [-60.0, -24.0, -6.0, 0.0] {
+            let back = parse(&feedback(&Param::PhonesVol { db }));
+            let Ok(Command::Set(Param::PhonesVol { db: got })) = back else {
+                panic!()
+            };
+            assert!((got - db).abs() < 1e-3, "{db} -> {got}");
+        }
+        for gain in [0.1, 0.5, 2.0] {
+            let back = parse(&feedback(&Param::MixVol {
+                bus: 0,
+                ch: 0,
+                gain,
+            }));
+            let Ok(Command::Set(Param::MixVol { gain: got, .. })) = back else {
+                panic!()
+            };
+            assert!((got - gain).abs() / gain < 1e-5, "{gain} -> {got}");
+        }
+        // NaN / inf are rejected, never turned into silence.
+        assert!(matches!(vol(f32::NAN), Err(OscError::ArgType(_))));
+        assert!(matches!(main(f32::INFINITY), Err(OscError::ArgType(_))));
     }
 
     #[test]

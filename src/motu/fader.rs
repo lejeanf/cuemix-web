@@ -79,6 +79,18 @@ pub fn db_to_pos(db: f64) -> f64 {
     (UNITY_POS * 10f64.powf(d / (20.0 * exponent()))).clamp(0.0, 1.0)
 }
 
+/// Trim taper (main / headphones): same curve as the mix faders but with
+/// `1.0` = 0 dB (trims have no boost). Never returns less than `floor_db`
+/// (so `0.0` maps to the hardware floor, not `-inf`).
+pub fn trim_pos_to_db(pos: f64, floor_db: f64) -> f64 {
+    pos_to_db(sanitize_pos(pos) * UNITY_POS).max(floor_db)
+}
+
+/// Inverse of [`trim_pos_to_db`]: dB (≤ 0) → position `0.0..=1.0`.
+pub fn trim_db_to_pos(db: f64) -> f64 {
+    (db_to_pos(db.min(0.0)) / UNITY_POS).clamp(0.0, 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +143,21 @@ mod tests {
         assert_eq!(db_to_pos(f64::NEG_INFINITY), 0.0);
         assert_eq!(db_to_pos(f64::NAN), 0.0);
         assert!((db_to_pos(40.0) - 1.0).abs() < EPS);
+    }
+
+    #[test]
+    fn trim_law() {
+        assert!(trim_pos_to_db(1.0, -100.0).abs() < EPS);
+        assert_eq!(trim_pos_to_db(0.0, -100.0), -100.0);
+        assert_eq!(trim_pos_to_db(f64::NAN, -100.0), -100.0);
+        assert!((trim_db_to_pos(0.0) - 1.0).abs() < EPS);
+        assert_eq!(trim_db_to_pos(f64::NEG_INFINITY), 0.0);
+        assert!((trim_db_to_pos(12.0) - 1.0).abs() < EPS, "no boost");
+        for i in 1..=100 {
+            let p = f64::from(i) / 100.0;
+            let db = trim_pos_to_db(p, -1000.0);
+            assert!((trim_db_to_pos(db) - p).abs() < 1e-9, "p={p}");
+        }
     }
 
     #[test]

@@ -165,7 +165,7 @@ async fn set_is_broadcast_to_others_but_not_echoed() -> Result<(), Box<dyn std::
     drain_initial(&mut b).await?;
 
     a.send(Message::text(
-        r#"{"cmd":"set","param":"mix_vol","bus":0,"ch":3,"value":0.5}"#,
+        r#"{"cmd":"set","param":"mix_vol","bus":0,"ch":3,"gain":0.5}"#,
     ))
     .await?;
     let ev = next_json(&mut b).await?;
