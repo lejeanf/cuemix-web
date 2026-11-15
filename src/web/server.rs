@@ -8,8 +8,13 @@
 //! - every other path serves the embedded `frontend/dist/` bundle, falling
 //!   back to `index.html` for client-side routes. Only embedded names are
 //!   ever served, so path traversal is impossible.
-//! - the client IP used in logs is the peer address, or the first
-//!   `X-Forwarded-For` entry when `web.trust_forwarded_headers = true`.
+//! - the client IP used in logs is the peer address, or the rightmost
+//!   `X-Forwarded-For` entry (appended by the trusted proxy) when
+//!   `web.trust_forwarded_headers = true`.
+//! - `/ws` rejects cross-site browser connections (403): an `Origin` header
+//!   must match the request host or an entry of `web.allowed_origins`.
+//! - every WebSocket write has a [`SEND_TIMEOUT`]; a client that stops
+//!   reading is disconnected so it can never pin memory or stall others.
 
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
@@ -21,6 +26,7 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use futures_util::{Sink, SinkExt};
 use rust_embed::RustEmbed;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::Instant;
@@ -38,20 +44,25 @@ struct Assets;
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 /// Keep-alive ping period.
 const PING_EVERY: Duration = Duration::from_secs(20);
+/// Maximum time a single WebSocket write may take before the client is dropped.
+const SEND_TIMEOUT: Duration = Duration::from_secs(2);
 /// Minimum spacing between two forwarded `Meters` events (60 Hz).
 const METER_MIN_INTERVAL: Duration = Duration::from_micros(16_667);
 
 /// Web server settings.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WebConfig {
-    /// Trust `X-Forwarded-For` for the client IP (behind HAProxy / pfSense).
+    /// Trust `X-Forwarded-For` / `X-Forwarded-Host` (behind HAProxy / pfSense).
     pub trust_forwarded_headers: bool,
+    /// Extra origins (`scheme://host[:port]`) allowed to open `/ws`.
+    pub allowed_origins: Vec<String>,
 }
 
 impl WebConfig {
     pub fn from_config(cfg: &Config) -> Self {
         Self {
             trust_forwarded_headers: cfg.web.trust_forwarded_headers,
+            allowed_origins: cfg.web.allowed_origins.clone(),
         }
     }
 }
@@ -138,7 +149,7 @@ fn client_ip(peer: SocketAddr, headers: &HeaderMap, trust: bool) -> IpAddr {
         if let Some(ip) = headers
             .get("x-forwarded-for")
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split(',').next())
+            .and_then(|v| v.rsplit(',').next())
             .and_then(|s| s.trim().parse::<IpAddr>().ok())
         {
             return ip;
@@ -147,12 +158,92 @@ fn client_ip(peer: SocketAddr, headers: &HeaderMap, trust: bool) -> IpAddr {
     peer.ip()
 }
 
+/// Canonical `(scheme, host, port)` of a strict `scheme://host[:port]` origin.
+fn parse_origin(raw: &str) -> Option<(String, String, u16)> {
+    let (scheme, rest) = raw.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let default_port = match scheme.as_str() {
+        "http" => 80,
+        "https" => 443,
+        _ => return None,
+    };
+    if rest.is_empty()
+        || rest
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || "/?#@\\".contains(c))
+    {
+        return None;
+    }
+    let (host, port) = if let Some(v6) = rest.strip_prefix('[') {
+        let (addr, tail) = v6.split_once(']')?;
+        let port = match tail {
+            "" => default_port,
+            t => t.strip_prefix(':')?.parse().ok()?,
+        };
+        (format!("[{}]", addr.to_ascii_lowercase()), port)
+    } else {
+        match rest.split_once(':') {
+            Some((h, p)) => (h.to_ascii_lowercase(), p.parse().ok()?),
+            None => (rest.to_ascii_lowercase(), default_port),
+        }
+    };
+    if host.is_empty() || host == "[]" {
+        return None;
+    }
+    Some((scheme, host, port))
+}
+
+/// Whether a WebSocket upgrade with these headers may proceed.
+fn origin_allowed(headers: &HeaderMap, cfg: &WebConfig) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN) else {
+        return true; // non-browser client
+    };
+    let Some(parsed) = origin.to_str().ok().and_then(parse_origin) else {
+        return false;
+    };
+    let (scheme, host, port) = &parsed;
+    let request_host = if cfg.trust_forwarded_headers {
+        headers
+            .get("x-forwarded-host")
+            .or_else(|| headers.get(header::HOST))
+    } else {
+        headers.get(header::HOST)
+    }
+    .and_then(|v| v.to_str().ok())
+    .map(|h| {
+        // Only the rightmost forwarded host (appended by our proxy) counts.
+        h.rsplit(',')
+            .next()
+            .unwrap_or(h)
+            .trim()
+            .to_ascii_lowercase()
+    });
+    if let Some(h) = request_host {
+        let default_port = matches!((scheme.as_str(), *port), ("http", 80) | ("https", 443));
+        if h == format!("{host}:{port}") || (default_port && h == *host) {
+            return true;
+        }
+    }
+    cfg.allowed_origins
+        .iter()
+        .filter_map(|o| parse_origin(o))
+        .any(|allowed| allowed == parsed)
+}
+
 async fn ws_handler(
     State(app): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
+    if !origin_allowed(&headers, &app.cfg) {
+        let origin = headers
+            .get(header::ORIGIN)
+            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+            .unwrap_or_default();
+        tracing::info!(%origin, peer = %peer.ip(), "rejected websocket: origin not allowed");
+        return StatusCode::FORBIDDEN.into_response();
+    }
     let ip = client_ip(peer, &headers, app.cfg.trust_forwarded_headers);
     ws.max_message_size(MAX_MESSAGE_BYTES)
         .max_frame_size(MAX_MESSAGE_BYTES)
@@ -164,13 +255,29 @@ async fn ws_handler(
         })
 }
 
-/// Send one event as a JSON text frame. `Err` means the socket is gone.
-async fn send_event(socket: &mut WebSocket, event: &ServerEvent) -> Result<(), ()> {
+/// A WebSocket write failed or timed out; the session must end.
+#[derive(Debug, PartialEq, Eq)]
+struct SendFailed;
+
+/// Send one message, giving up after `limit` (client not reading).
+async fn send_msg<S>(sink: &mut S, msg: Message, limit: Duration) -> Result<(), SendFailed>
+where
+    S: Sink<Message> + Unpin,
+{
+    match tokio::time::timeout(limit, sink.send(msg)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err(SendFailed),
+        Err(_) => {
+            tracing::info!("websocket send timed out, closing slow client");
+            Err(SendFailed)
+        }
+    }
+}
+
+/// Send one event as a JSON text frame.
+async fn send_event(socket: &mut WebSocket, event: &ServerEvent) -> Result<(), SendFailed> {
     match serde_json::to_string(event) {
-        Ok(text) => socket
-            .send(Message::Text(text.into()))
-            .await
-            .map_err(|_| ()),
+        Ok(text) => send_msg(socket, Message::Text(text.into()), SEND_TIMEOUT).await,
         Err(e) => {
             tracing::error!(error = %e, "cannot serialise event");
             Ok(())
@@ -178,8 +285,8 @@ async fn send_event(socket: &mut WebSocket, event: &ServerEvent) -> Result<(), (
     }
 }
 
-async fn send_initial(socket: &mut WebSocket, engine: &EngineHandle) -> Result<(), ()> {
-    let events = engine.initial_events().await.map_err(|_| ())?;
+async fn send_initial(socket: &mut WebSocket, engine: &EngineHandle) -> Result<(), SendFailed> {
+    let events = engine.initial_events().await.map_err(|_| SendFailed)?;
     for ev in &events {
         send_event(socket, ev).await?;
     }
@@ -248,18 +355,17 @@ async fn session(mut socket: WebSocket, engine: EngineHandle, me: Origin) {
                 Err(RecvError::Closed) => break,
             },
             _ = ping.tick() => {
-                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                if send_msg(&mut socket, Message::Ping(Vec::new().into()), SEND_TIMEOUT).await.is_err() {
                     break;
                 }
             }
         }
     }
-    let _ = socket
-        .send(Message::Close(Some(CloseFrame {
-            code: 1000,
-            reason: "bye".into(),
-        })))
-        .await;
+    let close = Message::Close(Some(CloseFrame {
+        code: 1000,
+        reason: "bye".into(),
+    }));
+    let _ = send_msg(&mut socket, close, SEND_TIMEOUT).await;
 }
 
 #[cfg(test)]
@@ -272,11 +378,108 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert(
             "x-forwarded-for",
-            HeaderValue::from_static("192.168.1.9, 10.0.0.1"),
+            HeaderValue::from_static("192.168.1.9, 10.0.0.7"),
         );
-        assert_eq!(client_ip(peer, &h, true).to_string(), "192.168.1.9");
+        assert_eq!(client_ip(peer, &h, true).to_string(), "10.0.0.7");
         assert_eq!(client_ip(peer, &h, false).to_string(), "10.0.0.1");
         h.insert("x-forwarded-for", HeaderValue::from_static("garbage"));
         assert_eq!(client_ip(peer, &h, true).to_string(), "10.0.0.1");
+    }
+
+    fn hm(pairs: &[(&'static str, &'static str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(*k, HeaderValue::from_static(v));
+        }
+        h
+    }
+
+    #[test]
+    fn origin_rules() {
+        let cfg = WebConfig {
+            trust_forwarded_headers: false,
+            allowed_origins: vec!["https://Mixer.Example.com".into()],
+        };
+        let ok = |p: &[(&'static str, &'static str)]| origin_allowed(&hm(p), &cfg);
+        assert!(ok(&[("host", "pi.local:8080")]));
+        assert!(ok(&[
+            ("host", "pi.local:8080"),
+            ("origin", "http://pi.local:8080")
+        ]));
+        assert!(ok(&[
+            ("host", "PI.local"),
+            ("origin", "http://pi.LOCAL:80")
+        ]));
+        assert!(!ok(&[
+            ("host", "pi.local:8080"),
+            ("origin", "http://evil.example")
+        ]));
+        assert!(!ok(&[
+            ("host", "pi.local:8080"),
+            ("origin", "http://pi.local")
+        ]));
+        assert!(ok(&[
+            ("host", "x"),
+            ("origin", "https://mixer.example.com")
+        ]));
+        assert!(!ok(&[
+            ("host", "x"),
+            ("origin", "http://mixer.example.com")
+        ]));
+        assert!(!ok(&[("host", "x"), ("origin", "null")]));
+        assert!(!ok(&[("host", "x"), ("origin", "http://x/path")]));
+        assert!(!ok(&[("host", "x"), ("origin", "ftp://x")]));
+        assert!(!ok(&[("host", "x"), ("origin", "http://")]));
+        // X-Forwarded-Host is ignored unless trusted.
+        let fwd = [
+            ("host", "internal"),
+            ("x-forwarded-host", "pub.example"),
+            ("origin", "https://pub.example"),
+        ];
+        assert!(!ok(&fwd));
+        let trusted = WebConfig {
+            trust_forwarded_headers: true,
+            ..cfg
+        };
+        assert!(origin_allowed(&hm(&fwd), &trusted));
+    }
+
+    /// A sink that never accepts anything, like a client that never reads.
+    struct Stalled;
+    impl Sink<Message> for Stalled {
+        type Error = ();
+        fn poll_ready(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), ()>> {
+            std::task::Poll::Pending
+        }
+        fn start_send(self: std::pin::Pin<&mut Self>, _: Message) -> Result<(), ()> {
+            Ok(())
+        }
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), ()>> {
+            std::task::Poll::Pending
+        }
+        fn poll_close(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), ()>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    #[tokio::test]
+    async fn send_to_stalled_sink_times_out() {
+        let mut sink = Stalled;
+        let r = send_msg(
+            &mut sink,
+            Message::Text("x".into()),
+            Duration::from_millis(100),
+        )
+        .await;
+        assert_eq!(r, Err(SendFailed));
     }
 }

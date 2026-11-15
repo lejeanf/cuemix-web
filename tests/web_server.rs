@@ -49,6 +49,7 @@ async fn harness(tag: &str) -> Result<Harness, Box<dyn std::error::Error>> {
         handle,
         WebConfig {
             trust_forwarded_headers: true,
+            allowed_origins: vec!["http://mixer.example.com:8443".to_owned()],
         },
         shutdown,
     ));
@@ -63,6 +64,24 @@ async fn harness(tag: &str) -> Result<Harness, Box<dyn std::error::Error>> {
 async fn connect(h: &Harness) -> Result<Ws, Box<dyn std::error::Error>> {
     let (ws, _) = tokio::time::timeout(T, connect_async(format!("ws://{}/ws", h.addr))).await??;
     Ok(ws)
+}
+
+/// Connect with an optional `Origin` header; returns the handshake status.
+async fn connect_with_origin(
+    h: &Harness,
+    origin: Option<&str>,
+) -> Result<u16, Box<dyn std::error::Error>> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::Error as WsErr;
+    let mut req = format!("ws://{}/ws", h.addr).into_client_request()?;
+    if let Some(o) = origin {
+        req.headers_mut().insert("origin", o.parse()?);
+    }
+    match tokio::time::timeout(T, connect_async(req)).await? {
+        Ok((_, resp)) => Ok(resp.status().as_u16()),
+        Err(WsErr::Http(resp)) => Ok(resp.status().as_u16()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Next JSON text frame (pings etc. skipped).
@@ -280,5 +299,31 @@ async fn path_traversal_never_serves_files() -> Result<(), Box<dyn std::error::E
             r.status
         );
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn ws_origin_policy() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("origin").await?;
+    let same = format!("http://{}", h.addr);
+    assert_eq!(connect_with_origin(&h, None).await?, 101);
+    assert_eq!(connect_with_origin(&h, Some(&same)).await?, 101);
+    assert_eq!(
+        connect_with_origin(&h, Some("http://mixer.example.com:8443")).await?,
+        101
+    );
+    assert_eq!(
+        connect_with_origin(&h, Some("http://evil.example")).await?,
+        403
+    );
+    assert_eq!(
+        connect_with_origin(&h, Some("http://mixer.example.com")).await?,
+        403
+    );
+    assert_eq!(connect_with_origin(&h, Some("null")).await?, 403);
+    assert_eq!(
+        connect_with_origin(&h, Some("http://127.0.0.1/evil")).await?,
+        403
+    );
     Ok(())
 }
