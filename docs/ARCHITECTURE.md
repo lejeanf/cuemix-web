@@ -3,243 +3,259 @@
 > Document **vivant** et source de vérité technique. Toute modification structurelle
 > doit mettre à jour ce fichier **et** `README.md` dans la même PR (gouvernance
 > HANDOFF §8.1). Spécification d'origine : [`HANDOFF.md`](HANDOFF.md) (v12.0.0).
+> Protocole matériel : [`MOTU-PROTOCOL.md`](MOTU-PROTOCOL.md).
 
 | | |
 |---|---|
-| Version du contrat | `0.1.0` (Phase 1 — Fondations & Contrats) |
+| Version du contrat | `0.2.0` (Phase 2 — moteur & passerelles) |
 | MSRV | Rust `1.80`, édition 2021 |
-| Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` |
+| Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` (embarqué via `rust-embed`) |
 
 ---
 
 ## 1. Vue d'ensemble
 
 ```text
- Navigateurs (Web UI)          Contrôleurs OSC (TouchOSC, QLab…)
-        │  JSON / WebSocket /ws          │  UDP :8000 (1-based)
-        ▼                                ▼
- ┌──────────────┐               ┌────────────────┐
- │ web::server  │               │  osc::bridge   │
- │ (axum)       │               │  osc::address  │
- └──────┬───────┘               └───────┬────────┘
-        │   Command ──────────────►     │
-        │   ◄────────────── ServerEvent │
-        ▼                               ▼
- ┌─────────────────────────────────────────────┐
- │ state::MotuState  (cœur, source de vérité)  │
- │  apply(Param) → Option<Param effectif>      │
- └──────────────────────┬──────────────────────┘
-                        │ Param → Frame (throttle 40 Hz / param)
-                        ▼
- ┌─────────────────────────────────────────────┐
- │ motu::client  (tokio-tungstenite)           │
- │ motu::protocol (BE, 8.24) · motu::fader     │
- │ motu::discovery (if-addrs, mDNS, ARP+probe) │
- └──────────────────────┬──────────────────────┘
-                        │ ws://<169.254.x.x>:1280 (binaire)
-                        ▼
-              MOTU UltraLite-mk5 (USB CDC-Ethernet)
+ Navigateurs (Web UI)                    Contrôleurs OSC (TouchOSC, QLab…)
+        │  JSON / WebSocket /ws  (unités natives)   │  UDP :8000 (1-based, faders 0..1)
+        ▼                                           ▼
+ ┌──────────────────┐                     ┌────────────────────┐
+ │ web::server      │                     │ osc::bridge        │
+ │ axum + rust-embed│                     │ osc::address (0..1 ⇄ natif) │
+ └────────┬─────────┘                     └─────────┬──────────┘
+          │ EngineHandle::command(Origin, Command)  │
+          │ ◄──────── broadcast<Envelope{origin,target,event}>
+          ▼                                         ▼
+ ┌──────────────────────────────────────────────────────────────┐
+ │ engine (acteur, seul propriétaire de MotuState)              │
+ │  apply(Param) → Param effectif → broadcast + DeviceLink      │
+ │  presets (JSON) · labels.json · indicateur « ● Modifié »     │
+ └──────────────────────────┬───────────────────────────────────┘
+          DeviceLink.commands │ ▲ DeviceLink.events (Synced/Changed/Meters/Status)
+                              ▼ │
+ ┌──────────────────────────────────────────────────────────────┐
+ │ motu::client  — reconnexion, sync Option A, mode démo        │
+ │ motu::throttle (40 Hz/param) · motu::props (table prop_id)   │
+ │ motu::protocol (BE, 8.24) · motu::discovery (IP, mDNS, ARP)  │
+ └──────────────────────────┬───────────────────────────────────┘
+                            │ ws://<169.254.x.x>:1280 (binaire)
+                            ▼
+                MOTU UltraLite-mk5 (USB CDC-Ethernet)
 ```
 
 Principe : **un seul type de changement, [`Param`](../src/state.rs)**, circule dans les deux
-sens. Un client demande un `Param` ; le cœur l'applique, le borne (clamp) et diffuse le
-`Param` **effectif** à *tous* les clients Web et OSC (feedback bidirectionnel). JSON et OSC
-ne sont que deux encodages de `Param`.
+sens. Un client demande un `Param` ; l'`engine` l'applique, le borne et diffuse le `Param`
+**effectif** à tous les clients (feedback bidirectionnel) et l'envoie au matériel. Les
+changements venant du matériel sont appliqués et diffusés, **jamais renvoyés** au matériel.
 
 ## 2. Carte des modules
 
-| Fichier | Rôle | Statut | Agent |
-|---|---|---|---|
-| `src/lib.rs` | Racine de la bibliothèque, lints `deny(unwrap_used, expect_used)` hors tests | ✅ P1 | supervisor |
-| `src/main.rs` | CLI (`--config`), logs `tracing`, orchestration Tokio, arrêt propre | ✅ P1 (squelette) | bridges |
-| `src/config.rs` | `config.toml` + surcharges `CUEMIX_*` | ✅ P1 | bridges |
-| `src/state.rs` | `MotuState`, `Topology`, `Param`, `Command`, `ServerEvent`, `Preset`, `Labels` | ✅ P1 (contrat) | motu-protocol |
-| `src/motu/fader.rs` | Loi logarithmique unifiée `0..1` ⇄ gain/dB | ✅ P1 | motu-protocol |
-| `src/motu/protocol.rs` | Trames Big-Endian, virgule fixe `8.24`, `Value`/`ValueKind` | ✅ P1 (codec) — table `prop_id` en P2 | motu-protocol |
-| `src/motu/discovery.rs` | Interfaces lien-local (`if-addrs`) ✅ ; mDNS + ARP/sonde en P2 | 🟡 | motu-protocol |
-| `src/motu/client.rs` | `ConnectionStatus` ✅ ; client WS, reconnexion, throttling, mode démo en P2 | 🟡 | motu-protocol |
-| `src/osc/address.rs` | Table OSC ⇄ `Command`/`Param` (1-based) | ✅ P1 | bridges |
-| `src/osc/bridge.rs` | Serveur/client UDP `rosc` | ⏳ P2 | bridges |
-| `src/web/server.rs` | Axum, `/ws` JSON, assets `rust-embed` | ⏳ P2 | bridges |
-| `tests/support/` + `tests/mock_motu.rs` | Serveur Mock WebSocket MOTU + tests d'intégration | ✅ P1 | qa-security |
+| Fichier | Rôle | Statut |
+|---|---|---|
+| `src/lib.rs` | Racine, lints `deny(unwrap_used, expect_used)` hors tests | ✅ |
+| `src/main.rs` | CLI, logs, orchestration (`JoinSet`), arrêt propre Ctrl-C/SIGTERM (3 s de grâce) | ✅ |
+| `src/config.rs` | `config.toml` + surcharges `CUEMIX_*` | ✅ |
+| `src/state.rs` | `MotuState`, `Topology`, `Param`, `Command`, `ServerEvent`, `diff`, `all_params` | ✅ |
+| `src/engine.rs` | Acteur : `EngineHandle`, `Envelope{Origin,Target}`, `DeviceLink`, `Shutdown` | ✅ |
+| `src/presets.rs` | Présets (`<presets_dir>/<nom>.json`), `labels.json`, écritures atomiques | ✅ |
+| `src/motu/fader.rs` | Lois de fader `0..1` (mix et trims) — utilisées **uniquement aux bords** | ✅ |
+| `src/motu/protocol.rs` | Trames BE, `8.24`, `Value`/`ValueKind` | ✅ |
+| `src/motu/props.rs` | Table `prop_id` (65 entrées, `verified: false`), `encode`/`decode` | 🟡 partiel (§8) |
+| `src/motu/throttle.rs` | Limiteur par paramètre, dernière valeur garantie | ✅ |
+| `src/motu/client.rs` | Client WS, `PropCodec`, sync Option A, backoff 1→10 s, mode démo | ✅ |
+| `src/motu/discovery.rs` | IP explicite → mDNS (provisoire) → ARP + sonde TCP | 🟡 (§8) |
+| `src/osc/address.rs` | Table OSC ⇄ `Command`, conversions 0..1 ⇄ unités natives | ✅ |
+| `src/osc/bridge.rs` | UDP `rosc`, pairs (TTL 10 min, max 64), bundles ≤ 8 KiB | ✅ |
+| `src/web/server.rs` | Axum : `/ws`, `/api/health`, SPA embarquée, `X-Forwarded-For` | ✅ |
+| `src/zeroconf.rs` | Annonce mDNS `http://<mdns_hostname>.local:<port>` | ✅ |
+| `tests/` | Mock MOTU + intégration `mock_motu`, `motu_client`, `osc_bridge`, `web_server` | ✅ |
 
-> Écart assumé vs le prompt de lancement : le code Rust vit à la **racine** (`Cargo.toml`, `src/`)
-> conformément à HANDOFF §7 (qui fait foi), et non dans un dossier `backend/`.
-
-Dépendances ajoutées **au premier usage** (pas de dépendance morte dans le manifeste) :
-`axum` (ws), `rust-embed` et `mdns-sd` arrivent en Phase 2 ; `tokio-tungstenite` et
-`futures-util` sont en `[dev-dependencies]` (mock) et passeront en `[dependencies]` avec
-`motu::client`.
+Le code Rust vit à la **racine** (`Cargo.toml`, `src/`), conformément à HANDOFF §7.
 
 ## 3. Contrats
 
-### 3.1 Loi de fader unifiée (`motu::fader`)
+### 3.1 Unités : natives au cœur, `0..1` aux bords (décision D8)
 
-Position normalisée `p ∈ [0, 1]`, partagée par le Web et l'OSC :
+L'état, les présets et le JSON WebSocket portent les **unités natives de la MOTU** :
+
+| Contrôle | Champ | Unité / plage | Fil MOTU |
+|---|---|---|---|
+| Fader de mix | `gain` | gain linéaire `0.0..=MIX_GAIN_MAX` (3.98107 = +12 dB), `1.0` = 0 dB | `8.24` (Q4 : linéaire, à confirmer) |
+| Main / casque | `db` | dB entiers `-100..=0` | `U8` atténuation (0 = 0 dB, 100 = −100 dB) |
+| Gain préampli | `db` | dB entiers `0..=74` | `U8` |
+| Pan | `value` | `-1.0..=1.0` | non mappé (Q3) |
+
+La position de fader normalisée `0..1` n'existe **qu'aux bords** : OSC (`osc::address`) et le
+widget fader de l'UI (Phase 3, même loi portée en TypeScript).
 
 ```text
-gain(p) = (p / 0.75)^K          K = (12 / 20) / log10(1 / 0.75) ≈ 4.8024
-dB(p)   = 20 · K · log10(p / 0.75)
-p(gain) = 0.75 · gain^(1/K)
+Fader de mix :  gain(p) = (p / 0.75)^K      K = (12/20) / log10(1/0.75) ≈ 4.8024
+                p = 0 → −inf · 0.5 → −16.9 dB · 0.75 → 0 dB · 1.0 → +12 dB
+Trims       :  dB(p) = dB_mix(p · 0.75)    même courbe, 1.0 → 0 dB, plancher −100 dB
 ```
 
-| p | dB | gain linéaire |
-|---|---|---|
-| `0.0` | `-inf` | `0.0` |
-| `0.25` | ≈ `-45.8` | ≈ `0.005` |
-| `0.5` | ≈ `-16.9` | ≈ `0.143` |
-| `0.75` | `0.0` | `1.0` |
-| `1.0` | `+12.0` | `3.98107` |
+Fonctions totales (NaN → silence, hors plage → borné) ; **l'OSC rejette NaN/inf** avant
+conversion (une valeur invalide ne coupe jamais le son).
 
-Loi de puissance pure : continue, strictement monotone, exactement inversible, les trois
-points d'ancrage HANDOFF sont exacts. Fonctions **totales** (NaN → silence, hors plage →
-borné) ; le rejet des valeurs non finies se fait à la frontière (`MotuState::apply`).
+### 3.2 Virgule fixe signée `8.24` et trames
 
-### 3.2 Virgule fixe signée `8.24` (`motu::protocol`)
+* `raw = round(v · 2^24)` en `i32` BE ; plage `[-128, 128)` ; hors plage/non fini → `ProtocolError`.
+* Trame : `[prop_id: u16 BE][index: u16 BE][payload]`, payload selon `ValueKind`
+  (`Fixed` 4 o, `U32` 4 o, `U8` 1 o, `Str32` 32 o). Toute trame malformée → erreur, jamais de
+  panique (balayage exhaustif 0..64 octets testé).
+* ⚠ Les **fréquences d'EQ ne sont pas en `8.24`** mais en `Int32` Hz (Q1 résolu) ; `Int16` et
+  tableaux ne sont pas encore représentables par `ValueKind` (voir §8).
 
-* `raw = round(v · 2^24)` en `i32` Big-Endian ; `v = raw / 2^24` (exact).
-* Plage : `[-128.0, 127.99999994]`. **Hors plage ou non fini → `ProtocolError`**, jamais de
-  saturation silencieuse. (HANDOFF écrit `as i32` — troncature/saturation ; on arrondit au plus
-  proche, écart ≤ 1 LSB ≈ 6·10⁻⁸.)
-
-### 3.3 Trame binaire MOTU
-
-`[prop_id: u16 BE][index: u16 BE][payload]`, payload selon `ValueKind` :
-
-| `ValueKind` | Octets | Encodage |
-|---|---|---|
-| `Fixed` | 4 | `8.24` signé BE |
-| `U32` | 4 | `u32` BE |
-| `U8` | 1 | `u8` |
-| `Str32` | 32 | UTF-8, terminé/complété par NUL (≤ 31 octets utiles) |
-
-`Frame::decode(bytes, kind_of)` reçoit la table `prop_id → ValueKind` (Phase 2) ; toute trame
-tronquée, de longueur incorrecte ou non UTF-8 renvoie une erreur (testé par balayage
-exhaustif des longueurs 0..64) — **une trame malformée ne fait jamais paniquer le serveur**.
-
-### 3.4 État central (`state::MotuState`)
+### 3.3 État central (`state::MotuState`)
 
 ```text
 MotuState
-├── topology: Topology { mixes: 7, mixer_inputs: 18, preamps: 2, routing_inputs: 18, routing_outputs: 22 }  ⚠ provisoire (Q2)
-├── mixes[7]: Mix { name, channels[mixer_inputs]: { vol (0..1), pan (-1..1), mute, solo } }
-├── main: { vol }
-├── preamps[2]: { gain_db (0..60), phantom, pad, phase }
-├── channels[mixer_inputs]: ChannelDsp { eq: Equalizer { bypass, hpf, bands[4] }, comp, gate }
-├── reverb: { enabled, return_vol, time_s, predelay_ms, sends[mixer_inputs] }
-├── routing: { matrix[input][output]: bool }
-├── control_room: { dim, mono, speaker_b, talkback, phones_vol }
-└── clock: { sample_rate: "44100".."192000", source: internal|spdif|optical }
+├── topology: { mixes: 7, mixer_inputs: 32, preamps: 8, mic_inputs: 2, routing: 18 × 22 }  (démo ; Q2)
+├── mixes[7]: { name, channels[32]: { gain, pan, mute, solo } }
+├── main: { db }
+├── preamps[8]: { gain_db, phantom, pad, phase }   (+48V / Pad : seulement les 2 entrées micro)
+├── channels[32]: { eq: { bypass, hpf, bands[4] }, comp, gate }
+├── reverb: { enabled, return_vol, time_s, predelay_ms, sends[32] }   (non mappé)
+├── routing: { matrix[input][output]: bool }                          (non mappé)
+├── control_room: { dim, mono, speaker_b, talkback, phones_db }
+└── clock: { sample_rate, source }
 ```
 
-* **Indices 0-based** dans tout le serveur et en JSON. Seule la couche OSC convertit en 1-based.
-* `apply(&Param) -> Result<Option<Param>, StateError>` : rejette non-fini / index hors bornes
-  **sans muter l'état** ; borne les valeurs finies ; renvoie `None` si rien n'a changé
-  (pas de feedback inutile — idempotence).
-* `Preset { name, state }` ; `Preset::is_modified(&live)` alimente l'indicateur `● Modifié`.
-* `Labels { channels: { <index>: { name, color } } }` → `labels.json` (git-ignoré).
+* Indices **0-based** partout sauf OSC (1-based).
+* `apply(&Param)` : rejette non-fini / index hors bornes **sans muter** ; borne et arrondit
+  (dB entiers) ; renvoie `None` si rien ne change.
+* `diff(&target)` : `Param`s pour passer d'un état à l'autre (rappel de préset) ;
+  `all_params()` : tous les `Param` adressables (dump OSC après snapshot).
+
+### 3.4 Moteur (`engine`)
+
+* Acteur unique ; files : requêtes 1024, matériel 1024 (`try_send`, ne bloque jamais),
+  broadcast 4096 (`Lagged` → le client se resynchronise via `initial_events()`).
+* `Envelope { origin: Web(id) | Osc(addr) | Hardware | System, target: All | Only(origin), event }`.
+  Les réponses (`Presets` sur `ListPresets`) et les `Error` ne vont qu'à l'émetteur.
+* Rappel de préset : refusé si la topologie diffère ; sinon le `diff` est envoyé au matériel,
+  puis `Snapshot`. `● Modifié` = `Preset::is_modified(&live)`, `Session` diffusé à chaque bascule.
 
 ### 3.5 Contrat JSON WebSocket (`/ws`)
 
 Client → serveur (`Command`, tag `cmd`) :
 
 ```json
-{"cmd":"set","param":"mix_vol","bus":0,"ch":3,"value":0.75}
+{"cmd":"set","param":"mix_vol","bus":0,"ch":3,"gain":1.0}
+{"cmd":"set","param":"main_vol","db":-12}
+{"cmd":"set","param":"preamp_gain","ch":0,"db":30}
 {"cmd":"set","param":"phantom","ch":0,"on":true}
-{"cmd":"set","param":"route","input":2,"output":5,"on":true}
 {"cmd":"load_preset","name":"live"}
+{"cmd":"save_preset","name":"live"}
+{"cmd":"list_presets"}
+{"cmd":"set_label","ch":2,"label":{"name":"Vox","color":"#06B6D4"}}
 ```
 
-Serveur → client (`ServerEvent`, tag `event`) :
+Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`, `labels`, `presets`.
 
 ```json
-{"event":"snapshot","state":{…MotuState…},"session":{"active_preset":"default","modified":false,"connection":"demo"}}
+{"event":"snapshot","state":{…},"session":{"active_preset":null,"modified":false,"connection":"demo"}}
 {"event":"changed","params":[{"param":"dim","on":true}]}
 {"event":"status","connection":"online"}
 {"event":"session","active_preset":"live","modified":true,"connection":"online"}
+{"event":"presets","names":["default","live"]}
+{"event":"labels","channels":{"2":{"name":"Vox","color":"#06B6D4"}}}
+{"event":"meters","levels":[0.0,0.12,…]}
+{"event":"error","message":"…"}
 ```
 
-Valeurs de `param` : `mix_vol`, `mix_pan`, `mix_mute`, `mix_solo`, `main_vol`, `preamp_gain` (`db`),
-`phantom`, `pad`, `phase`, `eq_bypass`, `route`, `dim`, `mono`, `speaker_b`, `talkback`, `phones_vol`.
-`connection` : `online` | `connecting` | `demo`. Un `snapshot` est toujours envoyé en premier.
-Les VU-mètres (60 FPS) seront un événement `meters` dédié, défini en Phase 2.
+`param` : `mix_vol` (`gain`), `mix_pan` (`value`), `mix_mute`, `mix_solo`, `main_vol` (`db`),
+`preamp_gain` (`db`), `phantom`, `pad`, `phase`, `eq_bypass`, `route`, `dim`, `mono`,
+`speaker_b`, `talkback`, `phones_vol` (`db`). Le serveur ne renvoie pas un `changed` au client
+qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants ≤ 64 KiB.
 
 ### 3.6 Table OSC (UDP `:8000`, indices **1-based**)
 
-| Adresse | Arg. | `Param` |
+| Adresse | Arg. | `Param` (conversion) |
 |---|---|---|
-| `/mix/{bus}/ch/{ch}/vol` | float `0..1` | `mix_vol` |
+| `/mix/{bus}/ch/{ch}/vol` | float `0..1` | `mix_vol` (`gain = (p/0.75)^K`, 0.75 = 0 dB) |
 | `/mix/{bus}/ch/{ch}/pan` | float `-1..1` | `mix_pan` |
 | `/mix/{bus}/ch/{ch}/mute` · `/solo` | int/float/bool | `mix_mute` · `mix_solo` |
-| `/mix/main/vol` | float | `main_vol` |
-| `/preamp/{ch}/gain` | float `0..60` dB | `preamp_gain` |
+| `/mix/main/vol` | float `0..1` | `main_vol` (trim : 1.0 = 0 dB, 0 = −100 dB) |
+| `/preamp/{ch}/gain` | float dB `0..74` | `preamp_gain` |
 | `/preamp/{ch}/48v` · `/pad` · `/phase` | int | `phantom` · `pad` · `phase` |
 | `/eq/{ch}/bypass` | int | `eq_bypass` |
 | `/routing/in/{in}/out/{out}` | int | `route` |
 | `/controlroom/dim` · `/mono` · `/ab` · `/talkback` | int | `dim` · `mono` · `speaker_b` · `talkback` |
-| `/controlroom/phones/vol` | float | `phones_vol` — **extension** (absente de HANDOFF §3.1, requise par la barre Control Room §3.2) |
+| `/controlroom/phones/vol` | float `0..1` | `phones_vol` (trim) — extension à HANDOFF §3.1 |
 | `/preset/load` | string | `Command::LoadPreset` |
 
-Entrées booléennes : `int` (≠0), `float` (≥0.5), `T`/`F`. Feedback : booléens en `int 0/1`,
-continus en `float`. Index `0`, non numérique ou > `u16`/`u8` → `OscError::BadIndex`.
+Pont OSC : tout pair ayant envoyé un message valide est enregistré (TTL 10 min, 64 max) et
+reçoit un **dump complet** à son premier message ; le feedback `changed` va aux cibles
+configurées + pairs, **sauf l'émetteur** ; bundles découpés ≤ 8 KiB. Non transmis en OSC :
+`presets`, `labels`, `meters`, `status`, `session`, `error`.
 
 ### 3.7 Configuration (`config.rs`)
 
 Fichier : `--config` → `$CUEMIX_CONFIG` → `./config.toml` → `/etc/cuemix-web/config.toml` ;
-absent = valeurs par défaut (démarrage zéro-config), invalide = erreur. Clés inconnues
-**refusées** (`deny_unknown_fields`) pour détecter les fautes de frappe. Surcharges :
-`CUEMIX_HTTP_BIND`, `CUEMIX_OSC_LISTEN`, `CUEMIX_MOTU_IP`. `config.example.toml` est
-parsé par un test unitaire pour rester valide. `throttle_hz = 40` → intervalle 25 ms.
+absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUEMIX_HTTP_BIND`,
+`CUEMIX_OSC_LISTEN`, `CUEMIX_MOTU_IP`. `throttle_hz = 40` → 25 ms.
 
-## 4. Comportements moteur (spécifiés, implémentés en Phase 2)
+## 4. Comportements moteur
 
-* **Découverte** : `[motu].ip` explicite → interface `169.254.0.0/16` (`if-addrs`) → mDNS →
-  table ARP + sonde TCP `:1280`.
-* **Option A — matériel prioritaire** : à chaque (re)connexion, lecture complète de l'état
-  MOTU puis `snapshot` diffusé à tous les clients.
-* **Mode démo** : MOTU absente → `ConnectionStatus::Demo`, état en mémoire, UI/OSC/présets
-  utilisables.
-* **Throttling** : ≤ 40 msg/s **par paramètre** vers la MOTU, dernière valeur toujours envoyée.
+* **Découverte** : `[motu].ip` explicite → mDNS `_http._tcp` filtré (provisoire) → `/proc/net/arp`
+  (voisins `169.254.x.x`) + sonde TCP `:1280` (500 ms). La MOTU s'annonce en réalité par
+  **multicast UDP JSON sur 1280** (MOTU-PROTOCOL.md) — à implémenter (§8).
+* **Option A — matériel prioritaire** : la MOTU pousse **spontanément tout son état** à la
+  connexion puis chaque changement. Le client applique chaque trame jusqu'à **500 ms sans trame
+  non-mètre** (les mètres, prop `6000`, défilent en continu), plafond **5 s**, puis
+  `Synced` → `Snapshot` à tous. On ne réécrit jamais l'état au matériel à la reconnexion.
+* **Mode démo** : MOTU absente → `Demo`, état en mémoire ; les commandes sont drainées.
+* **Throttling** : 1re valeur d'un paramètre envoyée immédiatement, puis ≤ 1 / 25 ms, valeurs
+  intermédiaires fusionnées, dernière garantie (la MOTU ferme la socket si on écrit trop vite ;
+  motu-mk5-linux espace de 20 ms).
 
 ## 5. Chaîne de build & CI
 
-* Ordre **non négociable** : `frontend` (`npm ci && npm run build` → `frontend/dist/`) **puis**
-  `cargo build` (`rust-embed`). Le `Makefile` et tous les jobs CI le respectent.
-* `.cargo/config.toml` : `resolver.incompatible-rust-versions = "fallback"` → `Cargo.lock`
-  compatible MSRV 1.80 même généré avec une toolchain récente.
-* `ci.yml` : frontend (check+build) → rust (fmt, clippy `-D warnings`, tests) · msrv (1.80) ·
-  `cargo audit` · secrets (gitleaks 8.21.2 + regex RFC1918).
-* `release.yml` (tags `v*.*.*`) : musl `x86_64`/`aarch64`/`armv7` via `cargo-zigbuild`,
-  `.deb` (`cargo-deb`), archives + SHA-256, GitHub Release, image `ghcr.io` multi-arch
-  (`linux/amd64`, `linux/arm64`) à partir des binaires musl (distroless `nonroot`).
+* Ordre **non négociable** : `frontend` (`npm ci && npm run build`) **puis** `cargo build`
+  (`rust-embed` sans `allow_missing` : pas de binaire sans UI).
+* `.cargo/config.toml` : résolution compatible MSRV 1.80.
+* `ci.yml` : frontend → rust (fmt, clippy `-D warnings`, tests) · msrv · `cargo audit` · gitleaks + RFC1918.
+* `release.yml` : musl x86_64/aarch64/armv7 (`cargo-zigbuild`), `.deb`, GitHub Release, image
+  `ghcr.io` amd64/arm64 (distroless `nonroot`).
 
 ## 6. Sécurité
 
-* Aucun `unwrap`/`expect` en production (lint `deny` dans `lib.rs`, vérifié par clippy en CI).
-* Fichiers locaux git-ignorés : `config.toml`, `*.local.toml`, `deploy/*.env`, `.env`,
-  `*.pem`, `*.key`, `data/labels.json`, `data/presets/*.json`.
-* `.gitleaks.toml` : règles par défaut (`useDefault`) + règle RFC1918 ; seul `docs/HANDOFF.md`
-  est en liste blanche. Les fichiers d'exemple n'utilisent que `192.0.2.x`, `127.0.0.1`,
-  `169.254.x.x`.
-* Exécution non-root (`cuemix` / distroless `nonroot`).
+* Aucun `unwrap`/`expect` en production ; trames et JSON malformés → erreurs, jamais de panique.
+* Noms de présets validés (`[A-Za-z0-9 _.-]{1,64}`, pas de `.` initial) : pas de traversée.
+* Serveur web : seuls les fichiers embarqués sont servis (`..`, `\`, NUL → `index.html`).
+* Fichiers locaux git-ignorés : `config.toml`, `*.local.toml`, `deploy/*.env`, `.env`, `*.pem`,
+  `*.key`, `data/labels.json`, `data/presets/*.json`, `.claude/`.
+* `.gitleaks.toml` : règles par défaut + RFC1918 ; exemples en `192.0.2.x`/`127.0.0.1`/`169.254.x.x`.
 
 ## 7. Journal des décisions
 
 | # | Décision | Raison |
 |---|---|---|
-| D1 | Loi de fader = loi de puissance unique `(p/0.75)^K` | Exacte aux 3 ancrages, inversible, sans morceaux |
-| D2 | `8.24` : arrondi + erreur hors plage (pas de saturation) | Pas de valeur fausse silencieuse envoyée au matériel |
-| D3 | Un seul type `Param`, bidirectionnel, *set-style* idempotent | Feedback Web/OSC trivial, pas de dérive entre encodages |
-| D4 | 0-based interne/JSON, 1-based OSC | Tableaux JS natifs ; convention humaine TouchOSC/QLab |
-| D5 | Clamp des valeurs finies, rejet des non finies/index invalides | Contrôleurs OSC qui « débordent » légèrement tolérés |
-| D6 | Code Rust à la racine (HANDOFF §7), pas de `backend/` | HANDOFF fait foi ; Makefile existant cohérent |
-| D7 | Dépendances ajoutées au premier usage | Manifeste sans dépendance morte (lint cargo) |
+| D1 | Loi de fader = loi de puissance `(p/0.75)^K` | Exacte aux 3 ancrages HANDOFF, inversible |
+| D2 | `8.24` : arrondi + erreur hors plage | Pas de valeur fausse silencieuse vers le matériel |
+| D3 | Un seul type `Param`, bidirectionnel, idempotent | Feedback Web/OSC trivial |
+| D4 | 0-based interne/JSON, 1-based OSC | Tableaux JS ; convention TouchOSC/QLab |
+| D5 | Clamp des valeurs finies, rejet des non finies / index invalides | Tolérance aux contrôleurs |
+| D6 | Code Rust à la racine (HANDOFF §7) | HANDOFF fait foi |
+| D7 | Dépendances ajoutées au premier usage | Manifeste propre |
+| D8 | **Unités natives MOTU** dans l'état/présets/JSON ; `0..1` seulement en OSC et widget UI (arbitrage mainteneur 2026-11-14) | Codec quasi direct, présets = valeurs matérielles ; JSON ne peut pas porter `-inf` dB → gain linéaire pour les mix |
+| D9 | `engine` = acteur unique, `Envelope{origin,target}` | Pas de verrou, pas d'écho, réponses ciblées |
+| D10 | Sync Option A par fenêtre de silence non-mètre (500 ms, max 5 s) | La MOTU pousse son état sans requête (MOTU-PROTOCOL.md) |
+| D11 | Topologie démo 32 entrées mixer / 8 préamplis / 2 micros | Sources motu-mk5-linux (Q2) |
+| D12 | Pas d'écho `changed` vers l'émetteur (Web et OSC) | Évite le « tremblement » des faders pendant le geste |
 
-## 8. Questions matériel — arbitrages du mainteneur (2026-11-14)
+## 8. Questions matériel — arbitrages et état (2026-11-14)
 
-| # | Question | Arbitrage | Conséquence Phase 2 |
+| # | Sujet | Arbitrage | État |
 |---|---|---|---|
-| Q1 | HANDOFF §2.2 dit que les **fréquences** sont en `8.24`, or `8.24` plafonne à ~128 : 20 kHz est irreprésentable | **Vérifier dans les sources** (`motu-mk5-linux`, `app.asar` CueMix 5) avant d'implémenter l'EQ | Les fréquences EQ/HPF restent **hors protocole binaire** tant que l'encodage réel n'est pas établi ; `to_fixed_8_24(20000.0)` continue de renvoyer une erreur |
-| Q2 | Dimensions réelles UltraLite-mk5 | **Garder les valeurs par défaut** pour le mode démo, **lire la topologie réelle à la connexion** (Option A) | `Topology::ULTRALITE_MK5` = valeurs démo ; `motu::client` remplace la topologie par celle du matériel puis diffuse un `snapshot` |
-| Q3 | Table `prop_id` → `ValueKind` | **Extraire depuis `motu-mk5-linux`** (open source) | Chaque entrée porte un marqueur « non vérifié sur matériel » jusqu'au test par le mainteneur |
-| Q4 | Grandeur envoyée pour les volumes | **Gain linéaire `8.24`** (`fader::pos_to_gain`, 0 dB = `0x01000000`) | Hypothèse maintenue tant que l'extraction Q3 ou un test matériel ne la contredit pas |
+| Q1 | Encodage des fréquences EQ | Vérifier dans les sources | ✅ `Int32` Hz (props 1004/1024) ; gain/largeur EQ en `8.24` ; HPF = mode de bande 3. `ValueKind::I32` à ajouter avec l'EQ |
+| Q2 | Dimensions | Défauts démo, topologie réelle à la connexion | 🟡 défauts mis à jour (D11) ; lecture de la topologie à la connexion à faire |
+| Q3 | Table `prop_id` | Depuis motu-mk5-linux | 🟡 65 propriétés ; mappés : gain/phase préamplis (8), pad/48V (2), main, casque, mono, talkback. **Non mappés** : matrice de mix (ordre d'index 1016–1019 inconnu), routing (5010 = table de 80 o), bypass EQ global (par bande), DIM (absent du matériel), A/B (5015–5017 inconnus) |
+| Q4 | Volumes en gain linéaire `8.24` | Gain linéaire | 🟡 non confirmé ; seul indice : seuil de gate « 1 = 0 dB » |
+
+À vérifier **sur matériel** par le mainteneur (bloquant pour les faders de mix) :
+1. Écriture avec ou sans champ longueur `u16` (`[id][index][len][payload]` selon deux sources).
+2. Ordre d'index des props 1016–1019 (32 entrées × 14 bus).
+3. Chemin WebSocket selon firmware (`/` ou `/<serial>`, port 1280 ou 1281).
+4. Format des trames de mètres (prop 6000) ; valeur trim 100 = −100 dB ou −inf.
