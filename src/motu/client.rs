@@ -8,9 +8,13 @@
 //!   full state unprompted on connect (`docs/MOTU-PROTOCOL.md`): every frame
 //!   is collected until `sync_window` passes without a non-meter frame (max 5 s);
 //! - throttles outgoing commands **per parameter** ([`super::throttle`]) and
-//!   always delivers the last value;
+//!   always delivers the last value, then paces **every frame** through one
+//!   aggregate [`Pacer`] (one frame per [`MIN_FRAME_SPACING`]) so the device
+//!   never closes the socket on write bursts;
+//! - tries every discovery candidate in turn ([`discovery::discover`]);
 //! - falls back to [`ConnectionStatus::Demo`] when the device is absent and
-//!   retries with exponential backoff (1 s up to 10 s).
+//!   retries with exponential backoff (1 s up to 10 s); `Connecting` is only
+//!   reported for the first attempt and after losing a connection.
 
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
@@ -26,7 +30,8 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 use super::discovery;
 use super::protocol::{Frame, ProtocolError, ValueKind, HEADER_LEN};
-use super::throttle::Throttle;
+pub use super::throttle::MIN_FRAME_SPACING;
+use super::throttle::{Pacer, Throttle};
 use crate::config::Config;
 use crate::engine::{DeviceEvent, DeviceLink, Shutdown};
 use crate::state::{Param, Topology};
@@ -122,20 +127,24 @@ pub async fn run_with_codec<C: PropCodec>(
 ) {
     let mut status = StatusTracker::new(link.events.clone());
     let mut backoff = BACKOFF_START;
+    // `Connecting` only for the first attempt and after losing a connection:
+    // retries while offline stay `Demo` (no Demo <-> Connecting flapping).
+    let mut announce_connecting = true;
     loop {
         if shutdown.is_triggered() {
             return;
         }
-        if !status.set(ConnectionStatus::Connecting).await {
+        if announce_connecting && !status.set(ConnectionStatus::Connecting).await {
             return;
         }
+        announce_connecting = false;
         match connect(&cfg, &mut link, &mut shutdown).await {
             Guarded::Stop => return,
             Guarded::Done(Some(ws)) => {
                 backoff = BACKOFF_START;
                 match session(&cfg, &codec, ws, &mut link, &mut shutdown, &mut status).await {
                     SessionEnd::Stop => return,
-                    SessionEnd::Lost => {}
+                    SessionEnd::Lost => announce_connecting = true,
                 }
             }
             Guarded::Done(None) => {}
@@ -150,7 +159,8 @@ pub async fn run_with_codec<C: PropCodec>(
     }
 }
 
-type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
+/// Client WebSocket type.
+pub type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 enum Guarded<T> {
     Done(T),
@@ -184,24 +194,32 @@ async fn connect(
     shutdown: &mut Shutdown,
 ) -> Guarded<Option<Ws>> {
     let attempt = async {
-        let ip = discovery::discover(cfg.explicit_ip, cfg.port, cfg.interface.as_deref()).await?;
-        let url = format!("ws://{}", SocketAddr::new(ip, cfg.port));
+        let candidates =
+            discovery::discover(cfg.explicit_ip, cfg.port, cfg.interface.as_deref()).await;
+        let addrs: Vec<SocketAddr> = candidates
+            .into_iter()
+            .map(|ip| SocketAddr::new(ip, cfg.port))
+            .collect();
+        connect_first(&addrs).await.map(|(_, ws)| ws)
+    };
+    guarded(attempt, link, shutdown).await
+}
+
+/// Try each address in order; the first successful WebSocket handshake wins,
+/// failures fall through to the next candidate.
+pub async fn connect_first(addrs: &[SocketAddr]) -> Option<(SocketAddr, Ws)> {
+    for addr in addrs {
+        let url = format!("ws://{addr}");
         match timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await {
             Ok(Ok((ws, _))) => {
                 tracing::info!(%url, "connected to MOTU");
-                Some(ws)
+                return Some((*addr, ws));
             }
-            Ok(Err(e)) => {
-                tracing::debug!(%url, error = %e, "MOTU connect failed");
-                None
-            }
-            Err(_) => {
-                tracing::debug!(%url, "MOTU connect timed out");
-                None
-            }
+            Ok(Err(e)) => tracing::debug!(%url, error = %e, "MOTU connect failed"),
+            Err(_) => tracing::debug!(%url, "MOTU connect timed out"),
         }
-    };
-    guarded(attempt, link, shutdown).await
+    }
+    None
 }
 
 /// Emits `DeviceEvent::Status` only when the status changes.
@@ -258,27 +276,25 @@ fn decode_bytes<C: PropCodec>(codec: &C, bytes: &[u8]) -> Option<Param> {
     }
 }
 
-/// `Err(())` when the socket is broken.
-async fn send_param<C: PropCodec>(codec: &C, ws: &mut Ws, param: &Param) -> Result<(), ()> {
+/// Wire bytes of every frame of `param` (unencodable parts are logged and dropped).
+fn encode_frames<C: PropCodec>(codec: &C, param: &Param) -> Vec<Vec<u8>> {
     let frames = match codec.encode(param) {
         Ok(f) => f,
         Err(e) => {
             tracing::warn!(?param, error = %e, "cannot encode parameter, dropped");
-            return Ok(());
+            return Vec::new();
         }
     };
-    for frame in frames {
-        match frame.encode() {
-            Ok(bytes) => {
-                if let Err(e) = ws.send(Message::Binary(bytes)).await {
-                    tracing::warn!(error = %e, "send to MOTU failed");
-                    return Err(());
-                }
+    frames
+        .into_iter()
+        .filter_map(|frame| match frame.encode() {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                tracing::warn!(?frame, error = %e, "cannot encode frame, dropped");
+                None
             }
-            Err(e) => tracing::warn!(?frame, error = %e, "cannot encode frame, dropped"),
-        }
-    }
-    Ok(())
+        })
+        .collect()
 }
 
 async fn session<C: PropCodec>(
@@ -347,19 +363,35 @@ async fn session_inner<C: PropCodec>(
 
     // --- steady state ------------------------------------------------------
     let mut throttle = Throttle::new(cfg.throttle_interval);
+    let mut pacer = Pacer::new();
     loop {
-        let deadline = throttle.next_deadline();
-        let due = async {
-            match deadline {
+        let throttle_deadline = throttle.next_deadline();
+        let pacer_deadline = pacer.next_deadline(Instant::now());
+        let throttle_due = async {
+            match throttle_deadline {
+                Some(d) => sleep_until(d).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        let pacer_due = async {
+            match pacer_deadline {
                 Some(d) => sleep_until(d).await,
                 None => std::future::pending::<()>().await,
             }
         };
         tokio::select! {
             () = shutdown.wait() => return SessionEnd::Stop,
-            () = due => {
+            () = throttle_due => {
                 for param in throttle.flush_due(Instant::now()) {
-                    if send_param(codec, ws, &param).await.is_err() {
+                    pacer.push(param);
+                }
+            }
+            () = pacer_due => {
+                if let Some(bytes) = pacer.pop_due(Instant::now(), |p| encode_frames(codec, p)) {
+                    let res = ws.send(Message::Binary(bytes)).await;
+                    pacer.sent(Instant::now());
+                    if let Err(e) = res {
+                        tracing::warn!(error = %e, "send to MOTU failed");
                         return SessionEnd::Lost;
                     }
                 }
@@ -368,9 +400,7 @@ async fn session_inner<C: PropCodec>(
                 None => return SessionEnd::Stop,
                 Some(param) => {
                     if let Some(p) = throttle.push(Instant::now(), param) {
-                        if send_param(codec, ws, &p).await.is_err() {
-                            return SessionEnd::Lost;
-                        }
+                        pacer.push(p);
                     }
                 }
             },

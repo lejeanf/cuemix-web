@@ -10,7 +10,7 @@
 //! arriving within `interval` of the previous send are coalesced (latest
 //! wins) and released by [`Throttle::flush_due`] once the interval elapsed.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use tokio::time::Instant;
@@ -125,11 +125,192 @@ impl Throttle {
     }
 }
 
+/// Minimum spacing between two frames written to the MOTU, across **all**
+/// parameters. The device closes the WebSocket when writes arrive faster than
+/// it applies them (`docs/MOTU-PROTOCOL.md`; motu-mk5-linux spaces writes by
+/// 20 ms). Applies to every frame, including each frame of a multi-frame
+/// parameter and bursts after a preset recall.
+pub const MIN_FRAME_SPACING: Duration = Duration::from_millis(20);
+
+/// Aggregate output pacer: at most one frame per [`MIN_FRAME_SPACING`].
+///
+/// Sits behind the per-parameter [`Throttle`]. Queued parameters are coalesced
+/// by [`key_of`] (latest value wins, original queue position kept), so the
+/// queue never exceeds the number of distinct parameters (plus the remaining
+/// frames of the one parameter being sent) and the final value is always
+/// delivered. Pure state machine like [`Throttle`]: the caller owns time and
+/// the socket.
+#[derive(Debug)]
+pub struct Pacer {
+    order: VecDeque<ParamKey>,
+    latest: HashMap<ParamKey, Param>,
+    /// Remaining encoded frames of the parameter currently being sent.
+    frames: VecDeque<Vec<u8>>,
+    next_allowed: Option<Instant>,
+}
+
+impl Default for Pacer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Pacer {
+    pub fn new() -> Self {
+        Self {
+            order: VecDeque::new(),
+            latest: HashMap::new(),
+            frames: VecDeque::new(),
+            next_allowed: None,
+        }
+    }
+
+    /// Queue a parameter, replacing a queued value of the same key.
+    pub fn push(&mut self, param: Param) {
+        let key = key_of(&param);
+        if self.latest.insert(key, param).is_none() {
+            self.order.push_back(key);
+        }
+    }
+
+    /// Number of queued parameters (excluding frames already being sent).
+    pub fn queued_params(&self) -> usize {
+        self.order.len()
+    }
+
+    /// Nothing left to send.
+    pub fn is_empty(&self) -> bool {
+        self.order.is_empty() && self.frames.is_empty()
+    }
+
+    /// Instant at which the next frame may be written (`None` = nothing queued).
+    /// May be in the past: send right away.
+    pub fn next_deadline(&self, now: Instant) -> Option<Instant> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(self.next_allowed.unwrap_or(now))
+        }
+    }
+
+    /// Next frame if the spacing allows it at `now`. `encode` turns a
+    /// parameter into wire frames (empty / unencodable = skipped).
+    /// Call [`Pacer::sent`] after the write.
+    pub fn pop_due(
+        &mut self,
+        now: Instant,
+        mut encode: impl FnMut(&Param) -> Vec<Vec<u8>>,
+    ) -> Option<Vec<u8>> {
+        if self.next_allowed.is_some_and(|t| now < t) {
+            return None;
+        }
+        loop {
+            if let Some(f) = self.frames.pop_front() {
+                return Some(f);
+            }
+            let key = self.order.pop_front()?;
+            if let Some(param) = self.latest.remove(&key) {
+                self.frames = encode(&param).into();
+            }
+        }
+    }
+
+    /// Record that a frame was written at `at`.
+    pub fn sent(&mut self, at: Instant) {
+        self.next_allowed = Some(at + MIN_FRAME_SPACING);
+    }
+
+    /// Drop everything (e.g. on disconnect).
+    pub fn clear(&mut self) {
+        self.order.clear();
+        self.latest.clear();
+        self.frames.clear();
+        self.next_allowed = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const IV: Duration = Duration::from_millis(25);
+
+    fn enc(p: &Param) -> Vec<Vec<u8>> {
+        match p {
+            Param::PhonesVol { .. } => vec![vec![1], vec![2]],
+            Param::MixVol { ch, .. } => vec![vec![u8::try_from(*ch).unwrap_or(255)]],
+            _ => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn pacer_spaces_every_frame_including_multi_frame_params() {
+        let mut p = Pacer::new();
+        let t0 = Instant::now();
+        p.push(vol(1, 0.1));
+        p.push(Param::PhonesVol { db: -3.0 });
+        p.push(vol(2, 0.2));
+        let mut sent = Vec::new();
+        let mut now = t0;
+        while !p.is_empty() {
+            if let Some(f) = p.pop_due(now, enc) {
+                sent.push((now, f));
+                p.sent(now);
+            } else {
+                now += Duration::from_millis(1);
+            }
+        }
+        assert_eq!(
+            sent.iter().map(|(_, f)| f.clone()).collect::<Vec<_>>(),
+            vec![vec![1], vec![1], vec![2], vec![2]]
+        );
+        for w in sent.windows(2) {
+            assert!(w[1].0 - w[0].0 >= MIN_FRAME_SPACING);
+        }
+    }
+
+    #[test]
+    fn pacer_coalesces_by_key_and_stays_bounded() {
+        let mut p = Pacer::new();
+        for i in 0..1000u32 {
+            p.push(vol(u16::try_from(i % 5).unwrap_or(0), f64::from(i)));
+        }
+        assert_eq!(p.queued_params(), 5);
+        let mut last = std::collections::HashMap::new();
+        let mut t = Instant::now();
+        let mut n = 0;
+        while !p.is_empty() {
+            let f = p.pop_due(t, |q| {
+                if let Param::MixVol { ch, gain, .. } = q {
+                    last.insert(*ch, *gain);
+                }
+                enc(q)
+            });
+            assert_eq!(f.map(|f| f.len()), Some(1));
+            p.sent(t);
+            t += MIN_FRAME_SPACING;
+            n += 1;
+        }
+        assert_eq!(n, 5);
+        assert_eq!(last.len(), 5);
+        assert_eq!(last.get(&0), Some(&995.0));
+        assert_eq!(last.get(&4), Some(&999.0));
+    }
+
+    #[test]
+    fn pacer_deadline_follows_last_send() {
+        let mut p = Pacer::new();
+        let t0 = Instant::now();
+        assert_eq!(p.next_deadline(t0), None);
+        p.push(vol(1, 0.1));
+        p.push(vol(2, 0.2));
+        assert_eq!(p.next_deadline(t0), Some(t0));
+        assert!(p.pop_due(t0, enc).is_some());
+        p.sent(t0);
+        assert!(p.pop_due(t0 + Duration::from_millis(19), enc).is_none());
+        assert_eq!(p.next_deadline(t0), Some(t0 + MIN_FRAME_SPACING));
+        assert!(p.pop_due(t0 + MIN_FRAME_SPACING, enc).is_some());
+    }
 
     fn vol(ch: u16, value: f64) -> Param {
         Param::MixVol {
