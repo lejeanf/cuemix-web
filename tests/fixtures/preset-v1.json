@@ -1,0 +1,3505 @@
+{
+  "schema_version": 1,
+  "name": "Live set",
+  "state": {
+    "topology": {
+      "mixes": 7,
+      "mixer_inputs": 32,
+      "preamps": 8,
+      "mic_inputs": 2,
+      "routing_inputs": 18,
+      "routing_outputs": 22
+    },
+    "mixes": [
+      {
+        "name": "Mix 1",
+        "channels": [
+          {
+            "gain": 0.5,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          }
+        ]
+      },
+      {
+        "name": "Mix 2",
+        "channels": [
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          }
+        ]
+      },
+      {
+        "name": "Mix 3",
+        "channels": [
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          }
+        ]
+      },
+      {
+        "name": "Mix 4",
+        "channels": [
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          }
+        ]
+      },
+      {
+        "name": "Mix 5",
+        "channels": [
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          }
+        ]
+      },
+      {
+        "name": "Mix 6",
+        "channels": [
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          }
+        ]
+      },
+      {
+        "name": "Mix 7",
+        "channels": [
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          },
+          {
+            "gain": 1.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false
+          }
+        ]
+      }
+    ],
+    "main": {
+      "db": -8.0
+    },
+    "preamps": [
+      {
+        "gain_db": 0.0,
+        "phantom": false,
+        "pad": false,
+        "phase": false
+      },
+      {
+        "gain_db": 0.0,
+        "phantom": false,
+        "pad": false,
+        "phase": false
+      },
+      {
+        "gain_db": 0.0,
+        "phantom": false,
+        "pad": false,
+        "phase": false
+      },
+      {
+        "gain_db": 0.0,
+        "phantom": false,
+        "pad": false,
+        "phase": false
+      },
+      {
+        "gain_db": 0.0,
+        "phantom": false,
+        "pad": false,
+        "phase": false
+      },
+      {
+        "gain_db": 0.0,
+        "phantom": false,
+        "pad": false,
+        "phase": false
+      },
+      {
+        "gain_db": 0.0,
+        "phantom": false,
+        "pad": false,
+        "phase": false
+      },
+      {
+        "gain_db": 0.0,
+        "phantom": false,
+        "pad": false,
+        "phase": false
+      }
+    ],
+    "channels": [
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": true,
+              "freq_hz": 3000.0,
+              "gain_db": 4.0,
+              "q": 1.2
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      },
+      {
+        "eq": {
+          "bypass": false,
+          "hpf": {
+            "enabled": false,
+            "freq_hz": 80.0
+          },
+          "bands": [
+            {
+              "enabled": false,
+              "freq_hz": 100.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 500.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 2000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            },
+            {
+              "enabled": false,
+              "freq_hz": 8000.0,
+              "gain_db": 0.0,
+              "q": 0.7
+            }
+          ]
+        },
+        "comp": {
+          "enabled": false,
+          "threshold_db": -20.0,
+          "ratio": 4.0,
+          "attack_ms": 10.0,
+          "release_ms": 100.0,
+          "gain_db": 0.0
+        },
+        "gate": {
+          "enabled": false,
+          "threshold_db": -50.0,
+          "attack_ms": 1.0,
+          "release_ms": 100.0
+        }
+      }
+    ],
+    "reverb": {
+      "enabled": false,
+      "return_gain": 0.0,
+      "time_s": 2.0,
+      "predelay_ms": 20.0,
+      "sends": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "routing": {
+      "matrix": [
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      ]
+    },
+    "control_room": {
+      "dim": false,
+      "mono": true,
+      "speaker_b": false,
+      "talkback": false,
+      "phones_db": 0.0
+    },
+    "clock": {
+      "sample_rate": "48000",
+      "source": "internal"
+    }
+  }
+}

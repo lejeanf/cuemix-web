@@ -25,6 +25,7 @@ use crate::motu::client::ConnectionStatus;
 /// Hardware dimensions. Values for the UltraLite-mk5 are **provisional** until
 /// confirmed against the device (open question Q2 in `docs/ARCHITECTURE.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Topology {
     /// Independent stereo mixes (HANDOFF: 7).
     pub mixes: u8,
@@ -62,6 +63,7 @@ impl Default for Topology {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MotuState {
     pub topology: Topology,
     pub mixes: Vec<Mix>,
@@ -75,13 +77,15 @@ pub struct MotuState {
     pub clock: Clock,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Mix {
     pub name: String,
     pub channels: Vec<MixChannel>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MixChannel {
     /// Linear gain, `0.0..=MIX_GAIN_MAX` (`1.0` = 0 dB) — MOTU native (8.24).
     /// The `0..1` fader position exists only at the edges (OSC, UI widget).
@@ -103,13 +107,15 @@ impl Default for MixChannel {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MainOut {
     /// Main trim, whole dB `TRIM_MIN_DB..=0.0` — MOTU native (U8 attenuation).
     pub db: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Preamp {
     /// Whole dB `0.0..=PREAMP_GAIN_MAX_DB` — MOTU native (U8).
     pub gain_db: f64,
@@ -119,6 +125,7 @@ pub struct Preamp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelDsp {
     pub eq: Equalizer,
     pub comp: Compressor,
@@ -128,6 +135,7 @@ pub struct ChannelDsp {
 /// 4-band parametric EQ + HPF. Physical units here; their wire encoding is
 /// open question Q1 (frequencies do not fit in `8.24`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Equalizer {
     /// Global bypass of the 4 bands (cuemix-web improvement over CueMix 5).
     pub bypass: bool,
@@ -155,12 +163,14 @@ impl Default for Equalizer {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Hpf {
     pub enabled: bool,
     pub freq_hz: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EqBand {
     pub enabled: bool,
     pub freq_hz: f64,
@@ -169,6 +179,7 @@ pub struct EqBand {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Compressor {
     pub enabled: bool,
     pub threshold_db: f64,
@@ -192,6 +203,7 @@ impl Default for Compressor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Gate {
     pub enabled: bool,
     pub threshold_db: f64,
@@ -211,6 +223,7 @@ impl Default for Gate {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Reverb {
     pub enabled: bool,
     /// Return level, linear gain `0.0..=MIX_GAIN_MAX` (native unit, D8).
@@ -222,12 +235,14 @@ pub struct Reverb {
 }
 
 /// Routing crosspoints, `matrix[input][output]`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Routing {
     pub matrix: Vec<Vec<bool>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ControlRoom {
     /// −20 dB dim.
     pub dim: bool,
@@ -240,9 +255,53 @@ pub struct ControlRoom {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Clock {
     pub sample_rate: SampleRate,
     pub source: ClockSource,
+}
+
+// Defaults used when an older/partial preset file lacks a field (tolerant
+// reading, D15). They match `MotuState::new`.
+impl Default for Clock {
+    fn default() -> Self {
+        Self {
+            sample_rate: SampleRate::Hz48000,
+            source: ClockSource::Internal,
+        }
+    }
+}
+
+impl Default for Hpf {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            freq_hz: 80.0,
+        }
+    }
+}
+
+impl Default for EqBand {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            freq_hz: 1_000.0,
+            gain_db: 0.0,
+            q: 0.7,
+        }
+    }
+}
+
+impl Default for Reverb {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            return_gain: 0.0,
+            time_s: 2.0,
+            predelay_ms: 20.0,
+            sends: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1077,9 +1136,18 @@ impl MotuState {
 /// A named snapshot stored as `<presets_dir>/<name>.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Preset {
+    /// Preset file format version (D15). Missing in files written before it
+    /// existed → `0`, read as the current format (fields default when absent).
+    #[serde(default)]
+    pub schema_version: u32,
     pub name: String,
     pub state: MotuState,
 }
+
+/// Current preset file format. Bump on any *incompatible* change to
+/// `MotuState` (renamed field, changed unit) and add a migration + fixture.
+/// Additive changes (new fields with defaults) do not need a bump.
+pub const PRESET_SCHEMA_VERSION: u32 = 1;
 
 impl Preset {
     /// `● Modifié` indicator: live state diverges from this snapshot, ignoring
@@ -1227,6 +1295,7 @@ mod tests {
     fn preset_modified_flag() {
         let mut live = MotuState::default();
         let preset = Preset {
+            schema_version: PRESET_SCHEMA_VERSION,
             name: "default".into(),
             state: live.clone(),
         };
@@ -1422,6 +1491,7 @@ mod recall_tests {
         let _ = live.apply(&Param::Phantom { ch: 0, on: true });
         let _ = live.apply(&Param::MainVol { db: -20.0 });
         let preset = Preset {
+            schema_version: PRESET_SCHEMA_VERSION,
             name: "p".into(),
             state: MotuState::default(),
         };

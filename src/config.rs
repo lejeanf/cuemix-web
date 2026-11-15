@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Config {
     pub network: Network,
     pub motu: Motu,
@@ -23,7 +23,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Network {
     pub http_bind: SocketAddr,
     pub osc_listen: SocketAddr,
@@ -46,7 +46,7 @@ impl Default for Network {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Motu {
     /// Explicit device IP; `""` (→ `None`) = auto-discovery.
     #[serde(with = "optional_ip")]
@@ -72,7 +72,7 @@ pub enum SyncMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Engine {
     /// Max messages/s per parameter towards the MOTU (40 → 25 ms).
     pub throttle_hz: u32,
@@ -91,7 +91,7 @@ impl Default for Engine {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Storage {
     pub presets_dir: PathBuf,
     pub labels_file: PathBuf,
@@ -107,7 +107,7 @@ impl Default for Storage {
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Web {
     /// Use `X-Forwarded-For` (rightmost entry, appended by the proxy) for the
     /// client IP in logs. Only enable behind a reverse proxy.
@@ -115,6 +115,23 @@ pub struct Web {
     /// Extra origins allowed to open `/ws` (e.g. `https://mixer.example.com`).
     /// Same-origin requests (`Origin` host = `Host`) are always allowed.
     pub allowed_origins: Vec<String>,
+}
+
+/// Keys present in `raw` but absent from the serialised known config.
+fn collect_unknown(raw: &toml::Value, known: &toml::Value, prefix: &str, out: &mut Vec<String>) {
+    if let (toml::Value::Table(r), toml::Value::Table(k)) = (raw, known) {
+        for (key, value) in r {
+            let path = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            match k.get(key) {
+                Some(known_value) => collect_unknown(value, known_value, &path, out),
+                None => out.push(path),
+            }
+        }
+    }
 }
 
 mod optional_ip {
@@ -146,7 +163,21 @@ impl Config {
     }
 
     pub fn from_toml_str(text: &str) -> Result<Self> {
-        toml::from_str(text).context("invalid configuration TOML")
+        Self::parse_with_warnings(text).map(|(cfg, _)| cfg)
+    }
+
+    /// Parse and list keys this version does not know (`section.key`).
+    ///
+    /// Unknown keys are **warnings, not errors** (D15): a typo is still
+    /// reported loudly, but a config written for a newer version does not stop
+    /// an older binary from starting (e.g. after `cuemix-update --rollback`).
+    pub fn parse_with_warnings(text: &str) -> Result<(Self, Vec<String>)> {
+        let raw: toml::Value = toml::from_str(text).context("invalid configuration TOML")?;
+        let cfg: Config = raw.clone().try_into().context("invalid configuration")?;
+        let known = toml::Value::try_from(&cfg).context("cannot re-serialise configuration")?;
+        let mut unknown = Vec::new();
+        collect_unknown(&raw, &known, "", &mut unknown);
+        Ok((cfg, unknown))
     }
 
     /// Load from an explicit path, or search the default locations.
@@ -167,8 +198,12 @@ impl Config {
         for path in candidates {
             match std::fs::read_to_string(&path) {
                 Ok(text) => {
-                    config = Self::from_toml_str(&text)
+                    let (cfg, unknown) = Self::parse_with_warnings(&text)
                         .with_context(|| format!("in {}", path.display()))?;
+                    for key in unknown {
+                        tracing::warn!(%key, path = %path.display(), "unknown configuration key ignored (typo, or written for a newer cuemix-web?)");
+                    }
+                    config = cfg;
                     used = Some(path);
                     break;
                 }
@@ -228,8 +263,27 @@ mod tests {
     }
 
     #[test]
-    fn unknown_keys_are_rejected() {
-        assert!(Config::from_toml_str("[network]\nhttp_bnd = \"0.0.0.0:1\"").is_err());
+    fn unknown_keys_are_reported_not_fatal() {
+        let text = "[network]\nhttp_bnd = \"0.0.0.0:1\"\n[future]\nflag = true\n[web]\ntrust_forwarded_headers = true";
+        let parsed = Config::parse_with_warnings(text);
+        assert!(parsed.is_ok(), "{parsed:?}");
+        let (cfg, mut unknown) = parsed.unwrap_or_default();
+        unknown.sort();
+        assert_eq!(
+            unknown,
+            vec!["future".to_owned(), "network.http_bnd".to_owned()]
+        );
+        assert!(cfg.web.trust_forwarded_headers, "known keys still apply");
+        assert_eq!(
+            cfg.network.http_bind.port(),
+            8080,
+            "a typo falls back to the default"
+        );
+        // Wrong *types* on known keys are still errors.
+        assert!(Config::from_toml_str("[engine]\nthrottle_hz = \"fast\"").is_err());
+        // The shipped example has no unknown keys.
+        let example = Config::parse_with_warnings(include_str!("../config.example.toml"));
+        assert_eq!(example.map(|(_, u)| u).ok(), Some(vec![]));
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-use crate::state::{Labels, MotuState, Preset};
+use crate::state::{Labels, MotuState, Preset, PRESET_SCHEMA_VERSION};
 
 /// Preset names: 1–64 chars of `[A-Za-z0-9 _.-]`, not starting with `.`
 /// (no path separators → no traversal outside `presets_dir`).
@@ -40,17 +40,13 @@ impl PresetStore {
         let text = tokio::fs::read_to_string(&path)
             .await
             .with_context(|| format!("cannot read preset {}", path.display()))?;
-        let preset: Preset = serde_json::from_str(&text)
-            .with_context(|| format!("invalid preset {}", path.display()))?;
-        Ok(Preset {
-            name: name.to_owned(),
-            ..preset
-        })
+        parse_preset(name, &text).with_context(|| format!("invalid preset {}", path.display()))
     }
 
     pub async fn save(&self, name: &str, state: &MotuState) -> Result<Preset> {
         let path = self.path(name)?;
         let preset = Preset {
+            schema_version: PRESET_SCHEMA_VERSION,
             name: name.to_owned(),
             state: state.clone(),
         };
@@ -82,6 +78,29 @@ impl PresetStore {
         names.sort();
         Ok(names)
     }
+}
+
+/// Parse a preset file (D15).
+///
+/// - Older files (lower or missing `schema_version`) load: missing fields take
+///   their defaults, unknown fields are ignored, the result is upgraded to the
+///   current version in memory (and on disk at the next save).
+/// - Files written by a *newer* cuemix-web are refused with a clear message
+///   (e.g. after a rollback) instead of being silently misread.
+pub fn parse_preset(name: &str, text: &str) -> Result<Preset> {
+    let preset: Preset = serde_json::from_str(text)?;
+    if preset.schema_version > PRESET_SCHEMA_VERSION {
+        bail!(
+            "preset {name:?} uses format v{} but this cuemix-web reads up to v{PRESET_SCHEMA_VERSION}; \
+             update cuemix-web (cuemix-update) to load it",
+            preset.schema_version
+        );
+    }
+    Ok(Preset {
+        schema_version: PRESET_SCHEMA_VERSION,
+        name: name.to_owned(),
+        ..preset
+    })
 }
 
 /// Load `labels.json`; missing file = no labels.
@@ -188,5 +207,105 @@ mod tests {
         assert!(save_labels(&path, &labels).await.is_ok());
         assert_eq!(load_labels(&path).await.ok(), Some(labels));
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+}
+
+#[cfg(test)]
+mod compat_tests {
+    use super::*;
+    use crate::state::{Param, Topology};
+
+    /// Frozen v1 preset, written by this version. Never edit it: it guards
+    /// that future versions keep reading presets saved today.
+    const V1_FIXTURE: &str = include_str!("../tests/fixtures/preset-v1.json");
+
+    #[test]
+    fn frozen_v1_fixture_still_loads() {
+        let p = parse_preset("Live set", V1_FIXTURE);
+        assert!(p.is_ok(), "{p:?}");
+        let p = p.unwrap_or_else(|_| unreachable!());
+        assert_eq!(p.schema_version, PRESET_SCHEMA_VERSION);
+        assert_eq!(p.state.topology, Topology::ULTRALITE_MK5);
+        assert!(p.state.control_room.mono);
+        assert_eq!(p.state.main.db, -8.0);
+        assert!(p.state.clone().normalized().is_ok());
+    }
+
+    #[test]
+    fn legacy_file_without_version_or_sections_loads_with_defaults() {
+        // As written before schema_version existed, with whole sections and
+        // individual fields missing.
+        let text = r#"{"name":"old","state":{"control_room":{"dim":true},"main":{}}}"#;
+        let p = parse_preset("old", text);
+        assert!(p.is_ok(), "{p:?}");
+        let p = p.unwrap_or_else(|_| unreachable!());
+        assert!(p.state.control_room.dim);
+        assert_eq!(p.state.control_room.phones_db, 0.0);
+        assert_eq!(
+            p.state.mixes.len(),
+            7,
+            "missing sections come from the default state"
+        );
+        assert!(p.state.normalized().is_ok());
+    }
+
+    #[test]
+    fn unknown_fields_from_newer_minor_versions_are_ignored() {
+        let text = r#"{"schema_version":1,"name":"n","future_field":42,
+                       "state":{"main":{"db":-3,"future_knob":1}}}"#;
+        let p = parse_preset("n", text);
+        assert!(p.is_ok(), "{p:?}");
+        assert_eq!(p.map(|p| p.state.main.db).ok(), Some(-3.0));
+    }
+
+    #[test]
+    fn newer_major_format_is_refused_clearly() {
+        let text = format!(
+            r#"{{"schema_version":{},"name":"x","state":{{}}}}"#,
+            PRESET_SCHEMA_VERSION + 1
+        );
+        let err = parse_preset("x", &text)
+            .map(|_| ())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("update cuemix-web"), "{err}");
+    }
+
+    /// Regenerate the fixture only when deliberately introducing a new format
+    /// (then add preset-v2.json and keep v1): `cargo test write_v1_fixture -- --ignored`.
+    #[test]
+    #[ignore]
+    fn write_v1_fixture() {
+        let mut s = MotuState::default();
+        for p in [
+            Param::Mono { on: true },
+            Param::MainVol { db: -8.0 },
+            Param::MixVol {
+                bus: 0,
+                ch: 0,
+                gain: 0.5,
+            },
+            Param::EqBand {
+                ch: 1,
+                band: 2,
+                enabled: true,
+                freq_hz: 3_000.0,
+                gain_db: 4.0,
+                q: 1.2,
+            },
+        ] {
+            let _ = s.apply(&p);
+        }
+        let preset = Preset {
+            schema_version: PRESET_SCHEMA_VERSION,
+            name: "Live set".into(),
+            state: s,
+        };
+        let json = serde_json::to_string_pretty(&preset).unwrap_or_default();
+        std::fs::write(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/preset-v1.json"),
+            json + "\n",
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
     }
 }
