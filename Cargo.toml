@@ -35,7 +35,7 @@ rust-embed = { version = "8", features = ["mime-guess"] }
 # OSC over UDP
 rosc = "0.11"
 # Link-local discovery & Zeroconf
-if-addrs = "0.13"
+if-addrs = "0.15"
 mdns-sd = "0.11"
 # Config, presets, labels, JSON contracts
 serde = { version = "1", features = ["derive"] }
