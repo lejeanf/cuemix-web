@@ -341,6 +341,103 @@ async fn reconnects_after_drop_and_survives_garbage_frames() {
 }
 
 #[tokio::test]
+async fn offline_retries_do_not_flap_between_demo_and_connecting() {
+    let port = {
+        let l = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        l.local_addr().expect("addr").port()
+    };
+    let mut h = start_client(port);
+    // Spans the first retry (backoff 1 s) and part of the second (2 s).
+    tokio::time::sleep(Duration::from_millis(3300)).await;
+    let mut statuses = Vec::new();
+    while let Ok(ev) = h.events.try_recv() {
+        if let DeviceEvent::Status(s) = ev {
+            statuses.push(s);
+        }
+    }
+    assert_eq!(
+        statuses,
+        vec![ConnectionStatus::Connecting, ConnectionStatus::Demo]
+    );
+    h.stop().await;
+}
+
+#[tokio::test]
+async fn connect_first_falls_through_failed_candidates() {
+    use cuemix_web::motu::client::connect_first;
+    let dead = {
+        let l = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        l.local_addr().expect("addr")
+    };
+    let live = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let live_addr = live.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let (s, _) = live.accept().await.expect("accept");
+        let _ws = tokio_tungstenite::accept_async(s).await.expect("ws");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    });
+    let got = timeout(T, connect_first(&[dead, live_addr]))
+        .await
+        .expect("timeout");
+    assert_eq!(got.map(|(a, _)| a), Some(live_addr));
+    assert!(connect_first(&[dead]).await.is_none());
+    server.abort();
+}
+
+#[tokio::test]
+async fn aggregate_pacer_spaces_a_burst_of_distinct_params() {
+    use cuemix_web::motu::client::MIN_FRAME_SPACING;
+    const N: u16 = 50;
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let server = tokio::spawn(async move {
+        let (s, _) = listener.accept().await.expect("accept");
+        let mut ws = tokio_tungstenite::accept_async(s).await.expect("ws");
+        let mut got: Vec<(tokio::time::Instant, Vec<u8>)> = Vec::new();
+        while got.len() < usize::from(N) {
+            match ws.next().await {
+                Some(Ok(Message::Binary(b))) => got.push((tokio::time::Instant::now(), b)),
+                Some(Ok(_)) => {}
+                _ => break,
+            }
+        }
+        got
+    });
+
+    let mut h = start_client(port);
+    wait_online(&mut h).await;
+    for ch in 0..N {
+        h.cmd
+            .send(Param::MixVol {
+                bus: 0,
+                ch,
+                gain: 0.25,
+            })
+            .await
+            .expect("send");
+    }
+    let got = timeout(Duration::from_secs(5), server)
+        .await
+        .expect("frames not delivered in time")
+        .expect("server task");
+    assert_eq!(got.len(), usize::from(N));
+    let total = got[got.len() - 1].0 - got[0].0;
+    assert!(
+        total >= (MIN_FRAME_SPACING - Duration::from_millis(2)) * u32::from(N - 1),
+        "burst not paced: {total:?}"
+    );
+    // Every channel arrived with its value.
+    let mut seen = std::collections::HashSet::new();
+    for (_, bytes) in &got {
+        let frame = Frame::decode(bytes, |_| ValueKind::Fixed).expect("decode");
+        assert_eq!(frame.value, Value::Fixed(quantized(0.25)));
+        seen.insert(frame.index);
+    }
+    assert_eq!(seen.len(), usize::from(N));
+    h.stop().await;
+}
+
+#[tokio::test]
 async fn shutdown_while_waiting_for_backoff_exits_promptly() {
     let port = {
         let l = TcpListener::bind("127.0.0.1:0").await.expect("bind");
