@@ -1,0 +1,15 @@
+[network]
+http_bind = "0.0.0.0:8080"
+osc_listen = "0.0.0.0:8000"
+osc_feedback_targets = ["127.0.0.1:9000"]
+motu_interface = "eth1"
+mdns_hostname = "cuemix-web"
+
+[engine]
+throttle_hz = 40
+sync_mode = "hardware_priority"
+offline_demo_fallback = true
+
+[storage]
+presets_dir = "/var/lib/cuemix-web/presets"
+labels_file = "/var/lib/cuemix-web/labels.json"

@@ -1,0 +1,24 @@
+# --- Secrets & Local Private Config ---
+config.toml
+*.env
+!*.env.example
+deploy/proxmox.env
+data/labels.json
+data/presets/*.json
+!data/presets/default.json
+
+# --- Rust ---
+/target/
+**/*.rs.bk
+
+# --- Frontend / Node.js / Svelte ---
+frontend/node_modules/
+frontend/dist/
+.vite/
+
+# --- OS & Editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
