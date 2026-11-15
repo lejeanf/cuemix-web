@@ -168,7 +168,8 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
 }
 
 /// Encode an effective [`Param`] as OSC feedback (1-based addresses).
-pub fn feedback(param: &Param) -> OscMessage {
+/// `None` for params without an OSC address (DSP blocks, reverb, clock).
+pub fn feedback(param: &Param) -> Option<OscMessage> {
     let n = |i: u16| u32::from(i) + 1;
     let b = |on: bool| OscType::Int(i32::from(on));
     // OSC floats are 32-bit; precision loss is expected and harmless here.
@@ -204,11 +205,18 @@ pub fn feedback(param: &Param) -> OscMessage {
             "/controlroom/phones/vol".to_owned(),
             f(fader::trim_db_to_pos(db)),
         ),
+        Param::EqBand { .. }
+        | Param::Hpf { .. }
+        | Param::Comp { .. }
+        | Param::Gate { .. }
+        | Param::Reverb { .. }
+        | Param::ReverbSend { .. }
+        | Param::Clock { .. } => return None,
     };
-    OscMessage {
+    Some(OscMessage {
         addr,
         args: vec![arg],
-    }
+    })
 }
 
 #[cfg(test)]
@@ -340,7 +348,7 @@ mod tests {
             Param::PhonesVol { db: 0.0 },
         ];
         for p in params {
-            assert_eq!(parse(&feedback(&p)), Ok(Command::Set(p)));
+            assert_eq!(parse(&feedback(&p).unwrap()), Ok(Command::Set(p)));
         }
     }
 
@@ -370,18 +378,21 @@ mod tests {
         assert!((-30.0..-25.0).contains(&db), "{db}");
         // Feedback: positions round-trip within f32 precision.
         for db in [-60.0, -24.0, -6.0, 0.0] {
-            let back = parse(&feedback(&Param::PhonesVol { db }));
+            let back = parse(&feedback(&Param::PhonesVol { db }).unwrap());
             let Ok(Command::Set(Param::PhonesVol { db: got })) = back else {
                 panic!()
             };
             assert!((got - db).abs() < 1e-3, "{db} -> {got}");
         }
         for gain in [0.1, 0.5, 2.0] {
-            let back = parse(&feedback(&Param::MixVol {
-                bus: 0,
-                ch: 0,
-                gain,
-            }));
+            let back = parse(
+                &feedback(&Param::MixVol {
+                    bus: 0,
+                    ch: 0,
+                    gain,
+                })
+                .unwrap(),
+            );
             let Ok(Command::Set(Param::MixVol { gain: got, .. })) = back else {
                 panic!()
             };
@@ -419,5 +430,22 @@ mod tests {
             args: vec![],
         };
         assert!(matches!(parse(&no_args), Err(OscError::Arity(_))));
+    }
+}
+
+#[cfg(test)]
+mod dsp_feedback_tests {
+    use super::*;
+
+    #[test]
+    fn dsp_params_have_no_osc_address() {
+        assert!(feedback(&Param::Reverb {
+            enabled: true,
+            return_gain: 1.0,
+            time_s: 2.0,
+            predelay_ms: 10.0,
+        })
+        .is_none());
+        assert!(feedback(&Param::Dim { on: true }).is_some());
     }
 }

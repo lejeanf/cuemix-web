@@ -254,7 +254,11 @@ async fn g_new_peer_gets_full_dump() {
     let c = sock().await;
     send(&c, r.bridge, msg("/controlroom/dim", OscType::Int(0))).await;
     let got = collect(&c, Q).await;
-    let expected = cuemix_web::state::MotuState::default().all_params().len();
+    let expected = cuemix_web::state::MotuState::default()
+        .all_params()
+        .iter()
+        .filter(|p| cuemix_web::osc::address::feedback(p).is_some())
+        .count();
     assert!(got.len() >= expected, "{} < {expected}", got.len());
     assert!(got.iter().any(|m| m.addr == "/controlroom/dim"));
     assert!(got.iter().any(|m| m.addr == "/mix/main/vol"));
@@ -295,7 +299,11 @@ async fn i_sync_requests_dump() {
         args: vec![],
     };
     send(&c, r.bridge, sync.clone()).await;
-    let expected = cuemix_web::state::MotuState::default().all_params().len();
+    let expected = cuemix_web::state::MotuState::default()
+        .all_params()
+        .iter()
+        .filter(|p| cuemix_web::osc::address::feedback(p).is_some())
+        .count();
     assert!(collect(&c, Q).await.len() >= expected);
     // Known peer: another /sync after the window yields another dump.
     tokio::time::sleep(Duration::from_millis(1100)).await;

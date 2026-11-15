@@ -7,7 +7,7 @@
 
 | | |
 |---|---|
-| Version du contrat | `0.2.1` (Phase 2 — moteur & passerelles, audit architect-guardian corrigé) |
+| Version du contrat | `0.3.0` (Phase 3 — interface ; params DSP/réverbe/horloge éditables) |
 | MSRV | Rust `1.80`, édition 2021 |
 | Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` (embarqué via `rust-embed`) |
 
@@ -175,7 +175,14 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 
 `param` : `mix_vol` (`gain`), `mix_pan` (`value`), `mix_mute`, `mix_solo`, `main_vol` (`db`),
 `preamp_gain` (`db`), `phantom`, `pad`, `phase`, `eq_bypass`, `route`, `dim`, `mono`,
-`speaker_b`, `talkback`, `phones_vol` (`db`). Le serveur ne renvoie pas un `changed` au client
+`speaker_b`, `talkback`, `phones_vol` (`db`), et (Phase 3, état/présets/UI seulement, sans
+adresse OSC ni mappage matériel) : `eq_band` (`ch`, `band` 0–3, `enabled`, `freq_hz`, `gain_db`,
+`q`), `hpf` (`enabled`, `freq_hz`), `comp` (`enabled`, `threshold_db`, `ratio`, `attack_ms`,
+`release_ms`, `gain_db`), `gate` (`enabled`, `threshold_db`, `attack_ms`, `release_ms`),
+`reverb` (`enabled`, `return_gain` linéaire, `time_s`, `predelay_ms`), `reverb_send` (`ch`,
+`gain` linéaire), `clock` (`sample_rate`, `source`). Chaque message porte le **bloc entier**
+(idempotent) ; plages dans `state::dsp_limits` (miroir TS : `frontend/src/lib/protocol.ts`,
+loi de fader : `frontend/src/lib/fader.ts`, portage exact de `motu::fader`). Le serveur ne renvoie pas un `changed` au client
 qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants ≤ 64 KiB.
 
 ### 3.6 Table OSC (UDP `:8000`, indices **1-based**)
