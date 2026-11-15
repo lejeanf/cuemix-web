@@ -10,7 +10,7 @@ Compatibility notes for each release say whether presets or `config.toml`
 need attention. Preset files carry `schema_version`; see
 `docs/ARCHITECTURE.md` (decision D15).
 
-## [0.3.0] - unreleased
+## [0.3.0] - 2026-11-14
 
 First feature-complete version (Phases 1–4 of `docs/HANDOFF.md`), not yet
 verified on a real UltraLite-mk5.
@@ -29,11 +29,13 @@ verified on a real UltraLite-mk5.
   check and automatic rollback; `proxmox-setup.sh --update`.
 - CI: tests, MSRV 1.85, secret scanning, shellcheck; security workflow (cargo
   audit, npm audit, dependency review, CodeQL) and Dependabot.
+- Security: third-party GitHub Actions pinned to commit SHAs; the web
+  client only accepts in-range integer indices from server payloads.
 
 ### Changed
 - Minimum supported Rust version raised to **1.85** (dependency upgrades:
-  tokio 1.54, toml 1.x, tokio-tungstenite 0.29, rosc 0.11, thiserror 2,
-  if-addrs 0.15).
+  tokio 1.54, toml 1.x, tokio-tungstenite 0.30, rosc 0.11, thiserror 2,
+  if-addrs 0.15, mdns-sd 0.21).
 
 ### Compatibility
 - Presets: format v1 (first versioned format).
