@@ -1,12 +1,12 @@
 //! MOTU WebSocket client.
 //!
 //! - connects to `ws://<motu_ip>:<port>` (binary frames from [`super::protocol`]);
-//! - on (re)connect applies **Option A - hardware priority**: a full state is
-//!   rebuilt from the frames the device sends during a sync window, then
-//!   [`DeviceEvent::Synced`] replaces the engine state. The device pushes its
+//! - on (re)connect applies **Option A - hardware priority**: the device dump is
+//!   collected during a sync window, then
+//!   [`DeviceEvent::Synced`] carries every decoded param; the engine applies them
+//!   on top of its state (unreported fields are kept). The device pushes its
 //!   full state unprompted on connect (`docs/MOTU-PROTOCOL.md`): every frame
-//!   is applied until `sync_window` passes without a non-meter frame (max 5 s), on top of
-//!   `MotuState::new(topology)`;
+//!   is collected until `sync_window` passes without a non-meter frame (max 5 s);
 //! - throttles outgoing commands **per parameter** ([`super::throttle`]) and
 //!   always delivers the last value;
 //! - falls back to [`ConnectionStatus::Demo`] when the device is absent and
@@ -29,7 +29,7 @@ use super::protocol::{Frame, ProtocolError, ValueKind, HEADER_LEN};
 use super::throttle::Throttle;
 use crate::config::Config;
 use crate::engine::{DeviceEvent, DeviceLink, Shutdown};
-use crate::state::{MotuState, Param, Topology};
+use crate::state::{Param, Topology};
 
 /// Link state reported to every client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -306,7 +306,7 @@ async fn session_inner<C: PropCodec>(
     // The device pushes its whole state unprompted on connect, then streams
     // meters forever (docs/MOTU-PROTOCOL.md): the sync ends after
     // `sync_window` without any non-meter frame, capped at SYNC_MAX.
-    let mut state = MotuState::new(cfg.topology);
+    let mut synced: Vec<Param> = Vec::new();
     let hard_deadline = Instant::now() + SYNC_MAX;
     let mut quiet_deadline = Instant::now() + cfg.sync_window;
     loop {
@@ -326,9 +326,7 @@ async fn session_inner<C: PropCodec>(
                         quiet_deadline = Instant::now() + cfg.sync_window;
                     }
                     if let Some(param) = decode_bytes(codec, &bytes) {
-                        if let Err(e) = state.apply(&param) {
-                            tracing::debug!(?param, error = %e, "sync frame rejected by state");
-                        }
+                        synced.push(param);
                     }
                 }
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return SessionEnd::Lost,
@@ -341,11 +339,7 @@ async fn session_inner<C: PropCodec>(
             "initial MOTU state dump did not settle within {SYNC_MAX:?}; using what was received"
         );
     }
-    if link
-        .events
-        .send(DeviceEvent::Synced(Box::new(state)))
-        .await
-        .is_err()
+    if link.events.send(DeviceEvent::Synced(synced)).await.is_err()
         || !status.set(ConnectionStatus::Online).await
     {
         return SessionEnd::Stop;

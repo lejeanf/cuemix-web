@@ -106,18 +106,15 @@ impl Default for Storage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Web {
+    /// Use `X-Forwarded-For` (rightmost entry, appended by the proxy) for the
+    /// client IP in logs. Only enable behind a reverse proxy.
     pub trust_forwarded_headers: bool,
-}
-
-impl Default for Web {
-    fn default() -> Self {
-        Self {
-            trust_forwarded_headers: true,
-        }
-    }
+    /// Extra origins allowed to open `/ws` (e.g. `https://mixer.example.com`).
+    /// Same-origin requests (`Origin` host = `Host`) are always allowed.
+    pub allowed_origins: Vec<String>,
 }
 
 mod optional_ip {

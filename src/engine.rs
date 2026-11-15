@@ -13,7 +13,11 @@
 //! - Every request is validated by [`MotuState::apply`]; only the *effective*
 //!   param is broadcast and forwarded to the device.
 //! - Hardware-originated changes are applied and broadcast but never sent back
-//!   to the device. `DeviceEvent::Synced` replaces the live state (Option A).
+//!   to the device. `DeviceEvent::Synced` applies the hardware dump on top of
+//!   the live state (Option A: hardware wins for every param it reports).
+//! - Only params with a hardware mapping (`motu::props::is_mapped`) enter the
+//!   device queue; a preset recall forwards every mapped param of the preset
+//!   except trims and +48V (`Param::excluded_from_recall`).
 //! - Broadcast events carry their [`Origin`] (bridges may skip echoing a
 //!   fader back to the client that is dragging it) and a [`Target`]
 //!   (`Only(origin)` for replies and errors).
@@ -27,6 +31,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::motu::client::ConnectionStatus;
+use crate::motu::props;
 use crate::presets::{self, PresetStore};
 use crate::state::{Command, Labels, MotuState, Param, Preset, ServerEvent, SessionInfo, Topology};
 
@@ -78,8 +83,10 @@ impl Envelope {
 /// Events produced by `motu::client`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeviceEvent {
-    /// Full hardware state read after (re)connect — Option A, hardware wins.
-    Synced(Box<MotuState>),
+    /// Every param read during the initial dump after (re)connect — Option A:
+    /// applied on top of the live state; fields the device did not report
+    /// (unmapped ones) keep their value.
+    Synced(Vec<Param>),
     /// Changes made on the hardware side.
     Changed(Vec<Param>),
     Meters(Vec<f32>),
@@ -193,6 +200,11 @@ pub async fn start(cfg: EngineConfig) -> (EngineHandle, DeviceLink, JoinHandle<(
             Labels::default()
         }
     };
+    let store = PresetStore::new(cfg.presets_dir);
+    let preset_names = store.list().await.unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "cannot list presets");
+        Vec::new()
+    });
 
     let engine = Engine {
         state: MotuState::new(cfg.topology),
@@ -200,7 +212,8 @@ pub async fn start(cfg: EngineConfig) -> (EngineHandle, DeviceLink, JoinHandle<(
         active: None,
         labels,
         labels_file: cfg.labels_file,
-        store: PresetStore::new(cfg.presets_dir),
+        preset_names,
+        store,
         events: events.clone(),
         to_device: dev_cmd_tx,
         _device_keepalive: dev_ev_tx.clone(),
@@ -224,6 +237,8 @@ struct Engine {
     active: Option<Preset>,
     labels: Labels,
     labels_file: PathBuf,
+    /// Cached preset list (no disk I/O on every client connect, audit #12).
+    preset_names: Vec<String>,
     store: PresetStore,
     events: broadcast::Sender<Envelope>,
     to_device: mpsc::Sender<Param>,
@@ -275,18 +290,19 @@ impl Engine {
     }
 
     async fn initial_events(&self) -> Vec<ServerEvent> {
-        let names = self.store.list().await.unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "cannot list presets");
-            Vec::new()
-        });
         vec![
             self.snapshot(),
             ServerEvent::Labels(self.labels.clone()),
-            ServerEvent::Presets { names },
+            ServerEvent::Presets {
+                names: self.preset_names.clone(),
+            },
         ]
     }
 
     fn forward(&self, param: Param) {
+        if !props::is_mapped(&param) {
+            return;
+        }
         if let Err(e) = self.to_device.try_send(param) {
             tracing::warn!(error = %e, "device queue unavailable, param not forwarded");
         }
@@ -333,13 +349,27 @@ impl Engine {
                     );
                 }
                 Ok(preset) => {
-                    for p in self.state.diff(&preset.state) {
-                        self.forward(p);
+                    // Untrusted file: validate shape and clamp every value.
+                    let mut next = match preset.state.clone().normalized() {
+                        Ok(s) => s,
+                        Err(e) => {
+                            self.reply_error(origin, format!("preset {name:?} rejected: {e}"));
+                            return;
+                        }
+                    };
+                    // Trims and +48V are never recalled (maintainer ruling).
+                    next.keep_excluded_from(&self.state);
+                    // The hardware state may be unknown (unmapped / not yet
+                    // synced): send every mapped param, not a diff.
+                    for p in next.all_params() {
+                        if !p.excluded_from_recall() {
+                            self.forward(p);
+                        }
                     }
-                    self.state = preset.state.clone();
+                    self.state = next;
                     self.session.active_preset = Some(preset.name.clone());
-                    self.session.modified = false;
                     self.active = Some(preset);
+                    self.session.modified = false;
                     self.emit(origin, Target::All, self.snapshot());
                 }
                 Err(e) => self.reply_error(origin, format!("{e:#}")),
@@ -348,21 +378,29 @@ impl Engine {
                 Ok(preset) => {
                     self.session.active_preset = Some(preset.name.clone());
                     self.session.modified = false;
+                    if let Err(i) = self.preset_names.binary_search(&preset.name) {
+                        self.preset_names.insert(i, preset.name.clone());
+                    }
                     self.active = Some(preset);
                     self.emit(
                         origin,
                         Target::All,
                         ServerEvent::Session(self.session.clone()),
                     );
-                    match self.store.list().await {
-                        Ok(names) => self.emit(origin, Target::All, ServerEvent::Presets { names }),
-                        Err(e) => tracing::warn!(error = %e, "cannot list presets"),
-                    }
+                    self.emit(
+                        origin,
+                        Target::All,
+                        ServerEvent::Presets {
+                            names: self.preset_names.clone(),
+                        },
+                    );
                 }
                 Err(e) => self.reply_error(origin, format!("{e:#}")),
             },
+            // Explicit request: re-read the directory and refresh the cache.
             Command::ListPresets => match self.store.list().await {
                 Ok(names) => {
+                    self.preset_names.clone_from(&names);
                     self.emit(origin, Target::Only(origin), ServerEvent::Presets { names })
                 }
                 Err(e) => self.reply_error(origin, format!("{e:#}")),
@@ -372,12 +410,22 @@ impl Engine {
                     self.reply_error(origin, format!("label channel {ch} out of range"));
                     return;
                 }
-                match label {
+                if let Some(Err(e)) = label.as_ref().map(|l| l.validate()) {
+                    self.reply_error(origin, e);
+                    return;
+                }
+                let previous = match label {
                     Some(l) => self.labels.channels.insert(ch, l),
                     None => self.labels.channels.remove(&ch),
                 };
                 if let Err(e) = presets::save_labels(&self.labels_file, &self.labels).await {
+                    // Keep memory and disk consistent: roll back.
+                    match previous {
+                        Some(p) => self.labels.channels.insert(ch, p),
+                        None => self.labels.channels.remove(&ch),
+                    };
                     self.reply_error(origin, format!("labels not saved: {e:#}"));
+                    return;
                 }
                 self.emit(
                     origin,
@@ -391,8 +439,12 @@ impl Engine {
     fn on_device(&mut self, event: DeviceEvent) {
         let origin = Origin::Hardware;
         match event {
-            DeviceEvent::Synced(state) => {
-                self.state = *state;
+            DeviceEvent::Synced(params) => {
+                for p in &params {
+                    if let Err(e) = self.state.apply(p) {
+                        tracing::warn!(error = %e, ?p, "hardware param rejected during sync");
+                    }
+                }
                 self.emit(origin, Target::All, self.snapshot());
                 self.refresh_modified(origin);
             }
@@ -491,13 +543,16 @@ mod tests {
                 }]
             }
         );
+        // Mix faders have no hardware mapping yet: never queued (audit #2).
+        assert!(link.commands.try_recv().is_err());
+        h.command(o, Command::Set(Param::MainVol { db: -6.4 }))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await;
         assert_eq!(
             link.commands.recv().await,
-            Some(Param::MixVol {
-                bus: 0,
-                ch: 0,
-                gain: crate::state::MIX_GAIN_MAX
-            })
+            Some(Param::MainVol { db: -6.0 }),
+            "mapped params are forwarded with their effective value"
         );
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
@@ -542,7 +597,7 @@ mod tests {
             }
         );
 
-        h.command(o, Command::Set(Param::Dim { on: true }))
+        h.command(o, Command::Set(Param::Mono { on: true }))
             .await
             .unwrap();
         assert!(matches!(
@@ -553,7 +608,19 @@ mod tests {
             panic!("session")
         };
         assert!(s.modified);
-        assert_eq!(link.commands.recv().await, Some(Param::Dim { on: true }));
+        assert_eq!(link.commands.recv().await, Some(Param::Mono { on: true }));
+        // Trims and +48V changes never mark the preset as modified...
+        h.command(o, Command::Set(Param::Phantom { ch: 0, on: true }))
+            .await
+            .unwrap();
+        assert!(matches!(
+            next(&mut rx).await.event,
+            ServerEvent::Changed { .. }
+        ));
+        assert_eq!(
+            link.commands.recv().await,
+            Some(Param::Phantom { ch: 0, on: true })
+        );
 
         h.command(
             o,
@@ -566,10 +633,18 @@ mod tests {
         let ServerEvent::Snapshot { state, session } = next(&mut rx).await.event else {
             panic!("snapshot")
         };
-        assert!(!state.control_room.dim);
+        assert!(!state.control_room.mono);
+        assert!(state.preamps[0].phantom, "...and are never recalled");
         assert!(!session.modified);
-        // The recall diff was forwarded to the device.
-        assert_eq!(link.commands.recv().await, Some(Param::Dim { on: false }));
+        // Every mapped, non-excluded param of the preset was sent.
+        let mut sent = Vec::new();
+        while let Ok(p) = link.commands.try_recv() {
+            sent.push(p);
+        }
+        assert!(sent.contains(&Param::Mono { on: false }));
+        assert!(sent.iter().all(|p| !p.excluded_from_recall()));
+        assert!(sent.iter().all(props::is_mapped));
+        assert!(sent.len() < 64, "only mapped params: {}", sent.len());
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
@@ -577,10 +652,12 @@ mod tests {
     async fn hardware_sync_and_changes_are_not_echoed_to_device() {
         let (h, mut link, dir) = setup("hw").await;
         let mut rx = h.subscribe();
-        let mut hw = MotuState::default();
-        let _ = hw.apply(&Param::Mono { on: true });
+        h.command(Origin::System, Command::Set(Param::Dim { on: true }))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await;
         link.events
-            .send(DeviceEvent::Synced(Box::new(hw)))
+            .send(DeviceEvent::Synced(vec![Param::Mono { on: true }]))
             .await
             .unwrap();
         let env = next(&mut rx).await;
@@ -589,6 +666,10 @@ mod tests {
             panic!("snapshot")
         };
         assert!(state.control_room.mono);
+        assert!(
+            state.control_room.dim,
+            "fields the device did not report are kept"
+        );
 
         link.events
             .send(DeviceEvent::Changed(vec![Param::Talkback { on: true }]))

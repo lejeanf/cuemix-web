@@ -77,6 +77,8 @@ const PHONES_L: u16 = 10;
 const PHONES_R: u16 = 11;
 /// Mic input gain ceiling in dB (line inputs stop at 20 dB).
 const GAIN_MAX_DB: f64 = 74.0;
+/// Line input gain ceiling in dB.
+const LINE_GAIN_MAX_DB: f64 = 20.0;
 /// Output trim attenuation range: `0..=100` = `0..-100` dB.
 const TRIM_MAX: u8 = 100;
 
@@ -277,7 +279,12 @@ fn trim_to_db(trim: u8) -> f64 {
 pub fn encode(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
     let frames = match *param {
         Param::PreampGain { ch, db } if ch < N_INPUTS => {
-            let gain = require_finite(db)?.clamp(0.0, GAIN_MAX_DB).round();
+            let max = if ch < N_MICS {
+                GAIN_MAX_DB
+            } else {
+                LINE_GAIN_MAX_DB
+            };
+            let gain = require_finite(db)?.clamp(0.0, max).round();
             // Integer in 0..=74: the cast is exact.
             vec![Frame {
                 prop_id: P_INPUT_GAIN,
@@ -314,6 +321,12 @@ pub fn encode(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
     Ok(frames)
 }
 
+/// Does `param` have a hardware mapping? Unmapped params never reach the
+/// device queue (audit #2).
+pub fn is_mapped(param: &Param) -> bool {
+    encode(param).is_ok_and(|f| !f.is_empty())
+}
+
 /// Hardware frame → param. `None` = unmapped property.
 pub fn decode(frame: &Frame) -> Option<Param> {
     let Value::U8(byte) = frame.value else {
@@ -332,7 +345,9 @@ pub fn decode(frame: &Frame) -> Option<Param> {
         P_MAIN_TRIM if ch == 0 => Some(Param::MainVol {
             db: trim_to_db(byte),
         }),
-        P_OUTPUT_TRIM if ch == PHONES_L || ch == PHONES_R => Some(Param::PhonesVol {
+        // Only the left channel drives PhonesVol: L and R are written together, and
+        // reading both would let an unbalanced pair overwrite each other.
+        P_OUTPUT_TRIM if ch == PHONES_L => Some(Param::PhonesVol {
             db: trim_to_db(byte),
         }),
         P_MONO if ch == 0 => Some(Param::Mono { on }),
@@ -349,8 +364,15 @@ mod tests {
     fn mapped_params() -> Vec<Param> {
         let mut v = Vec::new();
         for ch in 0..N_INPUTS {
-            for db in [0.0, 1.0, 37.0, 60.0, 74.0] {
-                v.push(Param::PreampGain { ch, db });
+            let max = if ch < N_MICS {
+                GAIN_MAX_DB
+            } else {
+                LINE_GAIN_MAX_DB
+            };
+            for db in [0.0, 1.0, 13.0, 20.0, 37.0, 60.0, 74.0] {
+                if db <= max {
+                    v.push(Param::PreampGain { ch, db });
+                }
             }
             for on in [false, true] {
                 v.push(Param::Phase { ch, on });
@@ -395,9 +417,8 @@ mod tests {
             let ph = encode(&Param::PhonesVol { db }).unwrap();
             assert_eq!(ph.len(), 2);
             assert_eq!((ph[0].index, ph[1].index), (PHONES_L, PHONES_R));
-            for f in &ph {
-                assert_eq!(decode(f), Some(Param::PhonesVol { db }));
-            }
+            assert_eq!(decode(&ph[0]), Some(Param::PhonesVol { db }));
+            assert_eq!(decode(&ph[1]), None, "right channel is write-only");
         }
         assert_eq!(db_to_trim(6.0), Ok(0), "no boost: saturates at 0 dB");
         assert_eq!(db_to_trim(-250.0), Ok(100));

@@ -41,5 +41,9 @@ presets_dir = "/var/lib/cuemix-web/presets"
 labels_file = "/var/lib/cuemix-web/labels.json"
 
 [web]
-# Trust X-Forwarded-* headers from a reverse proxy. Set to false when exposed directly.
-trust_forwarded_headers = true
+# Use X-Forwarded-For (rightmost entry) for client IPs in logs. Enable only behind
+# a reverse proxy (HAProxy / pfSense); leave false when exposed directly.
+trust_forwarded_headers = false
+# Extra origins allowed to open the /ws WebSocket (same-origin is always allowed).
+# Example behind a proxy: ["https://mixer.example.com"]
+allowed_origins = []

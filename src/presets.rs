@@ -104,10 +104,19 @@ pub async fn save_labels(path: &Path, labels: &Labels) -> Result<()> {
 
 /// Write to `<path>.tmp` then rename, so a crash never leaves a half file.
 async fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
     let tmp = path.with_extension("json.tmp");
-    tokio::fs::write(&tmp, bytes)
+    let mut file = tokio::fs::File::create(&tmp)
+        .await
+        .with_context(|| format!("cannot create {}", tmp.display()))?;
+    file.write_all(bytes)
         .await
         .with_context(|| format!("cannot write {}", tmp.display()))?;
+    // Data on disk before the rename, so power loss never leaves a torn file.
+    file.sync_all()
+        .await
+        .with_context(|| format!("cannot sync {}", tmp.display()))?;
+    drop(file);
     tokio::fs::rename(&tmp, path)
         .await
         .with_context(|| format!("cannot replace {}", path.display()))?;

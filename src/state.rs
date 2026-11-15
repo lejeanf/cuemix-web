@@ -468,6 +468,77 @@ pub enum StateError {
         index: usize,
         len: usize,
     },
+    #[error("state shape does not match its topology: {0}")]
+    Shape(&'static str),
+}
+
+/// Line-input (non-mic) preamp gain ceiling in dB (hardware, motu-mk5-linux).
+pub const LINE_GAIN_MAX_DB: f64 = 20.0;
+
+impl Param {
+    /// Parameters a preset recall never writes to the hardware (maintainer
+    /// ruling on audit #9): listening trims and +48V phantom power. They are
+    /// still stored in preset files.
+    pub fn excluded_from_recall(&self) -> bool {
+        matches!(
+            self,
+            Param::MainVol { .. } | Param::PhonesVol { .. } | Param::Phantom { .. }
+        )
+    }
+}
+
+impl MotuState {
+    /// Vector lengths must match `topology` (presets are untrusted files).
+    pub fn check_shape(&self) -> Result<(), StateError> {
+        let t = self.topology;
+        let inputs = usize::from(t.mixer_inputs);
+        let ok = |cond: bool, what| {
+            if cond {
+                Ok(())
+            } else {
+                Err(StateError::Shape(what))
+            }
+        };
+        ok(self.mixes.len() == usize::from(t.mixes), "mixes")?;
+        ok(
+            self.mixes.iter().all(|m| m.channels.len() == inputs),
+            "mix channels",
+        )?;
+        ok(self.preamps.len() == usize::from(t.preamps), "preamps")?;
+        ok(t.mic_inputs <= t.preamps, "mic_inputs")?;
+        ok(self.channels.len() == inputs, "channels")?;
+        ok(self.reverb.sends.len() == inputs, "reverb sends")?;
+        ok(
+            self.routing.matrix.len() == usize::from(t.routing_inputs),
+            "routing inputs",
+        )?;
+        ok(
+            self.routing
+                .matrix
+                .iter()
+                .all(|r| r.len() == usize::from(t.routing_outputs)),
+            "routing outputs",
+        )?;
+        Ok(())
+    }
+
+    /// Validate shape and clamp every addressable value through [`Self::apply`].
+    pub fn normalized(mut self) -> Result<Self, StateError> {
+        self.check_shape()?;
+        for p in self.all_params() {
+            self.apply(&p)?;
+        }
+        Ok(self)
+    }
+
+    /// Copy the recall-excluded fields (trims, +48V) from `live` into `self`.
+    pub fn keep_excluded_from(&mut self, live: &MotuState) {
+        self.main.db = live.main.db;
+        self.control_room.phones_db = live.control_room.phones_db;
+        for (mine, theirs) in self.preamps.iter_mut().zip(&live.preamps) {
+            mine.phantom = theirs.phantom;
+        }
+    }
 }
 
 /// Round to the hardware's whole-dB resolution, then clamp.
@@ -542,7 +613,12 @@ impl MotuState {
                 (set(&mut self.main.db, v), P::MainVol { db: v })
             }
             P::PreampGain { ch, db } => {
-                let v = whole_db(finite(db, "preamp_gain")?, 0.0, PREAMP_GAIN_MAX_DB);
+                let max = if ch < self.topology.mic_inputs {
+                    PREAMP_GAIN_MAX_DB
+                } else {
+                    LINE_GAIN_MAX_DB
+                };
+                let v = whole_db(finite(db, "preamp_gain")?, 0.0, max);
                 (
                     set(
                         &mut slot(&mut self.preamps, usize::from(ch), "preamp")?.gain_db,
@@ -738,9 +814,34 @@ pub struct Preset {
 }
 
 impl Preset {
-    /// `● Modifié` indicator: live state diverges from this snapshot.
+    /// `● Modifié` indicator: live state diverges from this snapshot, ignoring
+    /// the fields a recall never restores (trims, +48V).
     pub fn is_modified(&self, live: &MotuState) -> bool {
-        &self.state != live
+        let mut expected = self.state.clone();
+        expected.keep_excluded_from(live);
+        &expected != live
+    }
+}
+
+/// Maximum label name length (characters).
+pub const LABEL_NAME_MAX: usize = 64;
+
+impl ChannelLabel {
+    /// Name 1–64 chars without control characters; colour `#RRGGBB` if set.
+    pub fn validate(&self) -> Result<(), String> {
+        let n = self.name.chars().count();
+        if n == 0 || n > LABEL_NAME_MAX || self.name.chars().any(char::is_control) {
+            return Err(format!(
+                "label name must be 1-{LABEL_NAME_MAX} printable characters"
+            ));
+        }
+        if let Some(c) = &self.color {
+            let hex = c.strip_prefix('#').unwrap_or("");
+            if hex.len() != 6 || !hex.chars().all(|ch| ch.is_ascii_hexdigit()) {
+                return Err(format!("label colour {c:?} must be #RRGGBB"));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -798,9 +899,9 @@ mod tests {
             Ok(Some(Param::PhonesVol { db: TRIM_MIN_DB }))
         );
         assert_eq!(
-            s.apply(&Param::PreampGain { ch: 3, db: 80.0 }),
+            s.apply(&Param::PreampGain { ch: 1, db: 80.0 }),
             Ok(Some(Param::PreampGain {
-                ch: 3,
+                ch: 1,
                 db: PREAMP_GAIN_MAX_DB
             }))
         );
@@ -1003,5 +1104,102 @@ mod native_unit_tests {
             mix,
             serde_json::json!({"param":"mix_vol","bus":0,"ch":0,"gain":1.0})
         );
+    }
+}
+
+#[cfg(test)]
+mod recall_tests {
+    use super::*;
+
+    #[test]
+    fn line_inputs_cap_gain_at_20_db() {
+        let mut s = MotuState::default();
+        assert_eq!(
+            s.apply(&Param::PreampGain { ch: 1, db: 70.0 }),
+            Ok(Some(Param::PreampGain { ch: 1, db: 70.0 }))
+        );
+        assert_eq!(
+            s.apply(&Param::PreampGain { ch: 2, db: 70.0 }),
+            Ok(Some(Param::PreampGain {
+                ch: 2,
+                db: LINE_GAIN_MAX_DB
+            }))
+        );
+    }
+
+    #[test]
+    fn normalized_clamps_and_rejects_bad_shapes() {
+        let mut s = MotuState::default();
+        s.main.db = 30.0; // impossible on hardware
+        s.mixes[0].channels[0].gain = 99.0;
+        let n = s.normalized();
+        assert!(n.is_ok());
+        let n = n.unwrap_or_default();
+        assert_eq!(n.main.db, 0.0);
+        assert_eq!(n.mixes[0].channels[0].gain, MIX_GAIN_MAX);
+
+        let mut bad = MotuState::default();
+        bad.preamps.pop();
+        assert_eq!(bad.normalized(), Err(StateError::Shape("preamps")));
+        let mut bad = MotuState::default();
+        bad.routing.matrix[3].push(true);
+        assert_eq!(bad.check_shape(), Err(StateError::Shape("routing outputs")));
+    }
+
+    #[test]
+    fn recall_excludes_trims_and_phantom() {
+        let mut live = MotuState::default();
+        let _ = live.apply(&Param::Phantom { ch: 0, on: true });
+        let _ = live.apply(&Param::MainVol { db: -20.0 });
+        let preset = Preset {
+            name: "p".into(),
+            state: MotuState::default(),
+        };
+        assert!(
+            !preset.is_modified(&live),
+            "trims/48V never count as modified"
+        );
+        let _ = live.apply(&Param::Mono { on: true });
+        assert!(preset.is_modified(&live));
+
+        let mut next = preset.state.clone();
+        next.keep_excluded_from(&live);
+        assert!(next.preamps[0].phantom);
+        assert_eq!(next.main.db, -20.0);
+        assert!(Param::Phantom { ch: 0, on: true }.excluded_from_recall());
+        assert!(!Param::Mono { on: true }.excluded_from_recall());
+    }
+
+    #[test]
+    fn label_validation() {
+        let ok = ChannelLabel {
+            name: "Kick".into(),
+            color: Some("#06B6D4".into()),
+        };
+        assert!(ok.validate().is_ok());
+        for bad in [
+            ChannelLabel {
+                name: String::new(),
+                color: None,
+            },
+            ChannelLabel {
+                name: "x".repeat(65),
+                color: None,
+            },
+            ChannelLabel {
+                name: "a\nb".into(),
+                color: None,
+            },
+            ChannelLabel {
+                name: "ok".into(),
+                color: Some("red".into()),
+            },
+            ChannelLabel {
+                name: "ok".into(),
+                color: Some("#12345".into()),
+            },
+        ] {
+            assert!(bad.validate().is_err(), "{bad:?}");
+        }
     }
 }
