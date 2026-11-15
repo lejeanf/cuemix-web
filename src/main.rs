@@ -1,14 +1,23 @@
 //! `cuemix-web` entry point: config, logging, Tokio orchestration, clean shutdown.
 //!
-//! Phase 1 only wires configuration and the offline demo state; the MOTU
-//! client, OSC bridge and Web server are started here in Phase 2.
+//! Tasks: engine (state owner) · MOTU client · OSC bridge · Web server ·
+//! mDNS announcement. Ctrl-C / SIGTERM triggers a graceful shutdown.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use cuemix_web::config::Config;
-use cuemix_web::state::MotuState;
+use cuemix_web::engine::{self, EngineConfig};
+use cuemix_web::motu::client::{self, ClientConfig};
+use cuemix_web::osc::bridge::OscBridge;
+use cuemix_web::state::Topology;
+use cuemix_web::web::server::{self, WebConfig};
+use cuemix_web::zeroconf;
 use tracing_subscriber::EnvFilter;
+
+/// Grace period for tasks to finish after shutdown is requested.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 fn parse_args() -> Result<Option<PathBuf>> {
     let mut args = std::env::args_os().skip(1);
@@ -24,13 +33,39 @@ fn parse_args() -> Result<Option<PathBuf>> {
                 std::process::exit(0);
             }
             Some("--help" | "-h") => {
-                println!("Usage: cuemix-web [--config <path>]\nEnv: CUEMIX_CONFIG, CUEMIX_HTTP_BIND, CUEMIX_OSC_LISTEN, CUEMIX_MOTU_IP, RUST_LOG");
+                println!(
+                    "Usage: cuemix-web [--config <path>]\n\
+                     Env: CUEMIX_CONFIG, CUEMIX_HTTP_BIND, CUEMIX_OSC_LISTEN, CUEMIX_MOTU_IP, RUST_LOG"
+                );
                 std::process::exit(0);
             }
             _ => bail!("unknown argument {arg:?} (try --help)"),
         }
     }
     Ok(config)
+}
+
+async fn termination() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = term.recv() => {}
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "SIGTERM handler unavailable");
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 #[tokio::main]
@@ -48,16 +83,76 @@ async fn main() -> Result<()> {
         None => tracing::warn!("no config file found, using defaults"),
     }
 
-    let state = MotuState::default();
+    let topology = Topology::default();
+    let (engine, link, engine_task) = engine::start(EngineConfig {
+        topology,
+        presets_dir: config.storage.presets_dir.clone(),
+        labels_file: config.storage.labels_file.clone(),
+    })
+    .await;
+    let (trigger, shutdown) = engine::shutdown_channel();
+
+    // Bind sockets first so configuration errors fail fast.
+    let listener = tokio::net::TcpListener::bind(config.network.http_bind)
+        .await
+        .with_context(|| format!("cannot bind HTTP on {}", config.network.http_bind))?;
+    let osc = OscBridge::bind(
+        config.network.osc_listen,
+        config.network.osc_feedback_targets.clone(),
+    )
+    .await?;
+
+    let mut tasks = tokio::task::JoinSet::new();
+    tasks.spawn(client::run(
+        ClientConfig::from_config(&config, topology),
+        link,
+        shutdown.clone(),
+    ));
+    {
+        let (engine, shutdown) = (engine.clone(), shutdown.clone());
+        tasks.spawn(async move {
+            if let Err(e) = osc.run(engine, shutdown).await {
+                tracing::error!(error = %e, "OSC bridge stopped");
+            }
+        });
+    }
+    {
+        let (engine, shutdown) = (engine.clone(), shutdown.clone());
+        let web_cfg = WebConfig::from_config(&config);
+        tasks.spawn(async move {
+            if let Err(e) = server::serve(listener, engine, web_cfg, shutdown).await {
+                tracing::error!(error = %e, "web server stopped");
+            }
+        });
+    }
+    let mdns = zeroconf::announce(
+        &config.network.mdns_hostname,
+        config.network.http_bind.port(),
+    );
+
     tracing::info!(
         http = %config.network.http_bind,
         osc = %config.network.osc_listen,
-        mixes = state.mixes.len(),
-        "cuemix-web {} started (Phase 1: demo state only)",
+        "cuemix-web {} running",
         env!("CARGO_PKG_VERSION")
     );
 
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("shutdown requested, exiting");
+    termination().await;
+    tracing::info!("shutdown requested");
+    trigger.trigger();
+    if let Some(a) = mdns {
+        a.stop();
+    }
+    let drained = tokio::time::timeout(SHUTDOWN_GRACE, async {
+        while tasks.join_next().await.is_some() {}
+    })
+    .await;
+    if drained.is_err() {
+        tracing::warn!("some tasks did not stop in time, aborting them");
+        tasks.abort_all();
+    }
+    drop(engine);
+    engine_task.abort();
+    tracing::info!("bye");
     Ok(())
 }

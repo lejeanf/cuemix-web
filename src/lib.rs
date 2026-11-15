@@ -10,6 +10,7 @@
 //! - [`web`]     — JSON WebSocket contract and the Axum server.
 //! - [`engine`]  — actor owning `MotuState`; command/event bus between all sides.
 //! - [`presets`] — preset and `labels.json` persistence.
+//! - [`zeroconf`] — mDNS announcement of the web UI.
 
 // Production code must never panic on bad input: no unwrap/expect outside tests.
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
@@ -22,3 +23,4 @@ pub mod osc;
 pub mod presets;
 pub mod state;
 pub mod web;
+pub mod zeroconf;
