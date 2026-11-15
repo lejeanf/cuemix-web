@@ -40,9 +40,13 @@ function at<T>(arr: readonly T[] | undefined, i: unknown): T | undefined {
   return arr[i];
 }
 
-/** True when `i` is an in-range integer index of `arr`. */
-function inRange(arr: readonly unknown[], i: unknown): i is number {
-  return typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < arr.length;
+/**
+ * Replace element `i` of `arr` with `v` when `i` is an in-range integer index.
+ * Uses `splice` rather than `arr[i] = v`, so no property write keyed by
+ * payload data is ever performed.
+ */
+function setAt<T>(arr: T[], i: unknown, v: T): void {
+  if (typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < arr.length) arr.splice(i, 1, v);
 }
 
 /** Apply one parameter to the state (used for `changed` and optimistic edits). Out-of-range indices are ignored. */
@@ -143,11 +147,11 @@ export function applyParam(st: MotuState, p: Param): void {
       st.reverb.predelay_ms = p.predelay_ms;
       break;
     case 'reverb_send':
-      if (inRange(st.reverb.sends, p.ch)) st.reverb.sends[p.ch] = p.gain;
+      setAt(st.reverb.sends, p.ch, p.gain);
       break;
     case 'route': {
       const row = at(st.routing.matrix, p.input);
-      if (row && inRange(row, p.output)) row[p.output] = p.on;
+      if (row) setAt(row, p.output, p.on);
       break;
     }
     case 'dim':
