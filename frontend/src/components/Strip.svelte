@@ -182,10 +182,6 @@
     cursor: pointer;
     --on: var(--cyan);
   }
-  .b.wide {
-    align-self: stretch;
-    min-height: 32px;
-  }
   .b.red {
     --on: var(--red);
   }
