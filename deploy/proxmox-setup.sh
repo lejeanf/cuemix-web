@@ -165,10 +165,6 @@ preflight() {
   [[ -f "${UNIT_FILE}" ]] || die "missing ${UNIT_FILE} (run from a repository checkout)"
   [[ -f "${CONFIG_EXAMPLE}" ]] || die "missing ${CONFIG_EXAMPLE} (run from a repository checkout)"
   [[ -f "${UPDATE_SCRIPT}" ]] || die "missing ${UPDATE_SCRIPT} (run from a repository checkout)"
-
-  if ! grep -qs '^[[:space:]]*source[[:space:]]\+/etc/network/interfaces\.d/' /etc/network/interfaces; then
-    log_warn "/etc/network/interfaces does not source interfaces.d; the MOTU bridge config may not load"
-  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -258,6 +254,42 @@ collect_settings() {
 # ---------------------------------------------------------------------------
 # Host: isolated MOTU bridge
 # ---------------------------------------------------------------------------
+# interfaces_sources_cfg : true when /etc/network/interfaces loads our bridge
+# file, through `source <dir>/*`, `source <our file>` or `source-directory`.
+interfaces_sources_cfg() {
+  grep -qsE '^[[:space:]]*(source[[:space:]]+/etc/network/interfaces\.d/(\*|cuemix-motu\.cfg)|source-directory[[:space:]]+/etc/network/interfaces\.d/?)[[:space:]]*$' \
+    /etc/network/interfaces
+}
+
+# ensure_interfaces_source : without this, ifreload never sees the bridge
+# file, the bridge is not created and the container cannot start.
+# Only our own file is sourced, so no other file in interfaces.d is activated.
+ensure_interfaces_source() {
+  local line="source ${MOTU_BRIDGE_CFG}" backup answer=""
+  interfaces_sources_cfg && return 0
+
+  log_warn "/etc/network/interfaces does not load ${MOTU_BRIDGE_CFG}"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    printf '%s[dry-run]%s %s\n' "${C_YELLOW}" "${C_RESET}" \
+      "would ask to append '${line}' to /etc/network/interfaces (with a backup)"
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    die "add this line to /etc/network/interfaces, then re-run: ${line}"
+  fi
+  read -r -p "Append '${line}' to /etc/network/interfaces (a backup is kept)? [Y/n]: " answer || true
+  case "${answer:-y}" in
+    [Yy]|[Yy][Ee][Ss]) ;;
+    *) die "not changed; add this line to /etc/network/interfaces, then re-run: ${line}" ;;
+  esac
+
+  backup="/etc/network/interfaces.bak-cuemix-$(date +%Y%m%d%H%M%S)"
+  cp -p -- /etc/network/interfaces "${backup}"
+  printf '\n# Added by cuemix-web deploy/proxmox-setup.sh (isolated MOTU bridge).\n%s\n' \
+    "${line}" >> /etc/network/interfaces
+  log_info "appended '${line}' to /etc/network/interfaces (backup: ${backup})"
+}
+
 ensure_motu_bridge() {
   log_step "Isolated MOTU bridge ${MOTU_BRIDGE}"
   local br="${MOTU_BRIDGE}" cfg_tmp port name drv users defs needs_reload=0
@@ -314,13 +346,21 @@ EOF
   if [[ -f "${MOTU_BRIDGE_CFG}" ]] && cmp -s "${cfg_tmp}" "${MOTU_BRIDGE_CFG}"; then
     log_info "unchanged: ${MOTU_BRIDGE_CFG}"
   else
+    run mkdir -p -- "$(dirname -- "${MOTU_BRIDGE_CFG}")"
     run install -m 0644 -- "${cfg_tmp}" "${MOTU_BRIDGE_CFG}"
     log_info "wrote: ${MOTU_BRIDGE_CFG}"
     needs_reload=1
   fi
 
+  ensure_interfaces_source
+
   if [[ "${needs_reload}" -eq 1 ]]; then
     run ifreload -a
+  fi
+
+  # The container's eth1 needs this bridge: fail here, not at `pct start`.
+  if [[ "${DRY_RUN}" -eq 0 && ! -d "/sys/class/net/${br}/bridge" ]]; then
+    die "${br} was not created by 'ifreload -a'; check that /etc/network/interfaces loads ${MOTU_BRIDGE_CFG} (ifquery ${br})"
   fi
 }
 
@@ -610,7 +650,7 @@ print_summary() {
 
 HAProxy / reverse proxy notes (optional):
   - Proxy /ws as a WebSocket upgrade (Upgrade and Connection headers).
-  - Forward X-Forwarded-For and X-Forwarded-Proto.
+  - Forward X-Forwarded-For and X-Forwarded-Host (client address, Origin check).
   - When proxied, set in /etc/cuemix-web/config.toml inside the container:
         [web]
         trust_forwarded_headers = true
