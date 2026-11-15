@@ -166,13 +166,16 @@ On connection the server sends `snapshot`, `labels` and `presets`. Later events:
 
 `meters` is limited to 60 per second per client. Incoming messages are capped at 64 KiB. The server does not send a `changed` back to the client that caused it.
 
-## Deployment (planned)
+## Deployment
 
-- **Proxmox LXC**: a lightweight container next to the audio host, with the MOTU link-local interface reachable from the container.
-- **Raspberry Pi / single-board computers**: `aarch64` and `armv7` musl builds.
-- **Linux**: `.deb` package and static musl archives (`x86_64`, `aarch64`, `armv7`) with SHA-256 checksums, produced by the release workflow on `v*.*.*` tags.
+Release assets (`v*.*.*` tags) are built by `.github/workflows/release.yml`: static musl tarballs `cuemix-web-<tag>-<target>.tar.gz` and `.deb` packages, each with a `.sha256`, for `x86_64`, `aarch64` and `armv7` musl targets. Run the setup scripts from a checkout of this repository, as root.
+
+- **Proxmox VE (LXC)**: `sudo deploy/proxmox-setup.sh`. Creates a Debian 12 container with a LAN address and an isolated MOTU bridge (no gateway, container side `169.254.254.1/16`), installs the latest release, and enables the `cuemix-web` service. Optional answers can go in `deploy/proxmox.env` (copy `deploy/proxmox.env.example`). Use `--dry-run` to preview.
+- **Raspberry Pi / SBCs / Linux**: `sudo deploy/linux-setup.sh`. Detects the architecture, installs the release (`.deb` on Debian/Ubuntu, tarball otherwise), creates the `cuemix` service user, and sets up the systemd unit and the udev rule that gives the MOTU link `169.254.254.1/16`. Settings can go in `deploy/linux-setup.env`. `--uninstall` removes the installed pieces but keeps `/etc/cuemix-web` and `/var/lib/cuemix-web`.
 - **Docker**: `deploy/docker-compose.yml` uses **host networking**, which the link-local discovery and OSC UDP require. Images are multi-arch and run as the distroless `nonroot` user.
-- Install and setup scripts for these targets arrive in **Phase 4**.
+- **Reverse proxy**: the `/ws` WebSocket needs an upgrade-aware proxy. Forward `X-Forwarded-For` and `X-Forwarded-Proto`, and set `[web] trust_forwarded_headers = true` and `allowed_origins` in `config.toml`.
+
+Both scripts are idempotent: an existing `config.toml` is never overwritten. The service is `deploy/cuemix-web.service`, and the udev rule template is `deploy/99-motu-mk5.rules.template`.
 
 ## Security
 
