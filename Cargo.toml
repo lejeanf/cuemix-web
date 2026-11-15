@@ -33,7 +33,7 @@ axum = { version = "0.8", features = ["ws"] }
 # cpufeatures 0.3 (edition 2024, Rust >= 1.85) and breaks MSRV 1.80.
 rust-embed = { version = "8", features = ["mime-guess"] }
 # OSC over UDP
-rosc = "0.10"
+rosc = "0.11"
 # Link-local discovery & Zeroconf
 if-addrs = "0.13"
 mdns-sd = "0.11"
