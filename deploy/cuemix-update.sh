@@ -85,6 +85,8 @@ run() {
   "$@"
 }
 
+# Invoked indirectly via `trap cleanup EXIT` below.
+# shellcheck disable=SC2329
 cleanup() {
   # Keep the exit status of the script (the last command here must not change it).
   local rc=$?

@@ -231,6 +231,8 @@ collect_settings() {
   ask MOTU_BRIDGE "Isolated MOTU bridge (no gateway)" "vmbr2"
   MOTU_IP="${MOTU_IP:-169.254.254.1/16}"
 
+  # CTID is assigned by `ask` above (printf -v).
+  # shellcheck disable=SC2153
   if ! [[ "${CTID}" =~ ^[0-9]+$ ]] || (( CTID < 100 )); then
     die "CTID must be an integer >= 100"
   fi
