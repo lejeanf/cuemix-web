@@ -10,6 +10,15 @@ Compatibility notes for each release say whether presets or `config.toml`
 need attention. Preset files carry `schema_version`; see
 `docs/ARCHITECTURE.md` (decision D15).
 
+## [Unreleased]
+
+### Fixed
+- `proxmox-setup.sh`: on hosts whose `/etc/network/interfaces` does not load
+  `interfaces.d`, the MOTU bridge was never created and the container failed
+  to start. The script now offers to source its bridge file (with a backup),
+  stops otherwise, and checks the bridge exists after `ifreload`. The
+  reverse-proxy note names the headers actually used (`X-Forwarded-Host`).
+
 ## [0.3.0] - 2026-11-14
 
 First feature-complete version (Phases 1–4 of `docs/HANDOFF.md`), not yet
