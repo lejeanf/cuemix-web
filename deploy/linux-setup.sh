@@ -18,6 +18,7 @@ REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${SCRIPT_DIR}/linux-setup.env"
 UDEV_TEMPLATE="${SCRIPT_DIR}/99-motu-mk5.rules.template"
 UNIT_TEMPLATE="${SCRIPT_DIR}/cuemix-web.service"
+UPDATER_SRC="${SCRIPT_DIR}/cuemix-update.sh"
 CONFIG_EXAMPLE="${REPO_DIR}/config.example.toml"
 
 CONF_DIR="/etc/cuemix-web"
@@ -26,6 +27,7 @@ UNIT_PATH="/etc/systemd/system/cuemix-web.service"
 UDEV_RULE="/etc/udev/rules.d/99-motu-mk5.rules"
 HELPER_PATH="/usr/local/sbin/cuemix-motu-linklocal"
 NM_CONF="/etc/NetworkManager/conf.d/99-cuemix-motu.conf"
+UPDATER_PATH="/usr/local/sbin/cuemix-update"
 
 RELEASE_API="https://api.github.com/repos/lejeanf/cuemix-web/releases/latest"
 RELEASE_BASE="https://github.com/lejeanf/cuemix-web/releases/download"
@@ -156,6 +158,7 @@ require_commands() {
     [[ -f "${UDEV_TEMPLATE}" ]] || die "missing ${UDEV_TEMPLATE} (run from a repository checkout)"
     [[ -f "${UNIT_TEMPLATE}" ]] || die "missing ${UNIT_TEMPLATE} (run from a repository checkout)"
     [[ -f "${CONFIG_EXAMPLE}" ]] || die "missing ${CONFIG_EXAMPLE} (run from a repository checkout)"
+    [[ -f "${UPDATER_SRC}" ]] || die "missing ${UPDATER_SRC} (run from a repository checkout)"
   fi
 }
 
@@ -169,7 +172,8 @@ uninstall() {
   run rm -f -- "${UNIT_PATH}"
   run systemctl daemon-reload
 
-  run rm -f -- "${INSTALL_DIR}/cuemix-web"
+  run rm -f -- "${INSTALL_DIR}/cuemix-web" "${INSTALL_DIR}/cuemix-web.prev" "${INSTALL_DIR}/cuemix-web.new"
+  run rm -f -- "${UPDATER_PATH}"
 
   run rm -f -- "${UDEV_RULE}" "${HELPER_PATH}"
   run udevadm control --reload-rules || log_warn "could not reload udev rules"
@@ -301,6 +305,15 @@ install_binary() {
   # The .deb payload is extracted rather than registered with dpkg, so the
   # binary location matches the systemd unit and uninstall stays complete.
   run install -m 0755 -- "${src_bin}" "${INSTALL_DIR}/cuemix-web"
+}
+
+install_updater() {
+  log_step "Update command (manual only)"
+  if [[ "${INSTALL_DIR}" != "/usr/local/bin" ]]; then
+    log_warn "cuemix-update manages /usr/local/bin/cuemix-web; INSTALL_DIR=${INSTALL_DIR} will not be updated by it"
+  fi
+  run install -d -m 0755 "$(dirname -- "${UPDATER_PATH}")"
+  install_if_changed "${UPDATER_SRC}" "${UPDATER_PATH}" 0755 || true
 }
 
 ensure_service_user() {
@@ -443,6 +456,7 @@ print_summary() {
   log_info "web UI:  http://<this-host>:${HTTP_BIND##*:}  (mDNS: http://$(hostname -s 2>/dev/null || echo this-host).local:${HTTP_BIND##*:})"
   log_info "status:  systemctl status cuemix-web    logs: journalctl -u cuemix-web -f"
   log_info "reverse proxy: when proxied, set [web] trust_forwarded_headers = true and allowed_origins in config.toml"
+  log_info "Update later with: sudo cuemix-update"
 }
 
 main() {
@@ -465,6 +479,7 @@ main() {
   resolve_tag
   download_release
   install_binary
+  install_updater
   ensure_service_user
   install_directories
   install_config
