@@ -271,6 +271,9 @@ absent = défauts, invalide = erreur, clés inconnues refusées. Surcharges `CUE
 | D12 | Pas d'écho `changed` vers l'émetteur (Web et OSC) | Évite le « tremblement » des faders pendant le geste |
 | D13 | Rappel de préset sans trims ni +48V (arbitrage mainteneur, audit n°9) | Sécurité des écoutes et du matériel ; motu-mk5-linux le déconseille |
 | D14 | `rust-embed` verrouillé en 8.7.2 dans `Cargo.lock` | ≥ 8.8 tire `cpufeatures 0.3` (édition 2024) et casse la MSRV 1.80 |
+| D15 | Compatibilité des données : présets versionnés (`schema_version`, v1), lecture tolérante (`serde(default)`, champs inconnus ignorés), format plus récent refusé clairement ; clés inconnues de `config.toml` = avertissement | Mises à jour et retours arrière sans perte de présets ni démarrage bloqué ; fixture figée `tests/fixtures/preset-v1.json` |
+| D16 | Mises à jour **manuelles** via `cuemix-update` (sha256, remplacement atomique, contrôle `/api/health`, retour arrière automatique) ; ni minuterie, ni bouton web, ni requête sortante vers GitHub (arbitrage mainteneur 2026-11-14) | Pas de redémarrage surprise en séance ; le serveur web non-root et sans authentification ne doit pas pouvoir déclencher une action root |
+| D17 | Version de crate = tag de release (vérifié par `release.yml`) ; tags avec `-` = pré-release (pas de `latest` Docker) | Le contrôle de santé de `cuemix-update` compare la version annoncée par `/api/health` |
 
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
 
