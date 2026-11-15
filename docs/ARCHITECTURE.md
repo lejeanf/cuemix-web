@@ -7,7 +7,7 @@
 
 | | |
 |---|---|
-| Version du contrat | `0.3.0` (Phase 3 — interface ; params DSP/réverbe/horloge éditables) |
+| Version du contrat | `0.3.0` + non publié : DSP / réverbe / horloge à la forme du matériel, lus sur la MOTU (présets schema v2, D19–D23) |
 | MSRV | Rust `1.85`, édition 2021 (relevée depuis 1.80, décision D18) |
 | Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` (embarqué via `rust-embed`) |
 
@@ -60,8 +60,8 @@ changements venant du matériel sont appliqués et diffusés, **jamais renvoyés
 | `src/engine.rs` | Acteur : `EngineHandle`, `Envelope{Origin,Target}`, `DeviceLink`, `Shutdown` | ✅ |
 | `src/presets.rs` | Présets (`<presets_dir>/<nom>.json`), `labels.json`, écritures atomiques | ✅ |
 | `src/motu/fader.rs` | Lois de fader `0..1` (mix et trims) — utilisées **uniquement aux bords** | ✅ |
-| `src/motu/protocol.rs` | Trames BE, `8.24`, `Value`/`ValueKind` | ✅ |
-| `src/motu/props.rs` | Table `prop_id` (65 entrées, `verified: false`), `encode`/`decode` | 🟡 partiel (§8) |
+| `src/motu/protocol.rs` | Trames BE, `8.24`, `Int16`, `Value`/`ValueKind` | ✅ |
+| `src/motu/props.rs` | Table `prop_id` (69 entrées, `verified: false`), `encode`/`decode` ; DSP/réverbe/horloge décodés, encodeurs `encode_unverified` **non actifs** | 🟡 partiel (§8) |
 | `src/motu/throttle.rs` | Limiteur par paramètre, dernière valeur garantie | ✅ |
 | `src/motu/client.rs` | Client WS, `PropCodec`, sync Option A, backoff 1→10 s, mode démo | ✅ |
 | `src/motu/discovery.rs` | IP explicite → mDNS (provisoire) → ARP + sonde TCP | 🟡 (§8) |
@@ -102,10 +102,11 @@ conversion (une valeur invalide ne coupe jamais le son).
 
 * `raw = round(v · 2^24)` en `i32` BE ; plage `[-128, 128)` ; hors plage/non fini → `ProtocolError`.
 * Trame : `[prop_id: u16 BE][index: u16 BE][payload]`, payload selon `ValueKind`
-  (`Fixed` 4 o, `U32` 4 o, `U8` 1 o, `Str32` 32 o). Toute trame malformée → erreur, jamais de
+  (`Fixed` 4 o, `U32` 4 o, `U8` 1 o, `I16` 2 o signé, `Str32` 32 o). Toute trame malformée → erreur, jamais de
   panique (balayage exhaustif 0..64 octets testé).
-* ⚠ Les **fréquences d'EQ ne sont pas en `8.24`** mais en `Int32` Hz (Q1 résolu) ; `Int16` et
-  tableaux ne sont pas encore représentables par `ValueKind` (voir §8).
+* ⚠ Les **fréquences d'EQ ne sont pas en `8.24`** mais en `Int32` Hz (Q1 résolu, lues via
+  `U32` interprété signé) ; les temps DSP sont en `Int16` ms (`ValueKind::I16`) ; les tableaux
+  ne sont pas représentables par `ValueKind` (voir §8).
 
 ### 3.3 État central (`state::MotuState`)
 
@@ -115,12 +116,23 @@ MotuState
 ├── mixes[7]: { name, channels[32]: { gain, pan, mute, solo } }
 ├── main: { db }
 ├── preamps[8]: { gain_db, phantom, pad, phase }   (+48V / Pad : seulement les 2 entrées micro)
-├── channels[32]: { eq: { bypass, hpf, bands[4] }, comp, gate }
-├── reverb: { enabled, return_gain, time_s, predelay_ms, sends[32] }   (non mappé)
+├── input_eq[8][4]: { mode, bypass, freq_hz, gain_db, bw_oct }   (préamplis × INPUT_EQ_BANDS ; lu, non écrit)
+├── compressors[8]: { bypass, threshold_db, attack_ms, release_ms, ratio, makeup }   (lu, non écrit)
+├── gates[2]: { bypass, threshold_db, attack_ms, release_ms }     (entrées micro ; lu, non écrit)
+├── output_eq[12][3]: { mode, bypass, freq_hz, gain_db, bw_oct }  (OUTPUT_EQ_OUTPUTS × OUTPUT_EQ_BANDS ; lu, non écrit)
+├── reverb: { decay, damping, predelay_ms, width, preset }        (lu, non écrit ; départs/retour = mixes)
 ├── routing: { matrix[input][output]: bool }                          (non mappé)
 ├── control_room: { dim, mono, speaker_b, talkback, phones_db }
-└── clock: { sample_rate, source }
+└── clock: { sample_rate, source }                                (lu, non écrit)
 ```
+
+* Dimensions DSP : `input_eq` et `compressors` = `topology.preamps`, `gates` =
+  `topology.mic_inputs`, `output_eq` = constantes `OUTPUT_EQ_OUTPUTS` × `OUTPUT_EQ_BANDS`
+  (mk5 : 12 × 3). `MotuState::reset_dsp` reconstruit ces sections aux défauts du dump.
+* Réverbe : ses **départs** sont les faders du mix « Reverb » (mix 6) et son **retour** est
+  l'entrée de mixage « Reverb » (30-31) de chaque mix : ils vivent dans `mixes` (`mix_vol`).
+* `mode` d'EQ = octet brut (0 cloche, 2 shelf ?, 3 passe-haut) ; les valeurs inconnues sont
+  conservées telles quelles.
 
 * Indices **0-based** partout sauf OSC (1-based).
 * `apply(&Param)` : rejette non-fini / index hors bornes **sans muter** ; borne et arrondit
@@ -179,14 +191,18 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 ```
 
 `param` : `mix_vol` (`gain`), `mix_pan` (`value`), `mix_mute`, `mix_solo`, `main_vol` (`db`),
-`preamp_gain` (`db`), `phantom`, `pad`, `phase`, `eq_bypass`, `route`, `dim`, `mono`,
-`speaker_b`, `talkback`, `phones_vol` (`db`), et (Phase 3, état/présets/UI seulement, sans
-adresse OSC ni mappage matériel) : `eq_band` (`ch`, `band` 0–3, `enabled`, `freq_hz`, `gain_db`,
-`q`), `hpf` (`enabled`, `freq_hz`), `comp` (`enabled`, `threshold_db`, `ratio`, `attack_ms`,
-`release_ms`, `gain_db`), `gate` (`enabled`, `threshold_db`, `attack_ms`, `release_ms`),
-`reverb` (`enabled`, `return_gain` linéaire, `time_s`, `predelay_ms`), `reverb_send` (`ch`,
-`gain` linéaire), `clock` (`sample_rate`, `source`). Chaque message porte le **bloc entier**
-(idempotent) ; plages dans `state::dsp_limits` (miroir TS : `frontend/src/lib/protocol.ts`,
+`preamp_gain` (`db`), `phantom`, `pad`, `phase`, `route`, `dim`, `mono`, `speaker_b`,
+`talkback`, `phones_vol` (`db`), `output_trim` (`ch`, `db`), et **un param par propriété
+matérielle** pour le DSP (lus sur la MOTU, pas encore écrits) : `input_eq_mode` (`ch`, `band`,
+`mode` octet brut), `input_eq_bypass` (`on`), `input_eq_freq` (`hz` entiers), `input_eq_gain`
+(`db`), `input_eq_bw` (`octaves`), idem `output_eq_*` (`ch` = sortie 0–11, `band` 0–2),
+`gate_bypass` / `comp_bypass` (`on` = bypass), `gate_threshold` / `comp_threshold` (`db`),
+`gate_attack` / `gate_release` / `comp_attack` / `comp_release` (`ms` entiers), `comp_ratio`
+(`ratio`), `comp_makeup` (`gain` linéaire), `reverb_decay` / `reverb_damping` / `reverb_width`
+(`value` 0–100), `reverb_predelay` (`ms` 0–100), `reverb_preset` (`preset`), `sample_rate`
+(`rate` : `"48000"`…), `clock_source` (`source` : `internal`/`spdif`/`optical`). Chaque message
+est idempotent ; plages dans `state::dsp_limits` (provisoires, larges ; miroir TS :
+`frontend/src/lib/protocol.ts`,
 loi de fader : `frontend/src/lib/fader.ts`, portage exact de `motu::fader`). Le serveur ne renvoie pas un `changed` au client
 qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants ≤ 64 KiB.
 
@@ -200,7 +216,12 @@ qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants �
 | `/mix/main/vol` | float `0..1` | `main_vol` (trim : 1.0 = 0 dB, 0 = −100 dB) |
 | `/preamp/{ch}/gain` | float dB `0..74` | `preamp_gain` |
 | `/preamp/{ch}/48v` · `/pad` · `/phase` | int | `phantom` · `pad` · `phase` |
-| `/eq/{ch}/bypass` | int | `eq_bypass` |
+| `/eq/{ch}/band/{b}/mode` · `/bypass` · `/freq` · `/gain` · `/bw` | int / float | `input_eq_*` (`ch` 1–8, `b` 1–4 ; Hz, dB, octaves) |
+| `/output/{n}/eq/band/{b}/mode` · `/bypass` · `/freq` · `/gain` · `/bw` | int / float | `output_eq_*` (`n` 1–12, `b` 1–3) |
+| `/comp/{ch}/bypass` · `/threshold` · `/attack` · `/release` · `/ratio` · `/makeup` | int / float | `comp_*` (dB, ms, `n:1`, make-up linéaire) |
+| `/gate/{ch}/bypass` · `/threshold` · `/attack` · `/release` | int / float | `gate_*` (`ch` 1–2) |
+| `/reverb/decay` · `/damping` · `/predelay` · `/width` · `/preset` | float / int | `reverb_*` (unités natives 0–100, ms, n° brut) |
+| `/clock/rate` · `/clock/source` | int Hz · string | `sample_rate` · `clock_source` (`internal`/`spdif`/`optical`) |
 | `/routing/in/{in}/out/{out}` | int | `route` |
 | `/controlroom/dim` · `/mono` · `/ab` · `/talkback` | int | `dim` · `mono` · `speaker_b` · `talkback` |
 | `/controlroom/phones/vol` | float `0..1` | `phones_vol` (trim) — extension à HANDOFF §3.1 |
@@ -278,18 +299,23 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 | D12 | Pas d'écho `changed` vers l'émetteur (Web et OSC) | Évite le « tremblement » des faders pendant le geste |
 | D13 | Rappel de préset sans trims ni +48V (arbitrage mainteneur, audit n°9) | Sécurité des écoutes et du matériel ; motu-mk5-linux le déconseille |
 | D14 | `rust-embed` verrouillé en 8.7.2 dans `Cargo.lock` | ≥ 8.8 tire `cpufeatures 0.3` (édition 2024) et cassait l'ancienne MSRV 1.80 ; à réévaluer depuis D18 (MSRV 1.85) |
-| D15 | Compatibilité des données : présets versionnés (`schema_version`, v1), lecture tolérante (`serde(default)`, champs inconnus ignorés), format plus récent refusé clairement ; clés inconnues de `config.toml` = avertissement | Mises à jour et retours arrière sans perte de présets ni démarrage bloqué ; fixture figée `tests/fixtures/preset-v1.json` |
+| D15 | Compatibilité des données : présets versionnés (`schema_version`, v2 depuis D20), lecture tolérante (`serde(default)`, champs inconnus ignorés), format plus récent refusé clairement ; clés inconnues de `config.toml` = avertissement | Mises à jour et retours arrière sans perte de présets ni démarrage bloqué ; fixtures figées `tests/fixtures/preset-v1.json` et `preset-v2.json` |
 | D16 | Mises à jour **manuelles** via `cuemix-update` (sha256, remplacement atomique, contrôle `/api/health`, retour arrière automatique) ; ni minuterie, ni bouton web, ni requête sortante vers GitHub (arbitrage mainteneur 2026-11-14) | Pas de redémarrage surprise en séance ; le serveur web non-root et sans authentification ne doit pas pouvoir déclencher une action root |
 | D17 | Version de crate = tag de release (vérifié par `release.yml`) ; tags avec `-` = pré-release (pas de `latest` Docker) | Le contrôle de santé de `cuemix-update` compare la version annoncée par `/api/health` |
 | D18 | MSRV relevée de 1.80 à **1.85** (arbitrage mainteneur 2026-11-14) ; job CI MSRV via `dtolnay/rust-toolchain@master` + `toolchain: "1.85"`, ignoré par Dependabot | Les mises à jour Dependabot (tokio 1.54, toml 1.x) exigent 1.85 ; binaires statiques : les utilisateurs ne compilent pas ; reste conforme à « MSRV 1.80+ » (HANDOFF) |
+| D19 | DSP / réverbe / horloge à la forme du matériel : un `Param` **par propriété** (`input_eq_freq`, `comp_makeup`…) au lieu de blocs entiers (refonte approuvée par le mainteneur le 2026-11-15 ; la forme « un param par propriété » est un choix d'implémentation) | Une trame lue = un param ; pas d'état fantôme côté client pour recomposer un bloc ; codec 1:1 |
+| D20 | Présets **schema v2** : migration v0/v1 → v2 dans `presets::parse_preset` (suppression de `channels` et de l'ancien `reverb`, puis `reset_dsp` aux dimensions du préset) ; fixtures figées `preset-v1.json` et `preset-v2.json` | L'ancien DSP (32 tranches, HPF séparé, Q) ne correspond à aucun réglage matériel : rien à convertir honnêtement |
+| D21 | Départs/retour de réverbe = paramètres de mix (mix « Reverb », entrée « Reverb ») ; plus de `reverb_send` ni de `return_gain` | C'est ainsi que la MOTU les stocke (dump) |
+| D22 | Mode d'EQ = octet brut (`u8`) + noms côté UI ; pas de bypass global d'EQ (`eq_bypass`, `/eq/{ch}/bypass` retirés) | Valeurs inconnues conservées ; le matériel n'a qu'un bypass par bande |
+| D23 | Encodeurs DSP écrits et testés (`props::encode_unverified`) mais **non branchés** sur `encode` : `is_mapped` faux, rien n'est envoyé | Activation une fonction à la fois après un essai sur la carte |
 
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
 
 | # | Sujet | Arbitrage | État |
 |---|---|---|---|
-| Q1 | Encodage des fréquences EQ | Vérifier dans les sources | ✅ `Int32` Hz (props 1004/1024) ; gain/largeur EQ en `8.24` ; HPF = mode de bande 3. encodable via `ValueKind::U32` (existant) avec l'EQ |
+| Q1 | Encodage des fréquences EQ | Vérifier dans les sources | ✅ `Int32` Hz (props 1004/1024) ; gain/largeur EQ en `8.24` ; HPF = mode de bande 3 ; **lu** depuis le dump (index `ch × 4 + bande` en entrée, `sortie × 3 + bande` en sortie) ; encodeur prêt, non actif |
 | Q2 | Dimensions | Défauts démo, topologie réelle à la connexion | ✅ comptées dans le dump de connexion (`motu::identify`) ; défauts D11 confirmés sur un mk5 |
-| Q3 | Table `prop_id` | Depuis motu-mk5-linux | 🟡 65 propriétés ; mappés : gain/phase préamplis (8), pad/48V (2), main, casque, mono, talkback. **En lecture seule** : matrice de mix 1016–1019 (`bus × 32 + entrée`, déduit du dump ; écriture non vérifiée). **Non mappés** : routing (5010 = table de 80 o), bypass EQ global (par bande), DIM (absent du matériel), A/B (5015–5017 inconnus), horloge (`clock`), réverbération (`reverb`, `reverb_send`), EQ/HPF/comp/gate |
+| Q3 | Table `prop_id` | Depuis motu-mk5-linux | 🟡 65 propriétés ; mappés : gain/phase préamplis (8), pad/48V (2), main, casque, mono, talkback. **En lecture seule** : matrice de mix 1016–1019 (`bus × 32 + entrée`, déduit du dump ; écriture non vérifiée). **En lecture seule (écriture non active)** : EQ d'entrée 1002–1006 (8 × 4), EQ de sortie 1022–1026 (12 × 3), gate 1007–1010 (2), compresseur 1011–1015 + 1021 (8), réverbe 1030–1034, horloge 10/11 (layouts lus dans le dump du 2026-11-15). **Non mappés** : routing (5010 = table de 80 o), DIM (absent du matériel), A/B (5015–5017 inconnus), niveau de sortie des bus (1027) |
 | Q4 | Volumes en gain linéaire `8.24` | Gain linéaire | 🟡 non confirmé ; seul indice : seuil de gate « 1 = 0 dB » |
 
 À vérifier **sur matériel** par le mainteneur (bloquant pour les faders de mix) :

@@ -13,13 +13,13 @@ High-performance **Rust** web controller and bidirectional **OSC** bridge for th
 Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`docs/MOTU-PROTOCOL.md`](docs/MOTU-PROTOCOL.md). Everything marked "mapped" is encoded in code but has not yet been verified on a device.
 
 - **Mapped:** preamp gain and phase (8 inputs), pad and 48 V phantom (2 mic inputs), main and headphone trims, analog output trims (outputs 1–10), mono, talkback.
-- **Read from the device, not written yet:** mix faders, pan, mute and solo. The UI shows the MOTU's mix; moving a mix control does not change the hardware yet.
+- **Read from the device, not written yet:** mix faders, pan, mute and solo; input EQ (analog inputs 1–8, 4 bands: type, bypass, frequency, gain, bandwidth), compressor (inputs 1–8), gate (mic 1–2), output EQ (12 outputs, 3 bands), reverb (decay, damping, pre-delay, width, preset), sample rate and clock source. The UI shows the MOTU's settings; changing them in the UI does not change the hardware yet (the encoders exist and are tested, but are switched off until each feature is checked on a card). Reverb sends are the Reverb mix faders and the reverb return is the "Reverb" mixer input pair (0-based indices 30-31) in every mix, so both follow the mix matrix.
 - **Detected on connect:** model, firmware, channel counts, stereo pairs and default channel/mix names (the UI sizes itself to the device).
-- **Not mapped yet:** routing (table semantics unknown), EQ bypass (per-band layout unknown), DIM (no hardware property), A/B / speaker B (properties 5015–5017 unknown).
+- **Not mapped yet:** routing (table semantics unknown), DIM (no hardware property), A/B / speaker B (properties 5015–5017 unknown), mix bus output level (1027). There is no global EQ bypass on the hardware: bypass is per band.
 
 ## Features
 
-- Web UI for mixes, channel faders, pan, mute/solo, preamps (gain, 48 V, pad, phase), channel DSP (EQ, compressor, gate), reverb sends, routing matrix, control room and clock. Only the controls listed above are wired to hardware; the rest is planned.
+- Web UI for mixes, channel faders, pan, mute/solo, preamps (gain, 48 V, pad, phase), input DSP (EQ, compressor, gate), output EQ, reverb (settings, sends, return), routing matrix, control room and clock. Only the controls listed above are wired to hardware; the rest is planned.
 - Bidirectional OSC over UDP `:8000` with 1-based indices (TouchOSC / QLab friendly), with feedback to every controller.
 - One state core: all changes go through a single `Param` type, are clamped, then broadcast to Web and OSC clients. The engine never echoes a change back to the client that sent it.
 - Native units in state, presets and JSON (`gain` for mix faders, `db` for main, phones and preamps). The `0..1` fader position exists only at the edges: OSC and the UI fader.
@@ -112,7 +112,7 @@ Once running:
 
 ## Web UI
 
-The embedded Svelte 5 console (dark theme) has Mixer, Preamps, Routing and Reverb views, a channel DSP drawer (interactive EQ curve, compressor, gate), a presets popover and an always-visible Control Room bar. Faders: double-click/tap resets to 0 dB, Shift-drag is fine adjustment, mouse wheel nudges. Meters are provisional (level *i* is drawn on mixer input *i*) and stay idle in demo mode. When online, controls not yet written to the MOTU get a dashed outline.
+The embedded Svelte 5 console (dark theme) has Mixer, Input, Output, Routing and Reverb views, a DSP drawer on the analog-input strips (interactive EQ curve, compressor, and a gate on the mic inputs), an output EQ on the Output tab, a presets popover and an always-visible Control Room bar. Faders: double-click/tap resets to 0 dB, Shift-drag is fine adjustment, mouse wheel nudges. Meters are provisional (level *i* is drawn on mixer input *i*) and stay idle in demo mode. When online, controls not yet written to the MOTU get a dashed outline.
 
 ```sh
 cd frontend && npm install
@@ -134,7 +134,16 @@ UDP `:8000`. **Indices are 1-based on the wire** (the server converts them to 0-
 | `/mix/main/vol` | float `0..1` | `main_vol` → `db` (trim: `1.0` = 0 dB, `0` = −100 dB) |
 | `/preamp/{ch}/gain` | float dB `0..74` | `preamp_gain` (`db`) |
 | `/preamp/{ch}/48v` · `/pad` · `/phase` | int | `phantom` · `pad` · `phase` |
-| `/eq/{ch}/bypass` | int | `eq_bypass` |
+| `/eq/{ch}/band/{b}/mode` · `/bypass` | int | `input_eq_mode` (raw type: 0 bell, 2 shelf?, 3 high-pass) · `input_eq_bypass`; `ch` 1–8, `b` 1–4 |
+| `/eq/{ch}/band/{b}/freq` · `/gain` · `/bw` | float | `input_eq_freq` (Hz) · `input_eq_gain` (dB) · `input_eq_bw` (octaves) |
+| `/output/{n}/eq/band/{b}/mode` · `/bypass` · `/freq` · `/gain` · `/bw` | int / float | `output_eq_*`, same units; `n` 1–12, `b` 1–3 |
+| `/comp/{ch}/bypass` | int | `comp_bypass` (1 = bypassed); `ch` 1–8 |
+| `/comp/{ch}/threshold` · `/attack` · `/release` · `/ratio` · `/makeup` | float | `comp_*`: dB · ms · ms · `n:1` · linear gain (1.0 = 0 dB) |
+| `/gate/{ch}/bypass` · `/threshold` · `/attack` · `/release` | int / float | `gate_*` (1 = bypassed, dB, ms, ms); `ch` 1–2 |
+| `/reverb/decay` · `/damping` · `/predelay` · `/width` | float `0..100` | `reverb_decay` · `reverb_damping` · `reverb_predelay` (ms) · `reverb_width` |
+| `/reverb/preset` | int | `reverb_preset` (raw number) |
+| `/clock/rate` | int Hz | `sample_rate` (44100 … 192000) |
+| `/clock/source` | string | `clock_source`: `internal`, `spdif`, `optical` |
 | `/routing/in/{in}/out/{out}` | int | `route` |
 | `/controlroom/dim` · `/mono` · `/ab` · `/talkback` | int | `dim` · `mono` · `speaker_b` · `talkback` |
 | `/controlroom/phones/vol` | float `0..1` | `phones_vol` (trim; extension to the original spec, needed by the Control Room bar) |

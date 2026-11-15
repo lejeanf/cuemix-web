@@ -27,6 +27,43 @@ need attention. Preset files carry `schema_version`; see
 - Mix faders, pan, mute and solo are read from the MOTU (layout
   `bus × 32 + input`, from a real dump). Read-only: changes made in the UI are
   not written to the device yet, and the controls say so.
+- DSP, reverb and clock are read from the MOTU (layouts from a real connect
+  dump): input EQ on analog inputs 1-8 (4 bands: type, bypass, frequency,
+  gain, bandwidth; props 1002-1006, index `ch × 4 + band`), compressor on
+  inputs 1-8 (bypass, threshold, attack, release, ratio, make-up; 1011-1015,
+  1021), gate on mic 1-2 (1007-1010), output EQ on 12 outputs (3 bands;
+  1022-1026, index `out × 3 + band`), reverb (decay, damping, pre-delay,
+  width, preset; 1030-1034), sample rate (10) and clock source (11). The UI
+  shows them as read-only ("changes here are not sent yet"): the encoders are
+  written and unit-tested but switched off, so nothing new is sent to the
+  device until each feature is checked on a card.
+- `Int16` payloads (`ValueKind::I16`) for the DSP attack/release times.
+- OSC addresses for all of the above: `/eq/{ch}/band/{b}/{mode|bypass|freq|gain|bw}`,
+  `/output/{n}/eq/band/{b}/…`, `/comp/{ch}/…`, `/gate/{ch}/…`,
+  `/reverb/{decay|damping|predelay|width|preset}`, `/clock/rate`,
+  `/clock/source`.
+- Output tab: compact output EQ (pick an output, curve + band table).
+
+### Changed
+- **Preset format v2** (`schema_version: 2`). The DSP and reverb part of the
+  state now matches the hardware: `input_eq`, `compressors`, `gates`,
+  `output_eq` and a `reverb` block with decay / damping / pre-delay / width /
+  preset, replacing the per-mixer-input `channels` (EQ + HPF + compressor +
+  gate on all 32 strips) and the old reverb (time, return, sends). One param
+  per hardware property (e.g. `input_eq_freq`, `comp_makeup`, `sample_rate`,
+  `clock_source`) replaces the block params `eq_band`, `hpf`, `comp`, `gate`,
+  `reverb`, `reverb_send` and `clock`.
+- Migration: v1 (and unversioned) presets still load. Mixes, preamps, trims,
+  control room, routing, clock and labels are kept; the old DSP and reverb
+  sections are dropped and replaced by the hardware defaults (they never
+  matched a hardware setting). The file is rewritten as v2 on the next save.
+- Reverb sends are the faders of the Reverb mix and the reverb return is the
+  "Reverb" mixer input in every mix; the Reverb tab now shows those mix
+  faders. Removed: the global EQ bypass (`eq_bypass`, OSC `/eq/{ch}/bypass`):
+  the hardware only has a bypass per band.
+- The mixer strip's DSP button only appears on strips that have DSP (analog
+  inputs); the separate EQ toggle is gone. The gate section only shows on the
+  mic inputs.
 
 ### Fixed
 - Writes to the MOTU had no effect: the device ignores frames without a
