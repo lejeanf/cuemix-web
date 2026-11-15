@@ -287,7 +287,7 @@ fn encode_frames<C: PropCodec>(codec: &C, param: &Param) -> Vec<Vec<u8>> {
     };
     frames
         .into_iter()
-        .filter_map(|frame| match frame.encode() {
+        .filter_map(|frame| match frame.encode_write() {
             Ok(bytes) => Some(bytes),
             Err(e) => {
                 tracing::warn!(?frame, error = %e, "cannot encode frame, dropped");
