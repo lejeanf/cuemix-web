@@ -184,7 +184,11 @@ fn mdns_browse_blocking(limit: Duration, local: &HashSet<IpAddr>) -> Option<Ipv4
             let left = deadline.checked_duration_since(std::time::Instant::now())?;
             match rx.recv_timeout(left) {
                 Ok(ServiceEvent::ServiceResolved(info)) => {
-                    let addrs: Vec<IpAddr> = info.get_addresses().iter().copied().collect();
+                    let addrs: Vec<IpAddr> = info
+                        .get_addresses()
+                        .iter()
+                        .map(|a| a.to_ip_addr())
+                        .collect();
                     if let Some(ip) = looks_like_motu(info.get_fullname(), &addrs, local) {
                         return Some(ip);
                     }
