@@ -1,0 +1,35 @@
+[Unit]
+Description=cuemix-web MOTU UltraLite-mk5 controller
+Documentation=https://github.com/lejeanf/cuemix-web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cuemix
+Group=cuemix
+ExecStart=/usr/local/bin/cuemix-web --config /etc/cuemix-web/config.toml
+WorkingDirectory=/var/lib/cuemix-web
+Restart=on-failure
+RestartSec=3
+
+# Hardening: the service needs only its config (read), its state directory
+# (read/write) and the network. No privilege escalation, no capabilities.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/cuemix-web
+AmbientCapabilities=
+CapabilityBoundingSet=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

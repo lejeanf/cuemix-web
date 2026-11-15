@@ -1,0 +1,10 @@
+# MOTU UltraLite-mk5 USB CDC-Ethernet link.
+#
+# TEMPLATE: deploy/proxmox-setup.sh and deploy/linux-setup.sh install this file
+# to /etc/udev/rules.d/99-motu-mk5.rules after replacing @HELPER@ with the
+# absolute path of the helper script that matches the target platform.
+# %k is the kernel name of the network interface (e.g. eth1).
+#
+# 07fd is the MOTU USB vendor id; the device is exposed as a CDC-Ethernet
+# interface (driver cdc_ether). ATTRS and DRIVERS also match parent devices.
+ACTION=="add", SUBSYSTEM=="net", ATTRS{idVendor}=="07fd", DRIVERS=="cdc_ether", RUN+="@HELPER@ %k"
