@@ -3,8 +3,16 @@
 # TEMPLATE: deploy/proxmox-setup.sh and deploy/linux-setup.sh install this file
 # to /etc/udev/rules.d/99-motu-mk5.rules after replacing @HELPER@ with the
 # absolute path of the helper script that matches the target platform.
-# %k is the kernel name of the network interface (e.g. eth1).
+#
+# $name is the interface name after renaming (e.g. enx0001f2ff72a9). Do not
+# use %k: the kernel registers the link as eth0 and udev renames it
+# (predictable names) during this same event, so by the time RUN executes
+# the kernel name no longer exists (seen on Proxmox VE 7.4).
 #
 # 07fd is the MOTU USB vendor id; the device is exposed as a CDC-Ethernet
-# interface (driver cdc_ether). ATTRS and DRIVERS also match parent devices.
-ACTION=="add", SUBSYSTEM=="net", ATTRS{idVendor}=="07fd", DRIVERS=="cdc_ether", RUN+="@HELPER@ %k"
+# interface (driver cdc_ether). Match on the ENV keys the usb_id builtin sets
+# for net devices (75-net-description.rules), not on ATTRS{idVendor} plus
+# DRIVERS: udev requires all ATTRS/DRIVERS keys to match ONE parent, and the
+# vendor id (USB device) and the driver (USB interface) live on different
+# parents, so that combination never matched (seen with udevadm test).
+ACTION=="add", SUBSYSTEM=="net", ENV{ID_VENDOR_ID}=="07fd", ENV{ID_USB_DRIVER}=="cdc_ether", RUN+="@HELPER@ $name"

@@ -151,6 +151,15 @@ need attention. Preset files carry `schema_version`; see
   to start. The script now offers to source its bridge file (with a backup),
   stops otherwise, and checks the bridge exists after `ifreload`. The
   reverse-proxy note names the headers actually used (`X-Forwarded-Host`).
+- udev rule never matched: `ATTRS{idVendor}` and `DRIVERS` must match the
+  same parent device, but the vendor id and the `cdc_ether` driver live on
+  different ones. It now matches `ENV{ID_VENDOR_ID}` / `ENV{ID_USB_DRIVER}`
+  and passes the renamed interface (`$name`, not the pre-rename `%k`). Found
+  on the first real hardware test (`udevadm test`).
+
+### Verified on hardware
+- An UltraLite-mk5 is discovered through its UDP announcement and accepts the
+  WebSocket connection on port 1280 without a path.
 
 ## [0.3.0] - 2026-11-14
 
