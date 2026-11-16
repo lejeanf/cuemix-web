@@ -12,6 +12,12 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-16
+
+Phone view with rotary knobs and per-channel fades, room test with the phone
+microphone, input and output EQ written to the card, and meters that follow
+the card's output routing.
+
 ### Changed
 - Phones meter: it now shows what the headphone jack plays. Output meters
   follow the card's output patch (property 5010): on the card the jack is fed
@@ -133,6 +139,14 @@ need attention. Preset files carry `schema_version`; see
   26 dB, with Phones unchanged (it has its own slot); all four input EQ bands
   at −20 dB on Line 7 and 8 lower their post-EQ meters by about 29 dB. Both
   return to their previous level once the original values are written back.
+
+### Compatibility
+- Presets: format unchanged (v2); 0.4.0 presets load as they are.
+- `config.toml`: new optional `[measure]` section (MPD address for the room
+  test); without it the room test is hidden. Older configs work unchanged.
+- Deployment (Proxmox): run `deploy/proxmox-setup.sh --update` once to install
+  the bridge `post-up` hook that keeps the MOTU link attached after a network
+  reload.
 
 ## [0.4.0] - 2026-11-15
 
