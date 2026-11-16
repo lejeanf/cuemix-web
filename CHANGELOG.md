@@ -12,6 +12,40 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+### Added
+- Output EQ writes: the five output EQ props (1022-1026: type, bypass,
+  frequency, gain, Q) are now sent to the MOTU, coalesced per parameter by the
+  existing throttle. A filter type is written only on a band where CueMix 5
+  offers it (band 1: bell, low shelf, high-pass; band 2: bell; band 3: bell,
+  high shelf). Input EQ, compressor, gate, reverb and clock stay
+  read-only until each is checked on a card.
+
+### Fixed
+- Output EQ slot labelling. The device has 12 EQ slots, not 12 mono outputs:
+  Main L-R, an unused slot (never shown or written), Line 3 … Line 10, Phones
+  L-R and the Reverb. The Output tab now names them that way and a preset or
+  edit applies to the selected slot only (it used to treat slots as L/R pairs,
+  so "Phones R" edited the reverb EQ).
+
+### Changed
+- Output EQ defaults match CueMix 5 (low shelf 60 Hz, bell 800 Hz, high shelf
+  14 kHz, 0 dB, Q 1); the *Flat* preset uses the same values. OSC
+  `/output/{n}/eq/…` takes the 1-based EQ slot (1 = Main, 3-10 = Line 3-10,
+  11 = Phones, 12 = Reverb; 2 is unused).
+- Compatibility: preset recall now also applies the output EQ to the card.
+  Recalling a preset saved before this version (it holds placeholder EQ
+  values) replaces the EQ stored on the card. Output EQ values the card never
+  gets (the unused slot, a filter type the band does not offer) are rejected
+  from OSC and repaired to the defaults when a preset is imported or recalled.
+- Known limitation: on a stereo line pair CueMix only uses the left slot (the
+  odd-numbered line), so edit Line 3/5/7/9 for stereo pairs. The UI does not
+  hide the right slot yet.
+
+### Verified on hardware
+- UltraLite-mk5 (firmware 2.0.8): a Main EQ bell written at 1 kHz, −10 dB,
+  Q 1 is audible, and the card reports it back after a service restart (from
+  its own connect dump).
+
 ## [0.4.0] - 2026-11-15
 
 First version used day to day on a real UltraLite-mk5 (firmware 2.0.8).

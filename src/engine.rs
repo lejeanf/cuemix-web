@@ -40,7 +40,9 @@ use crate::state::{
 /// Capacity of the client → engine request queue.
 const REQUEST_QUEUE: usize = 1024;
 /// Capacity of the engine → device queue (the client drains it continuously).
-const DEVICE_QUEUE: usize = 1024;
+/// Sized for a whole-state recall on an unidentified device: every mix param
+/// (4 per input and bus) plus the output EQ (165 params) must fit.
+const DEVICE_QUEUE: usize = 4096;
 /// Capacity of the broadcast ring; slow receivers get `Lagged` and should
 /// resynchronise with [`EngineHandle::initial_events`].
 const EVENT_RING: usize = 4096;
@@ -409,21 +411,23 @@ impl Engine {
 
     async fn on_command(&mut self, origin: Origin, command: Command) {
         match command {
-            Command::Set(param) => match self.state.apply(&param) {
-                Ok(Some(effective)) => {
-                    self.forward(effective);
-                    self.emit(
-                        origin,
-                        Target::All,
-                        ServerEvent::Changed {
-                            params: vec![effective],
-                        },
-                    );
-                    self.refresh_modified(origin);
+            Command::Set(param) => {
+                match crate::state::check_writable(&param).and_then(|()| self.state.apply(&param)) {
+                    Ok(Some(effective)) => {
+                        self.forward(effective);
+                        self.emit(
+                            origin,
+                            Target::All,
+                            ServerEvent::Changed {
+                                params: vec![effective],
+                            },
+                        );
+                        self.refresh_modified(origin);
+                    }
+                    Ok(None) => {}
+                    Err(e) => self.reply_error(origin, e.to_string()),
                 }
-                Ok(None) => {}
-                Err(e) => self.reply_error(origin, e.to_string()),
-            },
+            }
             Command::LoadPreset { name } => match self.store.load(&name).await {
                 Ok(preset) => self.recall(origin, preset),
                 Err(e) => self.reply_error(origin, format!("{e:#}")),

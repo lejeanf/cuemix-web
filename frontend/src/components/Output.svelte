@@ -3,12 +3,13 @@
   import { S } from '../lib/strings';
   import { TRIM_MIN_DB } from '../lib/protocol';
   import { formatDb } from '../lib/fader';
-  import { OUTPUT_EQ_PRESETS, matchPreset, presetBands } from '../lib/eqPresets';
+  import { OUTPUT_EQ_PRESETS, matchPreset, presetWrites } from '../lib/eqPresets';
   import Knob from './Knob.svelte';
   import Meter from './Meter.svelte';
   import { METER_SLOT, OUTPUTS } from '../lib/meterMap';
   import EqCurve from './EqCurve.svelte';
   import EqBands from './EqBands.svelte';
+  import { eqSlotName, visibleEqSlots } from '../lib/outputEq';
 
   const st = $derived(store.state);
   const off = $derived(!store.ready);
@@ -33,15 +34,14 @@
     return out;
   });
 
-  const pair = $derived([eqOut & ~1, (eqOut & ~1) + 1].filter((c) => c < (st?.output_eq.length ?? 0)));
+  const eqSlots = $derived(visibleEqSlots(st?.output_eq.length ?? 0));
   const current = $derived(matchPreset(st?.output_eq[eqOut]));
 
-  /** Applies a preset to both outputs of the selected pair. */
+  /** Applies a preset to the selected EQ slot only. */
   function applyPreset(id: string) {
     const p = OUTPUT_EQ_PRESETS.find((x) => x.id === id);
     if (!p) return;
-    const bands = presetBands(p);
-    for (const ch of pair) bands.forEach((band, i) => store.setEq('output', ch, i, band, true));
+    for (const w of presetWrites(p, eqOut)) store.setEq('output', w.slot, w.band, w.value, true);
   }
 </script>
 
@@ -140,16 +140,14 @@
         <div class="eqhead">
           <h3>{S.outputEq}</h3>
           <div class="outs" role="tablist" aria-label="{S.outputEq} output">
-            {#each st.output_eq as bands, ch (ch)}
+            {#each eqSlots as s (s.slot)}
               <button
                 role="tab"
                 class="o"
-                class:sel={eqOut === ch}
-                class:act={bands.some((b) => !b.bypass && b.gain_db !== 0)}
-                class:gap={ch % 2 === 0 && ch > 0}
-                aria-selected={eqOut === ch}
-                title="{pairName(ch)} ({ch % 2 ? 'R' : 'L'})"
-                onclick={() => (eqOut = ch)}>{ch + 1}</button
+                class:sel={eqOut === s.slot}
+                class:act={st.output_eq[s.slot].some((b) => !b.bypass && b.gain_db !== 0)}
+                aria-selected={eqOut === s.slot}
+                onclick={() => (eqOut = s.slot)}>{s.name}</button
               >
             {/each}
           </div>
@@ -158,14 +156,14 @@
             <select
               value={current?.id ?? ''}
               disabled={off}
-              title="Applies to outputs {pair.map((c) => c + 1).join(' and ')} ({pairName(eqOut)})"
+              title="Applies to {eqSlotName(eqOut)} only"
               onchange={(e) => applyPreset(e.currentTarget.value)}
             >
               <option value="" disabled>{S.eqPresetCustom}</option>
               {#each OUTPUT_EQ_PRESETS as p (p.id)}<option value={p.id} title={p.info}>{p.name}</option>{/each}
             </select>
           </label>
-          <span class="for">{pairName(eqOut)} · {pair.map((c) => c + 1).join('-')}</span>
+          <span class="for">{eqSlotName(eqOut)}</span>
           {#if eqHint}<span class="sub">{eqHint}</span>{/if}
         </div>
         {#if current}<p class="info">{current.info}</p>{/if}
@@ -299,14 +297,12 @@
   .o {
     min-width: 26px;
     min-height: 24px;
+    padding: 0 7px;
     font-size: 11px;
     background: var(--bg-alt);
     border: 1px solid var(--border);
     border-radius: 5px;
     cursor: pointer;
-  }
-  .o.gap {
-    margin-left: 4px;
   }
   .o.act {
     color: var(--cyan);

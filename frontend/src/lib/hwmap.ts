@@ -18,13 +18,19 @@ export const HW_MAPPED_PARAMS: ReadonlySet<ParamName> = new Set<ParamName>([
   'mix_solo',
   // Prop 5006, from CueMix 5's property table.
   'optical_mode',
+  // Output EQ, 12 slots x 3 bands (props 1022-1026); slot 1 is unused and never written.
+  'output_eq_mode',
+  'output_eq_bypass',
+  'output_eq_freq',
+  'output_eq_gain',
+  'output_eq_bw',
 ]);
 
 export const isHwMapped = (p: ParamName): boolean => HW_MAPPED_PARAMS.has(p);
 
 /**
  * Params read from the MOTU (shown as the hardware has them) but not written yet:
- * the DSP / reverb / clock params whose encoders exist in
+ * the input EQ / dynamics / reverb / clock params whose encoders exist in
  * `src/motu/props.rs` but are not active (writes get enabled one feature at a time).
  */
 export const HW_READ_ONLY_PARAMS: ReadonlySet<ParamName> = new Set<ParamName>([
@@ -33,11 +39,6 @@ export const HW_READ_ONLY_PARAMS: ReadonlySet<ParamName> = new Set<ParamName>([
   'input_eq_freq',
   'input_eq_gain',
   'input_eq_bw',
-  'output_eq_mode',
-  'output_eq_bypass',
-  'output_eq_freq',
-  'output_eq_gain',
-  'output_eq_bw',
   'gate_bypass',
   'gate_threshold',
   'gate_attack',

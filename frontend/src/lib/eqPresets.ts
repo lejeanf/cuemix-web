@@ -19,7 +19,7 @@ const high = (freq_hz: number, gain_db: number): PBand => ({ mode: EQ_MODE.HIGH_
 
 /** Starting points for the 3-band output EQ (home listening / home cinema). */
 export const OUTPUT_EQ_PRESETS: readonly OutputEqPreset[] = [
-  { id: 'flat', name: 'Flat', info: 'No correction', bands: [bell(100, 0), bell(1000, 0), bell(10000, 0)] },
+  { id: 'flat', name: 'Flat', info: 'No correction', bands: [low(60, 0), bell(800, 0), high(14000, 0)] },
   {
     id: 'voice',
     name: 'Voice clarity',
@@ -50,6 +50,18 @@ export const OUTPUT_EQ_PRESETS: readonly OutputEqPreset[] = [
 /** Bands to apply for a preset (not bypassed). */
 export function presetBands(p: OutputEqPreset): EqBand[] {
   return p.bands.map((x) => ({ mode: x.mode, bypass: false, freq_hz: x.freq_hz, gain_db: x.gain_db, bw_oct: x.q }));
+}
+
+/** One band write of applying a preset: always on the given slot, nothing else. */
+export interface PresetWrite {
+  slot: number;
+  band: number;
+  value: EqBand;
+}
+
+/** The writes that apply preset `p` to the output EQ slot `slot` only. */
+export function presetWrites(p: OutputEqPreset, slot: number): PresetWrite[] {
+  return presetBands(p).map((value, band) => ({ slot, band, value }));
 }
 
 /** The preset these bands match, if any (a bypassed or 0 dB band matches any 0 dB band). */

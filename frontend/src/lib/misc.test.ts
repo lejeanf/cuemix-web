@@ -150,24 +150,57 @@ describe('hardware mapping list', () => {
     expect(isHwMapped('dim')).toBe(false);
     expect(isHwReadOnly('mix_vol')).toBe(false);
   });
-  it('DSP, reverb and clock are read from the MOTU but not written yet', () => {
-    for (const p of ['input_eq_freq', 'output_eq_gain', 'comp_makeup', 'gate_bypass', 'reverb_decay', 'sample_rate', 'clock_source'] as const) {
+  it('output EQ is written to the MOTU', () => {
+    for (const p of ['output_eq_mode', 'output_eq_bypass', 'output_eq_freq', 'output_eq_gain', 'output_eq_bw'] as const) {
+      expect(isHwMapped(p)).toBe(true);
+      expect(isHwReadOnly(p)).toBe(false);
+    }
+  });
+  it('input EQ, dynamics, reverb and clock are read from the MOTU but not written yet', () => {
+    for (const p of ['input_eq_freq', 'comp_makeup', 'gate_bypass', 'reverb_decay', 'sample_rate', 'clock_source'] as const) {
       expect(isHwMapped(p)).toBe(false);
       expect(isHwReadOnly(p)).toBe(true);
     }
   });
 });
 
+describe('output EQ slots', () => {
+  it('names the 12 device slots: Main, unused, Line 3-10, Phones, Reverb', async () => {
+    const { OUTPUT_EQ_SLOTS, visibleEqSlots, eqSlotName } = await import('./outputEq');
+    expect(OUTPUT_EQ_SLOTS).toHaveLength(12);
+    expect(OUTPUT_EQ_SLOTS.map((s) => s.slot)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(OUTPUT_EQ_SLOTS.filter((s) => s.hidden).map((s) => s.slot)).toEqual([1]);
+    expect(visibleEqSlots(12).map((s) => s.name)).toEqual([
+      'Main', 'Line 3', 'Line 4', 'Line 5', 'Line 6', 'Line 7', 'Line 8', 'Line 9', 'Line 10', 'Phones', 'Reverb',
+    ]);
+    expect(visibleEqSlots(3).map((s) => s.slot)).toEqual([0, 2]);
+    expect(visibleEqSlots(0)).toEqual([]);
+    expect(eqSlotName(10)).toBe('Phones');
+    expect(eqSlotName(99)).toBe('Slot 99');
+  });
+});
+
 describe('output EQ presets', () => {
   it('every preset round-trips through matchPreset and stays in range', async () => {
-    const { OUTPUT_EQ_PRESETS, presetBands, matchPreset } = await import('./eqPresets');
+    const { OUTPUT_EQ_PRESETS, presetBands, matchPreset, presetWrites } = await import('./eqPresets');
+    const { DSP_LIMITS, eqModesForBand } = await import('./protocol');
     for (const p of OUTPUT_EQ_PRESETS) {
       const bands = presetBands(p);
       expect(bands).toHaveLength(3);
       expect(matchPreset(bands)?.id).toBe(p.id);
-      for (const x of bands) {
-        expect(x.freq_hz).toBeGreaterThanOrEqual(20);
-        expect(Math.abs(x.gain_db)).toBeLessThanOrEqual(24);
+      bands.forEach((x, band) => {
+        expect(x.freq_hz).toBeGreaterThanOrEqual(DSP_LIMITS.FREQ_HZ[0]);
+        expect(x.freq_hz).toBeLessThanOrEqual(DSP_LIMITS.FREQ_HZ[1]);
+        expect(Math.abs(x.gain_db)).toBeLessThanOrEqual(DSP_LIMITS.EQ_GAIN_DB[1]);
+        expect(x.bw_oct).toBeGreaterThanOrEqual(DSP_LIMITS.EQ_BW_OCT[0]);
+        expect(x.bw_oct).toBeLessThanOrEqual(DSP_LIMITS.EQ_BW_OCT[1]);
+        expect(eqModesForBand(band, 3)).toContain(x.mode);
+      });
+      // Applying a preset writes the 3 bands of the selected slot only.
+      for (const slot of [0, 2, 10, 11]) {
+        const w = presetWrites(p, slot);
+        expect(w.map((x) => x.slot)).toEqual([slot, slot, slot]);
+        expect(w.map((x) => x.band)).toEqual([0, 1, 2]);
       }
     }
     const custom = presetBands(OUTPUT_EQ_PRESETS[1]);
