@@ -141,7 +141,7 @@
 <style>
   .fader {
     position: relative;
-    width: 44px;
+    width: 40px;
     min-height: 140px;
     flex: 1;
     touch-action: none;

@@ -3,6 +3,8 @@
   import { S } from '../lib/strings';
   import { LINE_GAIN_MAX_DB, PREAMP_GAIN_MAX_DB } from '../lib/protocol';
   import Knob from './Knob.svelte';
+  import Meter from './Meter.svelte';
+  import { METER_SLOT } from '../lib/meterMap';
 
   const st = $derived(store.state);
   const off = $derived(!store.ready);
@@ -54,6 +56,9 @@
                 hint={store.hint('preamp_gain')}
                 onchange={(v, f) => store.set({ param: 'preamp_gain', ch, db: Math.round(v) }, f)}
               />
+              <div class="hm" title="Input level after the preamp (before EQ and dynamics)">
+                <Meter index={METER_SLOT.preamp(ch)} horizontal label="Input meter {store.labelName(ch)}" />
+              </div>
               <div class="btns">
                 <button
                   class="b"
@@ -149,6 +154,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .hm {
+    align-self: stretch;
+    padding: 0 2px;
   }
   .btns,
   .row {

@@ -5,9 +5,17 @@
   import { formatDb, trimDbToPos, trimPosToDb } from '../lib/fader';
   import Fader from './Fader.svelte';
   import Strip from './Strip.svelte';
+  import Meter from './Meter.svelte';
+  import { METER_SLOT, OUTPUTS } from '../lib/meterMap';
 
   const st = $derived(store.state);
   const off = $derived(!store.ready);
+  /** Meter slots of the selected mix's output: mix m feeds output pair 2m (Main, Line 3-4 … Phones); the Reverb mix shows the reverb return. */
+  const mixMeters = $derived.by(() => {
+    const m = store.bus;
+    if (2 * m + 1 < OUTPUTS) return [METER_SLOT.output(2 * m), METER_SLOT.output(2 * m + 1)];
+    return [METER_SLOT.mixerInput(30), METER_SLOT.mixerInput(31)];
+  });
 </script>
 
 {#if st}
@@ -30,6 +38,7 @@
       </div>
       <section class="main" aria-label={S.main}>
         <div class="title">{S.main}</div>
+        <div class="mrow">
         <Fader
           pos={trimDbToPos(st.main.db)}
           label="{S.main} level"
@@ -40,6 +49,10 @@
           hint={store.hint('main_vol')}
           onchange={(p, f) => store.set({ param: 'main_vol', db: Math.round(trimPosToDb(p, TRIM_MIN_DB)) }, f)}
         />
+          <div class="mm" title="{store.mixName(store.bus)} output level (before the volume)">
+            {#each mixMeters as slot (slot)}<Meter index={slot} label="{store.mixName(store.bus)} output meter" />{/each}
+          </div>
+        </div>
         <div class="db">{formatDb(st.main.db, 0)} dB</div>
       </section>
     </div>
@@ -47,6 +60,17 @@
 {/if}
 
 <style>
+  .mrow {
+    flex: 1;
+    display: flex;
+    gap: 3px;
+    min-height: 0;
+    align-self: stretch;
+  }
+  .mm {
+    display: flex;
+    gap: 2px;
+  }
   .mixer {
     display: flex;
     flex-direction: column;

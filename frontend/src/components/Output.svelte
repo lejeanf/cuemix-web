@@ -5,6 +5,8 @@
   import { formatDb } from '../lib/fader';
   import { OUTPUT_EQ_PRESETS, matchPreset, presetBands } from '../lib/eqPresets';
   import Knob from './Knob.svelte';
+  import Meter from './Meter.svelte';
+  import { METER_SLOT, OUTPUTS } from '../lib/meterMap';
   import EqCurve from './EqCurve.svelte';
   import EqBands from './EqBands.svelte';
 
@@ -63,6 +65,10 @@
             hint={store.hint('main_vol')}
             onchange={(v, f) => store.set({ param: 'main_vol', db: Math.round(v) }, f)}
           />
+          <div class="km" title="Main output level (before the volume)">
+            <Meter index={METER_SLOT.output(0)} horizontal label="Main L meter" />
+            <Meter index={METER_SLOT.output(1)} horizontal label="Main R meter" />
+          </div>
           <div class="btns">
             <button class="t" class:on={st.control_room.mono} aria-pressed={st.control_room.mono} disabled={off}
               onclick={() => store.set({ param: 'mono', on: !st.control_room.mono }, true)}>{S.mono}</button>
@@ -87,6 +93,10 @@
             hint={store.hint('phones_vol')}
             onchange={(v, f) => store.set({ param: 'phones_vol', db: Math.round(v) }, f)}
           />
+          <div class="km" title="Phones level (before the volume)">
+            <Meter index={METER_SLOT.output(10)} horizontal label="Phones L meter" />
+            <Meter index={METER_SLOT.output(11)} horizontal label="Phones R meter" />
+          </div>
         </div>
       </section>
 
@@ -112,6 +122,11 @@
                     hint={store.hint('output_trim')}
                     onchange={(v, f) => store.set({ param: 'output_trim', ch, db: Math.round(v) }, f)}
                   />
+                {/each}
+              </div>
+              <div class="pm" title="Output level before the trim">
+                {#each [ch0, ch0 + 1].filter((c) => c < OUTPUTS) as ch (ch)}
+                  <Meter index={METER_SLOT.output(ch)} horizontal label="Output {ch + 1} meter" />
                 {/each}
               </div>
             </div>
@@ -251,6 +266,17 @@
   .tk {
     display: flex;
     gap: 4px;
+  }
+  .pm,
+  .km {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 3px;
+  }
+  .km {
+    width: 56px;
   }
   .eqhead {
     display: flex;

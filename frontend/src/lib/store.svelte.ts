@@ -1,6 +1,7 @@
 // Connection store: one WebSocket to `/ws`, reactive client state, optimistic
 // edits with a per-parameter 25 ms send throttle.
 import { meterBank } from './meters';
+import { hasMk5Meters, mk5MeterLevels } from './meterMap';
 import type { ChannelLabel, Command, DeviceInfo, EqBand, Param, ServerEvent } from './protocol';
 import { DSP_LIMITS } from './protocol';
 import { applyEvent, applyParam, initialClientState, type ClientState } from './reducer';
@@ -187,6 +188,7 @@ class Store {
   private handle(ev: ServerEvent): void {
     if (ev.event === 'meter_raw') {
       this.meterRaw = ev.raw;
+      if (hasMk5Meters(this.c.session.device?.model, ev.raw.length)) meterBank.push(mk5MeterLevels(ev.raw));
       return;
     }
     if (ev.event === 'meters') {

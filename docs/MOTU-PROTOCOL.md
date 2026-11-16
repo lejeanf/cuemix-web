@@ -97,7 +97,24 @@ Une trame par message WebSocket, environ 2 500 trames non-mètre. Le nombre d'en
 
 Partiellement observé (dump de connexion d'un UltraLite-mk5, firmware 2.0.8, musique sur Line 3-4) : chaque trame est `[6000][index 0][100 octets]`, un octet par point de mesure, environ 20 trames/s. `0xff` sur la plupart des points (point inactif ou silence ?), `0x00` sur certains, des valeurs qui bougent (≈ 4-17, ≈ 150-160, ≈ 190-224) sur une trentaine d'autres. Ni l'affectation des 100 points (entrées, mixes, sorties) ni la loi octet → dB ne sont connues.
 
-Pour les établir, cuemix-web transmet la trame brute (`ServerEvent::MeterRaw`, ≈ 15/s) à la vue de diagnostic **Meter probe** (`/?probe`) : on règle une référence en silence, on joue un signal sur une entrée/sortie connue, la vue surligne les points qui ont bougé et copie un instantané JSON. `ServerEvent::Meters` (niveaux linéaires par point) reste vide tant que la table n'est pas établie.
+**Table établie (UltraLite-mk5)** : la trame suit la numérotation du bus de patch interne. Niveau = −octet/2 dB, 255 = rien.
+
+| Points | Contenu |
+|---|---|
+| 0-22 | lecture USB (ordinateur → carte), une paire par mix : 0-1 Main, 2-3 Line 3-4 … 10-11 Phones, 12-13 S/PDIF, 14-21 ADAT |
+| 24-31 | entrées ADAT 1-8 |
+| 32-43 | entrées analogiques dans l'ordre matériel : 32 Mic 2, 33 Line 7, 34 Line 8, 35 Line 5, 36 Line 6, 37 Mic 1, 38 Line 3, 39 Line 4 (après préampli, avant DSP) |
+| 44-45 | entrée S/PDIF |
+| 46-47, 48-49, 54-57, 62-63, 64-65 | sorties (traitement de sortie, avant trim) : Main, Line 3-4, Line 5-8, Line 9-10, Phones |
+| 50-53, 58-61 | entrées analogiques après EQ/dynamique : Mic 1, Mic 2, Line 3, Line 4, puis Line 5-8 |
+| 68-69 | retour de réverbe |
+| 80-87 | après EQ : Mic 1-2, Line 3-8 |
+| 88-89, 90-91 | réduction de gain du gate, après gate (Mic 1-2) |
+| 92-93, 94-99 | réduction de gain du compresseur : Mic 1-2, Line 3-8 (0 = aucune) |
+
+Vérifié au probe : souffle de Mic 1 / Mic 2 (37/50/80/90, 32/40?/51/81/91), entrée optique (24-31), Line 7-8 câblées (33-34, 60-61, 86-87), Main (46-47). Les points 78-79 suivent le mix Main mais ne sont pas identifiés.
+
+Pour vérifier une autre carte, cuemix-web transmet la trame brute (`ServerEvent::MeterRaw`, ≈ 15/s) à la vue de diagnostic **Meter probe** (`/?probe`) : on règle une référence en silence, on joue un signal sur une entrée/sortie connue, la vue surligne les points qui ont bougé et copie un instantané JSON. `ServerEvent::Meters` (niveaux linéaires par point) reste vide tant que la table n'est pas établie.
 
 ## Inconnus à lever sur matériel
 

@@ -66,6 +66,7 @@
         onchange={(p, f) => both((c) => store.set({ param: 'mix_vol', bus, ch: c, gain: posToGain(p) }, f))}
       />
       <Meter index={ch} label="Meter {name}" />
+      {#if pair !== undefined}<Meter index={pair} label="Meter {name} right" />{/if}
     </div>
     <div class="db">
       {formatDb(gainToDb(mc.gain))}{#if rDiffers && mcR}<span
@@ -156,7 +157,7 @@
   .faderrow {
     flex: 1;
     display: flex;
-    gap: 4px;
+    gap: 2px;
     align-items: stretch;
     align-self: stretch;
     min-height: 140px;

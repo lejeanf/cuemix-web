@@ -186,3 +186,25 @@ describe('meter probe', () => {
     expect(changedFrom([255, 10], [255, 25])).toEqual([1]);
   });
 });
+
+describe('mk5 meter map', () => {
+  it('maps the points measured on a card', async () => {
+    const { mk5MeterLevels, METER_SLOT, rawToLinear, hasMk5Meters } = await import('./meterMap');
+    const raw = new Array(100).fill(255);
+    raw[37] = 63; // Mic 1 hiss at the preamp
+    raw[50] = 66; // Mic 1 after DSP
+    raw[33] = 20; // Line 7 at the preamp
+    raw[24] = 9; // ADAT 1
+    raw[46] = 0; // Main L, full scale
+    const lv = mk5MeterLevels(raw);
+    expect(lv[METER_SLOT.preamp(0)]).toBeCloseTo(rawToLinear(63), 9);
+    expect(lv[METER_SLOT.mixerInput(0)]).toBeCloseTo(rawToLinear(66), 9);
+    expect(lv[METER_SLOT.preamp(6)]).toBeCloseTo(rawToLinear(20), 9);
+    expect(lv[METER_SLOT.mixerInput(10)]).toBeCloseTo(rawToLinear(9), 9);
+    expect(lv[METER_SLOT.output(0)]).toBe(1);
+    expect(lv[METER_SLOT.preamp(1)]).toBe(0);
+    expect(rawToLinear(40)).toBeCloseTo(0.1, 9); // -20 dB
+    expect(hasMk5Meters('UL5E', 100)).toBe(true);
+    expect(hasMk5Meters(undefined, 100)).toBe(false);
+  });
+});

@@ -42,6 +42,12 @@ need attention. Preset files carry `schema_version`; see
   points that change against a silent baseline and copies a JSON snapshot.
   Used to map the meter layout before real meters are drawn. The server
   forwards the frames as a new `meter_raw` event (≈ 15/s).
+- Level meters from the MOTU on an UltraLite-mk5: every mixer strip (after
+  the input EQ/dynamics; both halves of a stereo pair), the selected mix's
+  output beside the Main fader, each preamp on the Input tab (after the
+  preamp, for gain staging), and each output, Main and Phones on the Output
+  tab (before trim/volume). Layout of the meter frame (prop 6000, one byte
+  per patch-bus point, −0.5 dB per step) confirmed with the meter probe.
 - Browser tab icon.
 - `Int16` payloads (`ValueKind::I16`) for the DSP attack/release times.
 - OSC addresses for all of the above: `/eq/{ch}/band/{b}/{mode|bypass|freq|gain|bw}`,

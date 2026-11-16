@@ -57,7 +57,7 @@ pub const SYNC_MAX: Duration = Duration::from_secs(5);
 /// Meter stream property (motu-mk5-linux `METERS_ID`; format still unknown).
 pub const METERS_PROP_ID: u16 = 6000;
 /// Minimum spacing between two raw meter frames forwarded to the engine.
-const METER_RAW_INTERVAL: Duration = Duration::from_millis(66);
+const METER_RAW_INTERVAL: Duration = Duration::from_millis(33);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(10);
