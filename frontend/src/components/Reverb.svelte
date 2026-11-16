@@ -43,7 +43,7 @@
         onchange={(v, f) => store.set({ param: 'reverb_predelay', ms: Math.round(v) }, f)}
       />
       <Knob value={rv.width} min={0} max={100} reset={50} step={1} size={40} label={S.reverbWidth} format={pct} disabled={off} hint={store.hint('reverb_width')} onchange={(v, f) => store.set({ param: 'reverb_width', value: Math.round(v) }, f)} />
-      <NumField label={S.reverbPreset} value={rv.preset} min={0} max={255} step={1} disabled={off} onchange={(v) => store.set({ param: 'reverb_preset', preset: Math.round(v) }, true)} />
+      <NumField label={S.reverbPreset} value={rv.preset} min={0} max={255} step={1} disabled={off || store.locked('reverb_preset')} onchange={(v) => store.set({ param: 'reverb_preset', preset: Math.round(v) }, true)} />
       {#if store.hint('reverb_decay')}<p class="hint">{store.hint('reverb_decay')}</p>{/if}
     </section>
 

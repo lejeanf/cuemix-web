@@ -39,6 +39,15 @@ body,
   margin: 0;
 }
 
+/* The page itself never scrolls: only the view inside the app does. On
+   phones with collapsing browser toolbars, 100% can be taller than what is
+   visible, and the document would scroll the top bar out of sight. */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -57,10 +66,14 @@ button {
   outline-offset: 2px;
 }
 
-/* Param not written to the MOTU yet (online only) — see src/lib/hwmap.ts */
+/* Param not written to the MOTU yet (online only) — greyed out; the control is
+   also disabled in its component (store.locked). See src/lib/hwmap.ts */
 [data-unmapped] {
-  outline: 1px dashed #6b7280;
-  outline-offset: 2px;
+  opacity: 0.4;
+  outline: none;
+}
+[data-unmapped] [data-unmapped] {
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -55,7 +55,6 @@
             value={st.main.db}
             min={TRIM_MIN_DB}
             max={0}
-            reset={0}
             step={1}
             label={S.monitor}
             ariaLabel="{S.monitor} level"
@@ -72,7 +71,7 @@
           <div class="btns">
             <button class="t" class:on={st.control_room.mono} aria-pressed={st.control_room.mono} disabled={off}
               onclick={() => store.set({ param: 'mono', on: !st.control_room.mono }, true)}>{S.mono}</button>
-            <button class="t" class:on={st.control_room.speaker_b} aria-pressed={st.control_room.speaker_b} disabled={off}
+            <button class="t" class:on={st.control_room.speaker_b} aria-pressed={st.control_room.speaker_b} disabled={off || store.locked('speaker_b')}
               data-unmapped={store.unmapped('speaker_b') ? '' : undefined} title={store.hint('speaker_b')}
               onclick={() => store.set({ param: 'speaker_b', on: !st.control_room.speaker_b }, true)}
               >{S.speakerAB}: {st.control_room.speaker_b ? 'B' : 'A'}</button>
@@ -83,7 +82,6 @@
             value={st.control_room.phones_db}
             min={TRIM_MIN_DB}
             max={0}
-            reset={0}
             step={1}
             label={S.phones}
             ariaLabel="{S.phones} level"
@@ -112,7 +110,6 @@
                     value={st.output_trims[ch]}
                     min={TRIM_MIN_DB}
                     max={0}
-                    reset={0}
                     step={1}
                     size={32}
                     label={String(ch + 1)}
@@ -235,9 +232,6 @@
     background: var(--on);
     color: var(--bg);
     border-color: var(--on);
-  }
-  .t[data-unmapped] {
-    border-style: dashed;
   }
   .trims {
     display: flex;

@@ -7,11 +7,11 @@ import { DSP_LIMITS } from './protocol';
 import { applyEvent, applyParam, initialClientState, type ClientState } from './reducer';
 import { ParamSender } from './sender';
 import { clamp } from './validate';
-import { isHwMapped, isHwReadOnly } from './hwmap';
+import { isHwMapped, isHwReadOnly, visibleTabs, type Tab } from './hwmap';
 import { S } from './strings';
 
 export type Link = 'offline' | 'connecting' | 'online' | 'demo';
-export type Tab = 'mixer' | 'input' | 'output' | 'reverb' | 'probe';
+export type { Tab };
 
 export const RECONNECT_MIN_MS = 500;
 export const RECONNECT_MAX_MS = 8000;
@@ -57,6 +57,10 @@ class Store {
   /** Running server version (from `/api/health`). The web server never
    *  contacts GitHub; release checks are a root timer (see UpdateBadge). */
   version: string | null = $state(null);
+  /** Tabs to show: the Reverb tab disappears on a MOTU while reverb is not written. */
+  tabList(probe: boolean): Tab[] {
+    return visibleTabs({ online: this.online, reverbWritable: isHwMapped('reverb_decay'), probe });
+  }
   /** Current view; `#mixer`, `#input`, `#output`, `#reverb` in the URL open it directly. */
   tab: Tab = $state(tabFromHash());
   /** Phone remote (Main / Phones volume) instead of the full console. */
@@ -96,9 +100,13 @@ class Store {
     return this.link === 'online';
   }
 
-  /** Dashed "state only" hint for params the MOTU backend doesn't write yet. */
+  /** True for params the MOTU backend doesn't write yet (online only; demo mode stays live). */
   unmapped(p: Param['param']): boolean {
     return this.online && !isHwMapped(p);
+  }
+  /** Controls for these params are greyed out and disabled so they don't look broken. */
+  locked(p: Param['param']): boolean {
+    return this.unmapped(p);
   }
   hint(p: Param['param']): string | undefined {
     if (!this.unmapped(p)) return undefined;
@@ -264,6 +272,11 @@ class Store {
     if (!this.ready || !this.c.state) return;
     applyParam(this.c.state, p);
     this.sender.set(p, final);
+  }
+
+  /** Drops a throttled `set` of this parameter that has not been sent yet. */
+  cancelPending(p: Param): void {
+    this.sender.cancel(p);
   }
 
   loadPreset(name: string): void {

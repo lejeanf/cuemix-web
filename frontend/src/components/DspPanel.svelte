@@ -43,7 +43,7 @@
       <EqBands kind="input" {ch} bind:selected={band} />
     </section>
 
-    {#if hint}<p class="hint">{hint}</p>{/if}
+        {#if hint}<p class="hint">{hint}</p>{/if}
 
     <section>
       <div class="sh">
@@ -53,16 +53,18 @@
           class:on={!comp.bypass}
           aria-pressed={!comp.bypass}
           aria-label="{S.compressor} {comp.bypass ? 'bypassed' : 'active'}"
-          disabled={off}
+          disabled={off || store.locked('comp_bypass')}
+          title={store.hint('comp_bypass')}
+          data-unmapped={store.unmapped('comp_bypass') ? '' : undefined}
           onclick={() => store.set({ param: 'comp_bypass', ch, on: !comp.bypass }, true)}>{comp.bypass ? S.bypass : 'On'}</button
         >
       </div>
       <div class="knobs">
-        <Knob label="Threshold" value={comp.threshold_db} min={-60} max={0} reset={-10} step={0.5} size={36} format={db} disabled={off} onchange={(v, f) => store.set({ param: 'comp_threshold', ch, db: v }, f)} />
-        <Knob label="Ratio" value={comp.ratio} min={L.COMP_RATIO[0]} max={20} reset={2} step={0.1} log size={36} format={(v) => `${v.toFixed(1)}:1`} disabled={off} onchange={(v, f) => store.set({ param: 'comp_ratio', ch, ratio: v }, f)} />
-        <Knob label="Attack" value={Math.max(comp.attack_ms, 1)} min={1} max={L.ATTACK_MS[1]} reset={10} step={1} log size={36} format={ms} disabled={off} onchange={(v, f) => store.set({ param: 'comp_attack', ch, ms: Math.round(v) }, f)} />
-        <Knob label="Release" value={Math.max(comp.release_ms, 1)} min={1} max={L.RELEASE_MS[1]} reset={1000} step={1} log size={36} format={ms} disabled={off} onchange={(v, f) => store.set({ param: 'comp_release', ch, ms: Math.round(v) }, f)} />
-        <Knob label="Makeup" value={comp.makeup} min={1} max={L.COMP_MAKEUP[1]} reset={1} log size={36} format={makeupText} disabled={off} onchange={(v, f) => store.set({ param: 'comp_makeup', ch, gain: v }, f)} />
+        <Knob label="Threshold" value={comp.threshold_db} min={-60} max={0} reset={-10} step={0.5} size={36} format={db} disabled={off} hint={store.hint('comp_threshold')} onchange={(v, f) => store.set({ param: 'comp_threshold', ch, db: v }, f)} />
+        <Knob label="Ratio" value={comp.ratio} min={L.COMP_RATIO[0]} max={20} reset={2} step={0.1} log size={36} format={(v) => `${v.toFixed(1)}:1`} disabled={off} hint={store.hint('comp_ratio')} onchange={(v, f) => store.set({ param: 'comp_ratio', ch, ratio: v }, f)} />
+        <Knob label="Attack" value={Math.max(comp.attack_ms, 1)} min={1} max={L.ATTACK_MS[1]} reset={10} step={1} log size={36} format={ms} disabled={off} hint={store.hint('comp_attack')} onchange={(v, f) => store.set({ param: 'comp_attack', ch, ms: Math.round(v) }, f)} />
+        <Knob label="Release" value={Math.max(comp.release_ms, 1)} min={1} max={L.RELEASE_MS[1]} reset={1000} step={1} log size={36} format={ms} disabled={off} hint={store.hint('comp_release')} onchange={(v, f) => store.set({ param: 'comp_release', ch, ms: Math.round(v) }, f)} />
+        <Knob label="Makeup" value={comp.makeup} min={1} max={L.COMP_MAKEUP[1]} reset={1} log size={36} format={makeupText} disabled={off} hint={store.hint('comp_makeup')} onchange={(v, f) => store.set({ param: 'comp_makeup', ch, gain: v }, f)} />
       </div>
     </section>
 
@@ -75,14 +77,16 @@
             class:on={!gate.bypass}
             aria-pressed={!gate.bypass}
             aria-label="{S.gate} {gate.bypass ? 'bypassed' : 'active'}"
-            disabled={off}
+            disabled={off || store.locked('gate_bypass')}
+            title={store.hint('gate_bypass')}
+            data-unmapped={store.unmapped('gate_bypass') ? '' : undefined}
             onclick={() => store.set({ param: 'gate_bypass', ch, on: !gate.bypass }, true)}>{gate.bypass ? S.bypass : 'On'}</button
           >
         </div>
         <div class="knobs">
-          <Knob label="Threshold" value={gate.threshold_db} min={-80} max={0} reset={-46} step={0.5} size={36} format={db} disabled={off} onchange={(v, f) => store.set({ param: 'gate_threshold', ch, db: v }, f)} />
-          <Knob label="Attack" value={Math.max(gate.attack_ms, 1)} min={1} max={L.ATTACK_MS[1]} reset={10} step={1} log size={36} format={ms} disabled={off} onchange={(v, f) => store.set({ param: 'gate_attack', ch, ms: Math.round(v) }, f)} />
-          <Knob label="Release" value={Math.max(gate.release_ms, 1)} min={1} max={L.RELEASE_MS[1]} reset={1000} step={1} log size={36} format={ms} disabled={off} onchange={(v, f) => store.set({ param: 'gate_release', ch, ms: Math.round(v) }, f)} />
+          <Knob label="Threshold" value={gate.threshold_db} min={-80} max={0} reset={-46} step={0.5} size={36} format={db} disabled={off} hint={store.hint('gate_threshold')} onchange={(v, f) => store.set({ param: 'gate_threshold', ch, db: v }, f)} />
+          <Knob label="Attack" value={Math.max(gate.attack_ms, 1)} min={1} max={L.ATTACK_MS[1]} reset={10} step={1} log size={36} format={ms} disabled={off} hint={store.hint('gate_attack')} onchange={(v, f) => store.set({ param: 'gate_attack', ch, ms: Math.round(v) }, f)} />
+          <Knob label="Release" value={Math.max(gate.release_ms, 1)} min={1} max={L.RELEASE_MS[1]} reset={1000} step={1} log size={36} format={ms} disabled={off} hint={store.hint('gate_release')} onchange={(v, f) => store.set({ param: 'gate_release', ch, ms: Math.round(v) }, f)} />
         </div>
       </section>
     {/if}
