@@ -7,7 +7,7 @@
 
   let { ch, onclose }: { ch: number; onclose: () => void } = $props();
 
-  const PALETTE = ['#EF4444', '#F59E0B', '#EAB308', '#10B981', '#06B6D4', '#3B82F6', '#8B5CF6', '#EC4899', '#9CA3AF'];
+  const PALETTE = ['#EF4444', '#F59E0B', '#EAB308', '#10B981', '#3B93E0', '#6366F1', '#8B5CF6', '#EC4899', '#9CA3AF'];
 
   const cur = untrack(() => store.label(ch));
   let name = $state(cur?.name ?? '');

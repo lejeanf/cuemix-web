@@ -9,7 +9,7 @@
 
   --red: #ef4444; /* mute, +48V */
   --amber: #f59e0b; /* solo, DIM */
-  --cyan: #06b6d4; /* EQ / Comp / Gate active */
+  --cyan: #3b93e0; /* accent blue: knobs, selection, EQ / Comp / Gate active (name kept for history) */
 
   --meter-green: #10b981;
   --meter-yellow: #eab308;

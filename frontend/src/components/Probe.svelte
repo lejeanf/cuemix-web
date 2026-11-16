@@ -60,14 +60,14 @@
   </div>
   <p class="dim help">
     1. Silence everything and press <em>Set baseline</em>. 2. Play audio on one known input or output. 3. Cells that changed turn
-    cyan; cells that flicker get an outline. 4. Write what is playing, press <em>Copy snapshot</em> and paste it in the chat.
+    blue; cells that flicker get an outline. 4. Write what is playing, press <em>Copy snapshot</em> and paste it in the chat.
   </p>
   <div class="patch">
     <strong>Patch (5010)</strong>
     {#if !patch}
       <span class="dim">Not read (demo mode or not sent by the card).</span>
     {:else}
-      <span class="dim">destination &rarr; source point; cyan = source has signal now</span>
+      <span class="dim">destination &rarr; source point; blue = source has signal now</span>
       <div class="grid">
         {#each patch as src, dest (dest)}
           <div class="cell" class:idle={src === 255} class:chg={live(src)} title="destination {dest} from source {src}, meter byte {raw[src] ?? 'n/a'}">

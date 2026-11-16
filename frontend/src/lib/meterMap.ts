@@ -24,13 +24,16 @@ const MK5_OUTPUT: readonly number[] = [46, 47, 48, 49, 54, 55, 56, 57, 62, 63, 6
 
 /**
  * Destination index in the device patch table (property 5010) of each output,
- * same order as MK5_OUTPUT: Main L/R, Line 3-10, Phones L/R. null = not known
- * yet. Fill this in after reading the "Patch (5010)" table of the meter probe
- * (`/?probe`) on the card; until then the outputs are metered at MK5_OUTPUT.
+ * same order as MK5_OUTPUT: Main L/R, Line 3-10, Phones L/R.
+ *
+ * Read on a card (firmware 2.0.8): destinations 0-21 carry the inputs (USB
+ * record), 24-31 USB playback (ADAT out), and the analog/S/PDIF outputs sit at
+ * 32-45 in hardware order: Line 5-10 = 32-37, Main = 38/39, Line 3-4 = 40/41,
+ * Phones = 42/43, S/PDIF = 44/45. With every output on its CueMix default each
+ * of them is fed by its own mix, except Phones and S/PDIF which follow Main;
+ * the Phones mix (point 64/65) is then not heard at the headphone jack at all.
  */
-export const MK5_PATCH_DEST: readonly (number | null)[] = [
-  null, null, null, null, null, null, null, null, null, null, null, null,
-];
+export const MK5_PATCH_DEST: readonly (number | null)[] = [38, 39, 40, 41, 32, 33, 34, 35, 36, 37, 42, 43];
 
 /**
  * Meter point of the source really patched to `output`'s destination, or the
@@ -46,7 +49,9 @@ export function outputSourcePoint(
   const dest = dests[output];
   if (!patch || dest === null || dest === undefined) return fallback;
   const src = patch[dest];
-  return src === undefined || src >= 255 ? fallback : src;
+  if (src === undefined) return fallback;
+  // 255 = nothing patched to that output: it is silent.
+  return src;
 }
 
 export const MIXER_INPUTS = 32;

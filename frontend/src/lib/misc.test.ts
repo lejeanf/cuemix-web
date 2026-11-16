@@ -261,7 +261,8 @@ describe('mk5 meter map', () => {
 describe('output patch', () => {
   it('follows the patch only for known destinations', async () => {
     const { outputSourcePoint, mk5MeterLevels, METER_SLOT, rawToLinear, MK5_PATCH_DEST } = await import('./meterMap');
-    expect(MK5_PATCH_DEST.every((d) => d === null)).toBe(true);
+    // Destinations read on a card: Main 38/39, Line 3-4 40/41, Line 5-10 32-37, Phones 42/43.
+    expect(MK5_PATCH_DEST).toEqual([38, 39, 40, 41, 32, 33, 34, 35, 36, 37, 42, 43]);
     const patch = new Array(80).fill(255);
     patch[10] = 46;
     patch[11] = 78;
@@ -271,14 +272,21 @@ describe('output patch', () => {
     expect(outputSourcePoint(0, patch, dests)).toBe(46); // unknown dest: own point
     expect(outputSourcePoint(10, null, dests)).toBe(64); // unknown patch
     expect(outputSourcePoint(10, [], dests)).toBe(64); // destination beyond the table
-    expect(outputSourcePoint(11, [...patch.slice(0, 11), 255], dests)).toBe(65); // nothing patched
+    expect(outputSourcePoint(11, [...patch.slice(0, 11), 255], dests)).toBe(255); // nothing patched: silent
     expect(outputSourcePoint(99, patch, dests)).toBe(255);
-    // Unknown destinations: levels identical with or without a patch.
+    // No patch: each output at its own processing point (Phones = 64/65).
     const raw = new Array(100).fill(255);
-    raw[64] = 10;
-    raw[78] = 4;
-    expect(mk5MeterLevels(raw, patch)).toEqual(mk5MeterLevels(raw));
-    expect(mk5MeterLevels(raw)[METER_SLOT.output(10)]).toBeCloseTo(rawToLinear(10), 9);
+    raw[46] = 20; // Main mix, -10 dB
+    raw[47] = 22;
+    raw[64] = 164; // Phones mix, -82 dB (not patched anywhere)
+    raw[65] = 164;
+    expect(mk5MeterLevels(raw)[METER_SLOT.output(10)]).toBeCloseTo(rawToLinear(164), 9);
+    // Patch read on the card: the headphone jack (42/43) plays the Main mix.
+    const card = [37, 32, 38, 39, 35, 36, 33, 34, 46, 47, 44, 45, 24, 25, 26, 27, 28, 29, 30, 31, 23, 23, 23, 23, 48, 49, 16, 17, 18, 19, 20, 21, 54, 55, 56, 57, 62, 63, 46, 47, 48, 49, 46, 47, 46, 47, 37, 32, 38, 39, 44, 45, 24, 25, 35, 36, 33, 34, 26, 27, 28, 29, 0, 1, 2, 3, 4, 30, 31, 23, 5, 6, 7, 8, 9, 10, 11, 23, 23, 23];
+    const lv = mk5MeterLevels(raw, card);
+    expect(lv[METER_SLOT.output(10)]).toBeCloseTo(rawToLinear(20), 9);
+    expect(lv[METER_SLOT.output(11)]).toBeCloseTo(rawToLinear(22), 9);
+    expect(lv[METER_SLOT.output(0)]).toBeCloseTo(rawToLinear(20), 9); // Main unchanged
   });
 });
 

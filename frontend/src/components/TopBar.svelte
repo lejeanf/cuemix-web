@@ -22,20 +22,16 @@
     link === 'online' ? S.online : link === 'connecting' ? S.connecting : link === 'demo' ? S.demo : S.offline,
   );
 
-  // The status is a small dot; its text shows on hover or focus, on a tap
-  // (phones have no hover), and for a few seconds whenever the state changes.
+  // The status is a small dot; its text shows only on hover or focus, or for
+  // a few seconds after a tap (phones have no hover).
   let showStatus = $state(false);
   let statusTimer: ReturnType<typeof setTimeout> | undefined;
-  function flashStatus(ms = 4000) {
+  function flashStatus(ms = 3000) {
     showStatus = true;
     clearTimeout(statusTimer);
     statusTimer = setTimeout(() => (showStatus = false), ms);
   }
-  $effect(() => {
-    void link;
-    flashStatus();
-    return () => clearTimeout(statusTimer);
-  });
+  $effect(() => () => clearTimeout(statusTimer));
 
   function toggle(which: 'presets' | 'clock') {
     open = open === which ? '' : which;
@@ -355,12 +351,13 @@
       opacity: 0.3;
     }
   }
-  /* The label floats under the dot, so showing it never moves
-     or wraps anything. */
+  /* The label floats over the bar just left of the dot, so showing it never
+     moves or wraps anything. */
   .txt {
     position: absolute;
-    right: 0;
-    top: calc(100% + 2px);
+    right: calc(100% + 4px);
+    top: 50%;
+    transform: translateY(-50%);
     z-index: 30;
     padding: 3px 10px;
     border: 1px solid var(--c);
