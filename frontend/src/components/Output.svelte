@@ -173,7 +173,7 @@
           <div class="curve" bind:clientWidth={curveW} bind:clientHeight={curveH}>
             <EqCurve kind="output" ch={eqOut} bind:selected={eqBand} height={curveHeight} />
           </div>
-          <div class="bandcol"><EqBands kind="output" ch={eqOut} bind:selected={eqBand} /></div>
+          <div class="bandcol"><EqBands kind="output" ch={eqOut} bind:selected={eqBand} rows /></div>
         </div>
       </section>
     {/if}
@@ -347,13 +347,14 @@
     flex: 1;
     min-height: 0;
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: stretch;
   }
   .curve {
-    flex: 1;
+    flex: 1 1 360px;
     min-width: 0;
-    min-height: 110px;
+    min-height: 120px;
     position: relative;
   }
   .curve :global(.eq) {
@@ -364,6 +365,8 @@
     max-height: none !important;
   }
   .bandcol {
-    flex: none;
+    flex: 0 1 470px;
+    min-width: 0;
+    align-self: flex-start;
   }
 </style>

@@ -16,6 +16,9 @@
   const bands: EqBand[] | undefined = $derived(kind === 'input' ? store.state?.input_eq[ch] : store.state?.output_eq[ch]);
   const off = $derived(!store.ready);
   let svg = $state<SVGSVGElement>()!;
+  // The drawing scales with its box; handles and text keep a fixed on-screen size.
+  let shownW = $state(0);
+  const k = $derived(shownW > 0 ? W / shownW : 1);
 
   const GRID_F = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
   const GRID_DB = [-24, -12, 0, 12, 24];
@@ -111,6 +114,8 @@
     viewBox="0 0 {W} {H}"
     class="eq"
     style:max-height="{H + 40}px"
+    style:--k={k}
+    bind:clientWidth={shownW}
     role="group"
     aria-label="EQ curve"
     onpointermove={move}
@@ -134,7 +139,7 @@
         class:dim={b.bypass}
         cx={freqToX(b.freq_hz) * W}
         cy={yOf(handleDb(b))}
-        r="10"
+        r={8 * k}
         fill={EQ_COLORS[i % EQ_COLORS.length]}
         role="slider"
         tabindex="0"
@@ -147,7 +152,7 @@
         onfocus={() => (selected = i)}
         use:wheel={(e) => onwheel(e, i)}
       />
-      <text x={freqToX(b.freq_hz) * W} y={yOf(handleDb(b)) + 4} class="num" text-anchor="middle">{i + 1}</text>
+      <text x={freqToX(b.freq_hz) * W} y={yOf(handleDb(b)) + 3.5 * k} class="num" text-anchor="middle">{i + 1}</text>
     {/each}
   </svg>
 {/if}
@@ -165,23 +170,26 @@
   .grid {
     stroke: #1d2027;
     stroke-width: 1;
+    vector-effect: non-scaling-stroke;
   }
   .grid.zero {
     stroke: #343947;
   }
   .axis {
     fill: #6b7280;
-    font-size: 10px;
+    font-size: calc(10px * var(--k, 1));
   }
   .curve {
     fill: none;
     stroke: var(--cyan);
-    stroke-width: 2.5;
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
   }
   .handle {
     cursor: grab;
     stroke: #0d0e11;
-    stroke-width: 2;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
   }
   .handle.sel {
     stroke: var(--text);
@@ -190,7 +198,7 @@
     opacity: 0.35;
   }
   .num {
-    font-size: 11px;
+    font-size: calc(10px * var(--k, 1));
     font-weight: 700;
     fill: #111;
     pointer-events: none;

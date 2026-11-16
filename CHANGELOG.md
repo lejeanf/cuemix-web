@@ -127,7 +127,9 @@ need attention. Preset files carry `schema_version`; see
 - Output tab: the EQ curve grows to fill the free height.
 - EQ editor (input DSP panel and output EQ) laid out like CueMix 5: a
   coloured column per band with an on/off button, Freq / Gain / Q and the
-  band's filter-type icons, under a full-width curve.
+  band's filter-type icons. On the Output tab the curve stays on the left
+  and the bands are compact rows on the right. Curve handles and labels
+  keep a fixed on-screen size however wide the curve is.
 - Writes to the MOTU had no effect: the device ignores frames without a
   payload length field. Writes are now `[id][index][len u16][payload]`
   (verified on an UltraLite-mk5: main volume follows the web UI). Reads are

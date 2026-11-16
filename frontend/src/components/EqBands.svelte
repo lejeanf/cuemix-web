@@ -5,7 +5,13 @@
   import { EQ_COLORS } from '../lib/eq';
 
   /** One column per band, as in CueMix 5: on/off, frequency, gain, Q and the band's filter types. */
-  let { kind, ch, selected = $bindable(0) }: { kind: 'input' | 'output'; ch: number; selected?: number } = $props();
+  /** `rows`: one band per line (beside a curve) instead of one column per band. */
+  let {
+    kind,
+    ch,
+    selected = $bindable(0),
+    rows = false,
+  }: { kind: 'input' | 'output'; ch: number; selected?: number; rows?: boolean } = $props();
 
   const bands: EqBand[] | undefined = $derived(kind === 'input' ? store.state?.input_eq[ch] : store.state?.output_eq[ch]);
   const off = $derived(!store.ready);
@@ -36,7 +42,7 @@
 </script>
 
 {#if bands}
-  <div class="bands" role="group" aria-label="EQ bands" style:grid-template-columns="repeat({bands.length}, minmax(0, 1fr))">
+  <div class="bands" class:rows role="group" aria-label="EQ bands" style:grid-template-columns={rows ? '1fr' : `repeat(${bands.length}, minmax(0, 1fr))`}>
     {#each bands as b, i (i)}
       {@const color = EQ_COLORS[i % EQ_COLORS.length]}
       <div class="band" class:sel={selected === i} class:byp={b.bypass} style:--c={color} role="group" aria-label="{S.band} {i + 1}">
@@ -182,6 +188,30 @@
   .ty.on {
     color: var(--c);
     border-color: var(--c);
+  }
+  /* Rows: [on/off] Freq Gain Q [types], colour stripe on the left. */
+  .rows .band {
+    display: grid;
+    grid-template-columns: 26px repeat(3, minmax(0, 1fr)) 104px;
+    align-items: center;
+    gap: 6px;
+    border-left: 4px solid var(--c);
+  }
+  .rows .head {
+    display: contents;
+  }
+  .rows .line {
+    display: none;
+  }
+  .rows .f {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .rows .f em:empty {
+    display: none;
+  }
+  .rows .types {
+    margin-top: 0;
+    justify-content: flex-end;
   }
   button:disabled,
   input:disabled {
