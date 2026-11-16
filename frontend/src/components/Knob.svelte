@@ -23,6 +23,12 @@
     /** Called when a drag starts (a touch or click on the dial). */
     onstart?: () => void;
     onchange: (value: number, final: boolean) => void;
+    /**
+     * Optional larger drag surface (e.g. the whole card around the knob). A pointerdown
+     * anywhere in it starts the drag like one on the dial, except on a button. The dial then
+     * only keeps keyboard and wheel; the parent should set `touch-action: none` on the surface.
+     */
+    surface?: HTMLElement | null;
   }
   let {
     value,
@@ -40,6 +46,7 @@
     travel = 160,
     onstart,
     onchange,
+    surface = null,
   }: Props = $props();
 
   const toNorm = (v: number) =>
@@ -66,6 +73,8 @@
 
   function down(e: PointerEvent) {
     if (disabled || e.button > 0) return;
+    // Buttons inside a shared surface stay plain buttons.
+    if (surface && (e.target as Element).closest('button, a, select, input, textarea')) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragging = true;
     moved = false;
@@ -112,6 +121,22 @@
     if (moved) onchange(fromNorm(dragNorm), true);
     else if (reset !== undefined && tap.hit()) onchange(reset, true);
   }
+  // With a shared surface the pointer handlers live on it (and pointer capture goes to it)
+  // instead of the dial.
+  $effect(() => {
+    const el = surface;
+    if (!el) return;
+    const h = [
+      ['pointerdown', down],
+      ['pointermove', move],
+      ['pointerup', up],
+      ['pointercancel', up],
+    ] as const;
+    for (const [n, f] of h) el.addEventListener(n, f as EventListener);
+    return () => {
+      for (const [n, f] of h) el.removeEventListener(n, f as EventListener);
+    };
+  });
   function onwheel(e: WheelEvent) {
     if (disabled) return;
     e.preventDefault();
@@ -163,10 +188,10 @@
     aria-valuenow={Math.round(value * 100) / 100}
     aria-valuetext={format(value)}
     aria-disabled={disabled}
-    onpointerdown={down}
-    onpointermove={move}
-    onpointerup={up}
-    onpointercancel={up}
+    onpointerdown={surface ? undefined : down}
+    onpointermove={surface ? undefined : move}
+    onpointerup={surface ? undefined : up}
+    onpointercancel={surface ? undefined : up}
     onkeydown={key}
     use:wheel={onwheel}
   >

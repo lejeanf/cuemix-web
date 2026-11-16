@@ -62,11 +62,15 @@ need attention. Preset files carry `schema_version`; see
   rotary knobs, Monitor (Main) and Phones, side by side, each with its dB value
   and a pair of vertical meters. The knobs resize with the screen width
   (stacked under 340 px), the drag travel scales with the knob size and a drag
-  works up or right for more. New Main on/off button: Off remembers the level
-  (in the browser) and fades Main to the minimum in at most one second; On fades
-  back up to that level and never above it (to -70 dB when none is remembered).
-  Touching the Main knob cancels a fade, and a fade stops by itself if Main is
-  changed elsewhere (another client, OSC, a preset) or the connection drops.
+  works up or right for more. Each card is one unit: its name, knob, value and
+  meters, with an on/off button at the bottom (a speaker icon for Monitor, a
+  headphones icon for Phones). Dragging anywhere on the card turns its knob. Off
+  remembers the level (in the browser, separately for Monitor and Phones) and
+  sweeps the knob all the way down to the minimum (-100 dB) in up to 1.2 s; On
+  sweeps back up to that level and never above it (to -70 dB when none is
+  remembered). Touching the card cancels a fade, and a fade stops by itself if
+  the volume is changed elsewhere (another client, OSC, a preset) or the
+  connection drops. The two units are centred vertically in the view.
 - Output EQ defaults match CueMix 5 (low shelf 60 Hz, bell 800 Hz, high shelf
   14 kHz, 0 dB, Q 1); the *Flat* preset uses the same values. OSC
   `/output/{n}/eq/…` takes the 1-based EQ slot (1 = Main, 3-10 = Line 3-10,

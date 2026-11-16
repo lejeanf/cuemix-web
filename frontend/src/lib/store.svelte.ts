@@ -290,6 +290,11 @@ class Store {
     this.sender.set(p, final);
   }
 
+  /** Drops a throttled `set` of this parameter that has not been sent yet. */
+  cancelPending(p: Param): void {
+    this.sender.cancel(p);
+  }
+
   loadPreset(name: string): void {
     this.sendRaw({ cmd: 'load_preset', name });
   }

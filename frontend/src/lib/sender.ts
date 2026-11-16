@@ -35,6 +35,11 @@ export class ParamSender {
     this.arm(key);
   }
 
+  /** Drops a queued (not yet sent) value of this parameter; the throttle window is kept. */
+  cancel(p: Param): void {
+    this.pending.delete(paramKey(p));
+  }
+
   private arm(key: string): void {
     this.timers.set(
       key,
