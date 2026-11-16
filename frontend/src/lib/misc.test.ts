@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { biquadMagDb, bwToQ, eqResponseDb, freqToX, peakingBiquad, xToFreq } from './eq';
 import { levelToPos, stepMeter } from './meters';
-import { EQ_MODE, eqModeName, type EqBand, type Param } from './protocol';
+import { EQ_MODE, TRIM_MIN_DB, eqModeName, type EqBand, type Param } from './protocol';
 import { ParamSender, paramKey } from './sender';
 import { isHexColor, isValidLabelName, isValidPresetName } from './validate';
 import { isHwMapped, isHwReadOnly } from './hwmap';
+import { FADE_FLOOR_DB, FADE_SAFE_DB, FADE_STORAGE_KEY, fadeMs, forgetRemembered, isOff, loadRemembered, planIn, planOut, saveRemembered, valueAt } from './fade';
 
 describe('ParamSender throttle', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -252,5 +253,75 @@ describe('preset files', () => {
     expect(presetNameFromFile('???.json')).toBe('imported');
     expect(presetNameFromFile('x'.repeat(80) + '.json')).toHaveLength(64);
     expect(exportFileName('Live set', new Date('2026-11-15T10:00:00Z'))).toBe('cuemix-Live_set-2026-11-15.json');
+  });
+});
+
+describe('master fade', () => {
+  it('fades out from the current level to the floor, then the minimum', () => {
+    const p = planOut(-20);
+    expect(p).toMatchObject({ from: -20, to: FADE_FLOOR_DB, end: TRIM_MIN_DB });
+    expect(valueAt(p, 0)).toBe(-20);
+    expect(valueAt(p, 0.5)).toBe(-40);
+    expect(valueAt(p, 1)).toBe(TRIM_MIN_DB);
+    const seq = [0, 0.2, 0.4, 0.6, 0.8, 0.99].map((t) => valueAt(p, t));
+    expect([...seq].sort((a, b) => b - a)).toEqual(seq);
+  });
+  it('a quiet Main already below the floor goes straight to the minimum', () => {
+    const p = planOut(-65);
+    expect(p.from).toBe(-65);
+    expect(p.to).toBe(-65);
+    expect(valueAt(p, 0.5)).toBe(-65);
+    expect(valueAt(p, 1)).toBe(TRIM_MIN_DB);
+  });
+  it('fades in to the remembered level and never above it', () => {
+    const p = planIn(TRIM_MIN_DB, -30);
+    expect(p).toMatchObject({ from: FADE_FLOOR_DB, to: -30, end: -30 });
+    for (let t = 0; t <= 1.2; t += 0.05) expect(valueAt(p, t)).toBeLessThanOrEqual(-30);
+    expect(valueAt(p, 0)).toBe(FADE_FLOOR_DB);
+    expect(valueAt(p, 1)).toBe(-30);
+  });
+  it('a remembered level below the floor is reached directly', () => {
+    const p = planIn(TRIM_MIN_DB, -65);
+    for (let t = 0; t <= 1; t += 0.1) expect(valueAt(p, t)).toBeLessThanOrEqual(-65);
+    expect(valueAt(p, 1)).toBe(-65);
+  });
+  it('without a remembered level, fades up to -70 dB at most; never above 0', () => {
+    expect(planIn(TRIM_MIN_DB, null).end).toBe(FADE_SAFE_DB);
+    expect(planIn(TRIM_MIN_DB, 12).end).toBe(0);
+    expect(planIn(TRIM_MIN_DB, Number.NaN).end).toBe(FADE_SAFE_DB);
+  });
+  it('a fade in starting above the remembered level never raises it', () => {
+    const p = planIn(-10, -30);
+    for (let t = 0; t <= 1; t += 0.05) expect(valueAt(p, t)).toBeLessThanOrEqual(-30);
+  });
+  it('reversing mid-fade starts from the current level', () => {
+    const p = planIn(-45, -20);
+    expect(p.from).toBe(-45);
+    expect(valueAt(p, 0)).toBe(-45);
+    expect(p.ms).toBeLessThan(1000);
+  });
+  it('detects off, durations are bounded, and storage failures are harmless', () => {
+    expect(isOff(TRIM_MIN_DB)).toBe(true);
+    expect(isOff(TRIM_MIN_DB + 0.5)).toBe(true);
+    expect(isOff(-65)).toBe(false);
+    expect(fadeMs(60)).toBe(1000);
+    expect(fadeMs(1)).toBe(250);
+    expect(loadRemembered()).toBeNull(); // no storage in node: harmless
+    const m = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    });
+    expect(loadRemembered()).toBeNull();
+    saveRemembered(-30);
+    expect(loadRemembered()).toBe(-30);
+    forgetRemembered();
+    expect(loadRemembered()).toBeNull();
+    for (const bad of [String(TRIM_MIN_DB), '5', 'abc', '', ' ', 'Infinity']) {
+      m.set(FADE_STORAGE_KEY, bad);
+      expect(loadRemembered()).toBeNull();
+    }
+    vi.unstubAllGlobals();
   });
 });

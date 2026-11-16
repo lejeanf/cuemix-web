@@ -25,14 +25,31 @@ need attention. Preset files carry `schema_version`; see
   band 4: bell, high shelf); the rule is shared with the output EQ (3 bands:
   first / middle / last).
 
+### Removed
+- The second "Advanced controls" link at the bottom of the phone view (the
+  header's mode button remains), and Mono / Talkback from the phone view.
+
 ### Fixed
 - Output EQ slot labelling. The device has 12 EQ slots, not 12 mono outputs:
   Main L-R, an unused slot (never shown or written), Line 3 … Line 10, Phones
   L-R and the Reverb. The Output tab now names them that way and a preset or
   edit applies to the selected slot only (it used to treat slots as L/R pairs,
   so "Phones R" edited the reverb EQ).
+- Double-clicking or double-tapping a volume knob (Monitor, Phones) no longer
+  resets it to 0 dB, which was a jump to full volume. Those knobs have no reset.
+- Double-clicking or double-tapping an output trim knob (Output tab) no longer
+  resets it to 0 dB (no attenuation, full level). Trim knobs have no reset.
 
 ### Changed
+- Phone (Simple) view redesigned after the desktop Monitoring card: two large
+  rotary knobs, Monitor (Main) and Phones, side by side, each with its dB value
+  and a pair of vertical meters. The knobs resize with the screen width
+  (stacked under 340 px), the drag travel scales with the knob size and a drag
+  works up or right for more. New Main on/off button: Off remembers the level
+  (in the browser) and fades Main to the minimum in at most one second; On fades
+  back up to that level and never above it (to -70 dB when none is remembered).
+  Touching the Main knob cancels a fade, and a fade stops by itself if Main is
+  changed elsewhere (another client, OSC, a preset) or the connection drops.
 - Output EQ defaults match CueMix 5 (low shelf 60 Hz, bell 800 Hz, high shelf
   14 kHz, 0 dB, Q 1); the *Flat* preset uses the same values. OSC
   `/output/{n}/eq/…` takes the 1-based EQ slot (1 = Main, 3-10 = Line 3-10,

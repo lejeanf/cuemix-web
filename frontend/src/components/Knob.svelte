@@ -5,8 +5,8 @@
     value: number;
     min: number;
     max: number;
-    /** Value a double-click/tap resets to. */
-    reset: number;
+    /** Value a double-click/tap resets to; omit to disable the reset (volumes: it must never jump up). */
+    reset?: number;
     label: string;
     /** Accessible name when it must say more than the visible caption. */
     ariaLabel?: string;
@@ -18,6 +18,10 @@
     disabled?: boolean;
     hint?: string;
     size?: number;
+    /** Drag distance in px for the full range (bigger knob, bigger travel, less twitchy). */
+    travel?: number;
+    /** Called when a drag starts (a touch or click on the dial). */
+    onstart?: () => void;
     onchange: (value: number, final: boolean) => void;
   }
   let {
@@ -33,6 +37,8 @@
     disabled = false,
     hint,
     size = 44,
+    travel = 160,
+    onstart,
     onchange,
   }: Props = $props();
 
@@ -49,9 +55,12 @@
   let dragNorm = $state(0);
   const norm = $derived(dragging ? dragNorm : Math.min(1, Math.max(0, toNorm(value))));
   const tap = new DoubleTap();
+  let startX = 0;
   let startY = 0;
   let startNorm = 0;
   let moved = false;
+  /** Axis chosen when the drag starts moving; locked so a diagonal drag never jumps. */
+  let axis: 'x' | 'y' = 'y';
   let fine = false;
   let last = 0;
 
@@ -61,21 +70,34 @@
     dragging = true;
     moved = false;
     fine = e.shiftKey;
+    startX = e.clientX;
     startY = e.clientY;
     startNorm = toNorm(value);
     dragNorm = startNorm;
     last = value;
+    onstart?.();
+  }
+  /** Drag distance along the locked axis: up or right = more. */
+  function delta(e: PointerEvent): number {
+    return axis === 'x' ? e.clientX - startX : startY - e.clientY;
   }
   function move(e: PointerEvent) {
     if (!dragging) return;
     if (e.shiftKey !== fine) {
       fine = e.shiftKey;
+      startX = e.clientX;
       startY = e.clientY;
       startNorm = dragNorm;
     }
-    if (Math.abs(e.clientY - startY) > 2) moved = true;
-    if (!moved) return;
-    dragNorm = Math.min(1, Math.max(0, startNorm + ((startY - e.clientY) / 160) * (fine ? 0.1 : 1)));
+    if (!moved) {
+      const dx = e.clientX - startX;
+      const dy = startY - e.clientY;
+      if (Math.max(Math.abs(dx), Math.abs(dy)) <= 2) return;
+      // The axis that moved more wins for the whole drag.
+      axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      moved = true;
+    }
+    dragNorm = Math.min(1, Math.max(0, startNorm + (delta(e) / travel) * (fine ? 0.1 : 1)));
     const v = fromNorm(dragNorm);
     if (v !== last) {
       last = v;
@@ -88,7 +110,7 @@
     const el = e.currentTarget as HTMLElement;
     if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
     if (moved) onchange(fromNorm(dragNorm), true);
-    else if (tap.hit()) onchange(reset, true);
+    else if (reset !== undefined && tap.hit()) onchange(reset, true);
   }
   function onwheel(e: WheelEvent) {
     if (disabled) return;
@@ -106,7 +128,7 @@
       let v = fromNorm(toNorm(value) + d * (e.shiftKey ? 0.002 : 0.02));
       if (step > 0 && v === value) v = Math.min(max, Math.max(min, value + d * step));
       onchange(v, true);
-    } else if (e.key === 'Enter') onchange(reset, true);
+    } else if (e.key === 'Enter' && reset !== undefined) onchange(reset, true);
   }
 
   // Arc geometry: 270° sweep, starting at 135° (lower-left).
@@ -174,6 +196,9 @@
     cursor: ns-resize;
     border-radius: 50%;
     user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
   }
   svg {
     width: 100%;

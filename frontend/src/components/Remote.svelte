@@ -1,87 +1,188 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { store } from '../lib/store.svelte';
   import { S } from '../lib/strings';
   import { TRIM_MIN_DB } from '../lib/protocol';
-  import { formatDb, trimDbToPos, trimPosToDb } from '../lib/fader';
+  import { formatDb } from '../lib/fader';
   import { METER_SLOT } from '../lib/meterMap';
+  import { FADE_STEP_MS, forgetRemembered, isOff, loadRemembered, planIn, planOut, saveRemembered, valueAt, type FadePlan } from '../lib/fade';
+  import Knob from './Knob.svelte';
   import Meter from './Meter.svelte';
 
-  // Simple view for phones: the two volumes people reach for, big enough
-  // for a thumb, with meters; everything else is one tap away (Advanced).
+  // Simple view for phones: the two rotary volumes people reach for, with
+  // vertical meters, a master on/off that fades Main, and preset recall.
+  // Everything else is one tap away (the header's mode button).
   const cr = $derived(store.state?.control_room);
   const main = $derived(store.state?.main.db ?? TRIM_MIN_DB);
+  const phones = $derived(cr?.phones_db ?? TRIM_MIN_DB);
   const off = $derived(!store.ready);
   const session = $derived(store.c.session);
+  const dbText = (v: number) => `${formatDb(v, 0)} dB`;
 
-  type Which = 'main_vol' | 'phones_vol';
-  const clampDb = (db: number) => Math.min(0, Math.max(TRIM_MIN_DB, Math.round(db)));
-  function setDb(which: Which, db: number, final: boolean) {
-    store.set({ param: which, db: clampDb(db) }, final);
-  }
-  function fromSlider(which: Which, e: Event, final: boolean) {
-    const pos = Number((e.currentTarget as HTMLInputElement).value) / 1000;
-    setDb(which, trimPosToDb(pos, TRIM_MIN_DB), final);
-  }
+  // Knob size follows the width so both knob + meter blocks fit side by side.
+  const GAP = 10; // between the two cards
+  const PAD = 10; // card padding
+  const INNER = 8; // knob to meters
+  const METERS_W = 2 * 12 + 2;
+  let width = $state(0);
+  const stacked = $derived(width > 0 && width < 340);
+  const size = $derived.by(() => {
+    if (width <= 0) return 96;
+    const block = stacked ? width : (width - GAP) / 2;
+    return Math.round(Math.min(150, Math.max(96, block - 2 * PAD - INNER - METERS_W - 2)));
+  });
+  const travel = $derived(Math.round(size * 2.5));
 
-  const cards = $derived([
-    { which: 'main_vol' as const, title: S.main, db: main, meters: [METER_SLOT.output(0), METER_SLOT.output(1)] },
-    { which: 'phones_vol' as const, title: S.phones, db: cr?.phones_db ?? TRIM_MIN_DB, meters: [METER_SLOT.output(10), METER_SLOT.output(11)] },
-  ]);
+  const setVol = (which: 'main_vol' | 'phones_vol', v: number, final: boolean) =>
+    store.set({ param: which, db: Math.round(v) }, final);
+
+  // --- master fade (Main volume only) ---------------------------------
+  type Dir = 'out' | 'in';
+  let fading = $state<Dir | null>(null);
+  let timer: ReturnType<typeof setInterval> | undefined;
+  /** Last value written by the fade; a reversal starts from it, so it is continuous. */
+  let level = TRIM_MIN_DB;
+
+  function stopFade() {
+    if (timer !== undefined) clearInterval(timer);
+    timer = undefined;
+    fading = null;
+  }
+  function run(dir: Dir, plan: FadePlan) {
+    stopFade();
+    fading = dir;
+    const t0 = performance.now();
+    let lastSent = Number.NaN;
+    // Main as this fade last left it; anything else means another client, OSC,
+    // a preset or a reconnect snapshot moved it: stop instead of fighting it.
+    let expect = main;
+    const write = (v: number, final: boolean) => {
+      setVol('main_vol', v, final);
+      expect = v;
+    };
+    const tick = () => {
+      const now = store.state?.main.db;
+      if (!store.ready || now === undefined || Math.abs(now - expect) > 0.5) {
+        stopFade();
+        return;
+      }
+      const t = plan.ms > 0 ? (performance.now() - t0) / plan.ms : 1;
+      const v = valueAt(plan, t);
+      level = v;
+      if (t >= 1) {
+        stopFade();
+        write(v, true);
+        // The remembered level is used once: a later Off remembers afresh.
+        if (dir === 'in') forgetRemembered();
+      } else if (v !== lastSent) {
+        lastSent = v;
+        write(v, false);
+      }
+    };
+    timer = setInterval(tick, FADE_STEP_MS);
+    tick();
+  }
+  const masterOn = $derived(fading === 'in' || (fading === null && !isOff(main)));
+  function toggleMaster() {
+    if (off) return;
+    if (masterOn) {
+      // Remember the level only when it is a real one (not mid-fade).
+      if (fading === null) saveRemembered(main);
+      run('out', planOut(fading ? level : main));
+    } else {
+      run('in', planIn(fading ? level : main, loadRemembered()));
+    }
+  }
+  /** User drags of Main: stop any fade; a level the user sets replaces the remembered one. */
+  function setMain(v: number, final: boolean) {
+    stopFade();
+    setVol('main_vol', v, final);
+    if (final && !isOff(v)) forgetRemembered();
+  }
+  const masterLabel = $derived(
+    fading === 'out' ? S.fadingOut : fading === 'in' ? S.fadingIn : masterOn ? S.mainOn : S.mainOff,
+  );
+
+  onDestroy(stopFade);
 
   $effect(() => {
     if (store.ready) store.listPresets();
   });
 </script>
 
-<div class="remote">
-  {#each cards as c (c.which)}
-    <section class="card" aria-label="{c.title} volume">
-      <div class="head">
-        <h2>{c.title}</h2>
-        <output class="db" aria-live="polite">{formatDb(c.db, 0)} <small>dB</small></output>
-      </div>
-      <div class="meters" aria-hidden="true">
-        {#each c.meters as m (m)}<Meter index={m} horizontal label="{c.title} meter" />{/each}
-      </div>
-      <div class="ctl">
-        <button class="step" aria-label="{c.title} down 1 dB" disabled={off} onclick={() => setDb(c.which, c.db - 1, true)}>−</button>
-        <input
-          type="range"
-          min="0"
-          max="1000"
-          step="1"
-          aria-label="{c.title} volume"
-          aria-valuetext="{formatDb(c.db, 0)} dB"
-          value={Math.round(trimDbToPos(c.db) * 1000)}
+<div class="remote" bind:clientWidth={width}>
+  <div class="pair" class:stacked>
+    <section class="card" aria-label="{S.main} volume">
+      <div class="blk">
+        <Knob
+          value={main}
+          min={TRIM_MIN_DB}
+          max={0}
+          step={1}
+          label={S.monitor}
+          ariaLabel="{S.monitor} level"
+          {size}
+          {travel}
+          format={dbText}
           disabled={off}
-          oninput={(e) => fromSlider(c.which, e, false)}
-          onchange={(e) => fromSlider(c.which, e, true)}
+          onstart={stopFade}
+          onchange={setMain}
         />
-        <button class="step" aria-label="{c.title} up 1 dB" disabled={off} onclick={() => setDb(c.which, c.db + 1, true)}>+</button>
+        <div class="km" style:height="{size}px" aria-hidden="true">
+          <Meter index={METER_SLOT.output(0)} label="Main L meter" />
+          <Meter index={METER_SLOT.output(1)} label="Main R meter" />
+        </div>
       </div>
     </section>
-  {/each}
-
-  {#if cr}
-    <section class="card row">
-      <button class="t" class:on={cr.mono} aria-pressed={cr.mono} disabled={off} onclick={() => store.set({ param: 'mono', on: !cr.mono }, true)}>{S.mono}</button>
-      <button class="t red" class:on={cr.talkback} aria-pressed={cr.talkback} disabled={off} onclick={() => store.set({ param: 'talkback', on: !cr.talkback }, true)}>{S.talkback}</button>
+    <section class="card" aria-label="{S.phones} volume">
+      <div class="blk">
+        <Knob
+          value={phones}
+          min={TRIM_MIN_DB}
+          max={0}
+          step={1}
+          label={S.phones}
+          ariaLabel="{S.phones} level"
+          {size}
+          {travel}
+          format={dbText}
+          disabled={off}
+          onchange={(v, f) => setVol('phones_vol', v, f)}
+        />
+        <div class="km" style:height="{size}px" aria-hidden="true">
+          <Meter index={METER_SLOT.output(10)} label="Phones L meter" />
+          <Meter index={METER_SLOT.output(11)} label="Phones R meter" />
+        </div>
+      </div>
     </section>
-  {/if}
+  </div>
+
+  <button
+    class="power"
+    class:on={masterOn}
+    class:busy={fading !== null}
+    aria-pressed={masterOn}
+    aria-label={S.mainPower}
+    aria-busy={fading !== null}
+    disabled={off}
+    onclick={toggleMaster}
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3v9" />
+      <path d="M6.4 6.6a8 8 0 1 0 11.2 0" />
+    </svg>
+    <span>{masterLabel}</span>
+  </button>
 
   {#if store.c.presets.length}
-    <section class="card">
-      <label class="preset">
-        <span>{S.presets}</span>
-        <select value={session.active_preset ?? ''} disabled={off} onchange={(e) => store.loadPreset(e.currentTarget.value)}>
-          <option value="" disabled>{S.noPreset}</option>
-          {#each store.c.presets as p (p)}<option value={p}>{p}</option>{/each}
-        </select>
-      </label>
-    </section>
+    <label class="preset">
+      <span>{S.presets}</span>
+      <select value={session.active_preset ?? ''} disabled={off} onchange={(e) => store.loadPreset(e.currentTarget.value)}>
+        <option value="" disabled>{S.noPreset}</option>
+        {#each store.c.presets as p (p)}<option value={p}>{p}</option>{/each}
+      </select>
+    </label>
   {/if}
-
-  <button class="adv" onclick={() => store.setSimple(false)}>Advanced controls →</button>
 </div>
 
 <style>
@@ -93,109 +194,93 @@
     margin: 0 auto;
     padding: 4px 0 16px;
   }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 14px 16px;
-  }
-  .head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-  }
-  h2 {
-    margin: 0;
-    font-size: 18px;
-  }
-  .db {
-    font-size: 30px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
-  .db small {
-    font-size: 14px;
-    color: var(--text-dim);
-  }
-  .meters {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    margin: 8px 0 12px;
-  }
-  .ctl {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .ctl input {
-    flex: 1;
-    min-width: 0;
-    height: 44px;
-    accent-color: var(--cyan);
-  }
-  .step {
-    width: 52px;
-    height: 52px;
-    flex: none;
-    font-size: 26px;
-    background: var(--bg-alt);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    cursor: pointer;
-  }
-  .row {
+  .pair {
     display: flex;
     gap: 10px;
   }
-  .t {
-    flex: 1;
-    min-height: 48px;
-    font-size: 15px;
-    background: var(--bg-alt);
+  .pair.stacked {
+    flex-direction: column;
+  }
+  .card {
+    flex: 1 1 0;
+    min-width: 0;
+    background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    cursor: pointer;
-    --on: var(--cyan);
+    border-radius: 14px;
+    padding: 12px 10px;
   }
-  .t.red {
-    --on: var(--red);
+  .blk {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 8px;
   }
-  .t.on {
-    background: var(--on);
-    border-color: var(--on);
-    color: #111;
+  .blk :global(.val) {
+    font-size: 20px;
     font-weight: 700;
+    margin-top: 4px;
+  }
+  .blk :global(.lbl) {
+    font-size: 14px;
+  }
+  .km {
+    display: flex;
+    gap: 2px;
+    flex: none;
+  }
+  .km :global(canvas) {
+    width: 12px;
+    height: 100%;
+    min-height: 0;
+  }
+  .power {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 56px;
+    font-size: 17px;
+    font-weight: 600;
+    background: var(--bg-alt);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .power svg {
+    width: 26px;
+    height: 26px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+  }
+  .power.on {
+    color: var(--cyan);
+    border-color: var(--cyan);
+  }
+  .power.busy {
+    opacity: 0.85;
   }
   .preset {
     display: flex;
     align-items: center;
-    gap: 12px;
-    font-size: 15px;
+    gap: 10px;
+    font-size: 14px;
+    color: var(--text-dim);
   }
   .preset select {
     flex: 1;
-    min-height: 44px;
-    font-size: 15px;
+    min-height: 40px;
+    font-size: 14px;
     background: #0d0e11;
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 0 8px;
   }
-  .adv {
-    align-self: center;
-    min-height: 44px;
-    padding: 0 18px;
-    background: none;
-    color: var(--cyan);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    font-size: 15px;
-    cursor: pointer;
-  }
   button:disabled,
-  input:disabled,
   select:disabled {
     opacity: 0.45;
   }

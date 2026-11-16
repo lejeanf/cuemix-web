@@ -55,7 +55,6 @@
             value={st.main.db}
             min={TRIM_MIN_DB}
             max={0}
-            reset={0}
             step={1}
             label={S.monitor}
             ariaLabel="{S.monitor} level"
@@ -83,7 +82,6 @@
             value={st.control_room.phones_db}
             min={TRIM_MIN_DB}
             max={0}
-            reset={0}
             step={1}
             label={S.phones}
             ariaLabel="{S.phones} level"
@@ -112,7 +110,6 @@
                     value={st.output_trims[ch]}
                     min={TRIM_MIN_DB}
                     max={0}
-                    reset={0}
                     step={1}
                     size={32}
                     label={String(ch + 1)}

@@ -75,4 +75,9 @@ export const S = {
   labelInvalid: 'Name must be 1–64 printable characters',
   sampleRate: 'Sample rate',
   clockSource: 'Clock source',
+  mainPower: 'Main output',
+  mainOn: 'Main On',
+  mainOff: 'Main Off',
+  fadingIn: 'Fading in…',
+  fadingOut: 'Fading out…',
 } as const;
