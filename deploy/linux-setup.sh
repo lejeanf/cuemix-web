@@ -455,7 +455,7 @@ install_unit() {
   install_update_units
 }
 
-# install_update_units : daily check timer + web-requested install (path unit).
+# install_update_units : hourly check timer + web-requested install (path unit).
 # Only for the default binary location, which is what cuemix-update manages.
 install_update_units() {
   if [[ "${INSTALL_DIR}" != "/usr/local/bin" ]]; then

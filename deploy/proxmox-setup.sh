@@ -677,7 +677,7 @@ provision_container() {
   push_update_units "${CTID}"
 }
 
-# push_update_units CTID : install the daily release check (timer) and the
+# push_update_units CTID : install the hourly release check (timer) and the
 # web-requested install (path unit) in the container, and run a first check.
 push_update_units() {
   local ctid="$1" u

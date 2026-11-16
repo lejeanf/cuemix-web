@@ -12,6 +12,18 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-16
+
+### Changed
+- The release check runs every hour instead of once a day, so a new version
+  shows up in the Advanced view (Control Room bar: **vX available**, then
+  **Install**) within about an hour. The page re-reads the result every 10
+  minutes and on reconnect.
+
+### Compatibility
+- The hourly timer is installed by `deploy/proxmox-setup.sh --update` (or
+  `linux-setup.sh`); an install from the UI keeps the timer it already has.
+
 ## [0.5.0] - 2026-11-16
 
 Phone view with rotary knobs and per-channel fades, room test with the phone

@@ -7,7 +7,7 @@
 # service and waits for its health endpoint. If the restart or the health check
 # fails, the previous binary is restored automatically.
 #
-# Updates are never automatic: a daily timer only *checks* (--check
+# Updates are never automatic: an hourly timer only *checks* (--check
 # --status-file), and an install runs when a person asks for it, from a shell
 # or from the web UI's Install button (which only creates a request file that
 # the root unit cuemix-update-request.path turns into a run of this script).
