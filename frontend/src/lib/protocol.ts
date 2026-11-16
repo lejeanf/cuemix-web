@@ -238,6 +238,8 @@ export type ServerEvent =
   /** Raw meter frame from the MOTU (prop 6000), for the meter probe. */
   | { event: 'meter_raw'; raw: number[] }
   | ({ event: 'measure' } & MeasureInfo)
+  /** Output patch (prop 5010, read-only): index = destination, value = source point. Empty = unknown. */
+  | { event: 'patch'; sources: number[] }
   | { event: 'error'; message: string };
 
 /** Room measurement (noise played by an MPD server, see docs). `unavailable` = not configured. */

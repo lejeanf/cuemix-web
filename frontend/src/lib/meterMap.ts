@@ -22,6 +22,33 @@ const MK5_MIXER_IN: readonly number[] = [
 /** Raw point for each output: Main L/R, Line 3-10, Phones L/R (output processing, before the trim). */
 const MK5_OUTPUT: readonly number[] = [46, 47, 48, 49, 54, 55, 56, 57, 62, 63, 64, 65];
 
+/**
+ * Destination index in the device patch table (property 5010) of each output,
+ * same order as MK5_OUTPUT: Main L/R, Line 3-10, Phones L/R. null = not known
+ * yet. Fill this in after reading the "Patch (5010)" table of the meter probe
+ * (`/?probe`) on the card; until then the outputs are metered at MK5_OUTPUT.
+ */
+export const MK5_PATCH_DEST: readonly (number | null)[] = [
+  null, null, null, null, null, null, null, null, null, null, null, null,
+];
+
+/**
+ * Meter point of the source really patched to `output`'s destination, or the
+ * output's own processing point (MK5_OUTPUT) when the patch or the destination
+ * index is unknown.
+ */
+export function outputSourcePoint(
+  output: number,
+  patch: readonly number[] | null,
+  dests: readonly (number | null)[] = MK5_PATCH_DEST,
+): number {
+  const fallback = MK5_OUTPUT[output] ?? 255;
+  const dest = dests[output];
+  if (!patch || dest === null || dest === undefined) return fallback;
+  const src = patch[dest];
+  return src === undefined || src >= 255 ? fallback : src;
+}
+
 export const MIXER_INPUTS = 32;
 export const OUTPUTS = MK5_OUTPUT.length;
 export const PREAMPS = MK5_ANALOG_IN.length;
@@ -45,10 +72,10 @@ export function hasMk5Meters(model: string | undefined, rawLength: number): bool
 }
 
 /** Raw mk5 meter frame → linear levels per meter slot. */
-export function mk5MeterLevels(raw: readonly number[]): number[] {
+export function mk5MeterLevels(raw: readonly number[], patch: readonly number[] | null = null): number[] {
   const out: number[] = [];
   MK5_MIXER_IN.forEach((p, i) => (out[METER_SLOT.mixerInput(i)] = rawToLinear(raw[p])));
-  MK5_OUTPUT.forEach((p, i) => (out[METER_SLOT.output(i)] = rawToLinear(raw[p])));
+  MK5_OUTPUT.forEach((_, i) => (out[METER_SLOT.output(i)] = rawToLinear(raw[outputSourcePoint(i, patch)])));
   MK5_ANALOG_IN.forEach((p, i) => (out[METER_SLOT.preamp(i)] = rawToLinear(raw[32 + p])));
   return out;
 }

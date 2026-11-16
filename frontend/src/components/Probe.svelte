@@ -19,6 +19,9 @@
   });
 
   const raw = $derived(store.meterRaw ?? []);
+  const patch = $derived(store.patch);
+  /** Source points that currently carry signal (above -120 dB). */
+  const live = (src: number) => src < 255 && (raw[src] ?? 255) < 240;
   const changed = $derived(new Set(baseline ? changedFrom(baseline, stats.mean) : []));
   const moving = (i: number) => (stats.max[i] ?? 0) - (stats.min[i] ?? 0) > 3;
 
@@ -59,6 +62,22 @@
     1. Silence everything and press <em>Set baseline</em>. 2. Play audio on one known input or output. 3. Cells that changed turn
     cyan; cells that flicker get an outline. 4. Write what is playing, press <em>Copy snapshot</em> and paste it in the chat.
   </p>
+  <div class="patch">
+    <strong>Patch (5010)</strong>
+    {#if !patch}
+      <span class="dim">Not read (demo mode or not sent by the card).</span>
+    {:else}
+      <span class="dim">destination &rarr; source point; cyan = source has signal now</span>
+      <div class="grid">
+        {#each patch as src, dest (dest)}
+          <div class="cell" class:idle={src === 255} class:chg={live(src)} title="destination {dest} from source {src}, meter byte {raw[src] ?? 'n/a'}">
+            <span class="i">{dest}</span>
+            <span class="v">{src === 255 ? '-' : src}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
   {#if !raw.length}
     <p class="dim">No meter frames yet. They come from the MOTU once it is online (not in demo mode).</p>
   {:else}
@@ -109,6 +128,11 @@
   .dim {
     color: var(--text-dim);
     font-size: 12px;
+  }
+  .patch {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
   .help {
     margin: 0;

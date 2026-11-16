@@ -258,6 +258,30 @@ describe('mk5 meter map', () => {
   });
 });
 
+describe('output patch', () => {
+  it('follows the patch only for known destinations', async () => {
+    const { outputSourcePoint, mk5MeterLevels, METER_SLOT, rawToLinear, MK5_PATCH_DEST } = await import('./meterMap');
+    expect(MK5_PATCH_DEST.every((d) => d === null)).toBe(true);
+    const patch = new Array(80).fill(255);
+    patch[10] = 46;
+    patch[11] = 78;
+    const dests = [null, null, null, null, null, null, null, null, null, null, 10, 11];
+    expect(outputSourcePoint(10, patch, dests)).toBe(46); // Phones L patched to Main
+    expect(outputSourcePoint(11, patch, dests)).toBe(78);
+    expect(outputSourcePoint(0, patch, dests)).toBe(46); // unknown dest: own point
+    expect(outputSourcePoint(10, null, dests)).toBe(64); // unknown patch
+    expect(outputSourcePoint(10, [], dests)).toBe(64); // destination beyond the table
+    expect(outputSourcePoint(11, [...patch.slice(0, 11), 255], dests)).toBe(65); // nothing patched
+    expect(outputSourcePoint(99, patch, dests)).toBe(255);
+    // Unknown destinations: levels identical with or without a patch.
+    const raw = new Array(100).fill(255);
+    raw[64] = 10;
+    raw[78] = 4;
+    expect(mk5MeterLevels(raw, patch)).toEqual(mk5MeterLevels(raw));
+    expect(mk5MeterLevels(raw)[METER_SLOT.output(10)]).toBeCloseTo(rawToLinear(10), 9);
+  });
+});
+
 describe('preset files', () => {
   it('derives valid names', async () => {
     const { presetNameFromFile, exportFileName } = await import('./presetFile');

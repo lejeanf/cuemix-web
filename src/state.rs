@@ -871,6 +871,11 @@ pub enum ServerEvent {
     /// meter point), for the meter probe used to map the layout. Rate-limited
     /// by the device client (~15 Hz).
     MeterRaw { raw: Vec<u8> },
+    /// Output patch read from the MOTU (property 5010, read-only): index =
+    /// destination, value = patch-bus source point (same numbering as the
+    /// meter points). Sent on connect when known and on every change; an
+    /// empty list means "unknown" (demo mode, link lost).
+    Patch { sources: Vec<u8> },
     /// Room-test state (sent on connect and at every change).
     Measure(MeasureStatus),
     /// Request rejected; delivered only to the requesting client.

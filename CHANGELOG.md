@@ -19,6 +19,13 @@ need attention. Preset files carry `schema_version`; see
   tab is hidden while a MOTU is connected and returns once reverb is written.
 
 ### Added
+- The output patch table of the card (property 5010) is now read, never
+  written, and sent to the web UI (`patch` message). The meter probe
+  (`/?probe`) shows it as a "Patch (5010)" table (destination to source
+  point, highlighted when the source has signal), and the output meters are
+  ready to follow it once the destination of each output is known (the
+  Phones meter stays empty meanwhile: the headphone jack is not fed by the
+  Phones mix).
 - Room test (optional, `[measure]` in `config.toml`, off by default): the
   server asks your MPD / myMPD to play pink noise (served by the new
   `GET /api/measure/noise.wav`, 90 s, 48 kHz, 16-bit, about -20 dBFS RMS,

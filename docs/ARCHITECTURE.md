@@ -251,6 +251,8 @@ décodage ; le feedback `changed` va aux cibles
 configurées + pairs, **sauf l'émetteur** ; bundles découpés ≤ 8 KiB. Non transmis en OSC :
 `presets`, `labels`, `meters`, `meter_raw`, `status`, `session`, `error`. `meter_raw` (`{"event":"meter_raw","raw":[255,13,…]}`) porte la trame de meters brute du MOTU (propriété 6000, non décodée), ≈ 15/s, pour la vue de diagnostic *Meter probe* (`/?probe`) qui sert à établir la table des meters.
 
+`patch` (`{"event":"patch","sources":[46,47,…]}`) porte la table de patch 5010 lue sur la carte (index = destination, valeur = point source ; liste vide = inconnue). Le client MOTU l'accumule (`apply_patch_frame`), le moteur la garde (`Engine.patch`, hors `MotuState` et hors présets), la diffuse à chaque changement, la rejoue après les événements initiaux quand elle est connue et la vide en mode démo. Lecture seule : aucun `Command`, aucun encodeur, pas de `check_writable`. Côté web : `store.patch`, tableau « Patch (5010) » du *Meter probe*, et `outputSourcePoint` (`meterMap.ts`) qui fait suivre aux meters de sortie la source réellement patchée dès que `MK5_PATCH_DEST` (indice de destination par sortie, vide tant qu'il n'est pas lu sur la carte) est renseigné.
+
 ### 3.7 Configuration (`config.rs`)
 
 Fichier : `--config` → `$CUEMIX_CONFIG` → `./config.toml` → `/etc/cuemix-web/config.toml` ;
