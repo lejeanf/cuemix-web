@@ -315,20 +315,21 @@
   }
   .status {
     --c: var(--text-dim);
+    position: relative;
+    flex: none;
     display: inline-flex;
     align-items: center;
-    gap: 0;
-    min-height: 24px;
-    padding: 0 7px;
-    border: 1px solid transparent;
-    border-radius: 999px;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
     background: none;
     color: var(--c);
     font-size: 12px;
     white-space: nowrap;
     cursor: default;
     touch-action: manipulation;
-    transition: border-color 0.2s, gap 0.2s;
   }
   .status.online {
     --c: var(--meter-green);
@@ -341,8 +342,8 @@
   }
   .dot {
     flex: none;
-    width: 10px;
-    height: 10px;
+    width: 13px;
+    height: 13px;
     border-radius: 50%;
     background: var(--c);
   }
@@ -354,21 +355,25 @@
       opacity: 0.3;
     }
   }
+  /* The label floats under the dot, so showing it never moves
+     or wraps anything. */
   .txt {
-    max-width: 0;
-    overflow: hidden;
-    transition: max-width 0.25s;
-  }
-  .status:hover,
-  .status:focus-visible,
-  .status.show {
-    gap: 6px;
-    border-color: var(--c);
+    position: absolute;
+    right: 0;
+    top: calc(100% + 2px);
+    z-index: 30;
+    padding: 3px 10px;
+    border: 1px solid var(--c);
+    border-radius: 999px;
+    background: var(--bg-alt);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
   }
   .status:hover .txt,
   .status:focus-visible .txt,
   .status.show .txt {
-    max-width: 160px;
+    opacity: 1;
   }
   /* Phones: tabs get their own scrolling row under the buttons; the clock
      (rarely changed) is left to larger screens. */
@@ -376,10 +381,14 @@
     .top {
       flex-wrap: wrap;
       gap: 6px;
-      padding: 4px 8px 0;
+      padding: 0 8px;
     }
+    /* The first row is as tall in Simple and Advanced views. */
     .brand {
       flex: 1;
+      display: flex;
+      align-items: center;
+      min-height: 44px;
     }
     .tabs {
       order: 10;
