@@ -17,8 +17,13 @@ need attention. Preset files carry `schema_version`; see
   frequency, gain, Q) are now sent to the MOTU, coalesced per parameter by the
   existing throttle. A filter type is written only on a band where CueMix 5
   offers it (band 1: bell, low shelf, high-pass; band 2: bell; band 3: bell,
-  high shelf). Input EQ, compressor, gate, reverb and clock stay
-  read-only until each is checked on a card.
+  high shelf). Compressor, gate, reverb and clock stay read-only until each
+  is checked on a card.
+- Input EQ writes: the five input EQ props (1002-1006, 8 analog inputs x 4
+  bands, index `ch x 4 + band`) are sent to the MOTU like the output EQ. Filter
+  types follow CueMix 5 (band 1: bell, low shelf, high-pass; bands 2-3: bell;
+  band 4: bell, high shelf); the rule is shared with the output EQ (3 bands:
+  first / middle / last).
 
 ### Fixed
 - Output EQ slot labelling. The device has 12 EQ slots, not 12 mono outputs:
@@ -32,14 +37,21 @@ need attention. Preset files carry `schema_version`; see
   14 kHz, 0 dB, Q 1); the *Flat* preset uses the same values. OSC
   `/output/{n}/eq/…` takes the 1-based EQ slot (1 = Main, 3-10 = Line 3-10,
   11 = Phones, 12 = Reverb; 2 is unused).
-- Compatibility: preset recall now also applies the output EQ to the card.
-  Recalling a preset saved before this version (it holds placeholder EQ
-  values) replaces the EQ stored on the card. Output EQ values the card never
-  gets (the unused slot, a filter type the band does not offer) are rejected
-  from OSC and repaired to the defaults when a preset is imported or recalled.
+- Input EQ defaults match CueMix 5 (low shelf 60 Hz, bell 400 Hz, bell 2 kHz,
+  high shelf 14 kHz, 0 dB, Q 1).
+- Compatibility: preset recall now also applies the input and output EQ to the
+  card. A preset saved before this version holds the EQ the app had at the
+  time: the card's values if it was saved while the card was connected, or the
+  app's old defaults (input: 45 Hz high-pass, flat bells; output: flat bells)
+  if saved in demo mode. Recalling it replaces the EQ stored on the card. EQ values the card never gets (the unused output slot, a filter type
+  the band does not offer) are rejected from OSC and repaired to the defaults
+  when a preset is imported or recalled.
 - Known limitation: on a stereo line pair CueMix only uses the left slot (the
   odd-numbered line), so edit Line 3/5/7/9 for stereo pairs. The UI does not
-  hide the right slot yet.
+  hide the right slot yet. The same holds for the input EQ: CueMix shows one
+  strip, with the left channel's EQ, for a stereo input pair; the right
+  channel's EQ is not used by it (what the firmware does with the right
+  channel's EQ is not verified on hardware).
 
 ### Verified on hardware
 - UltraLite-mk5 (firmware 2.0.8): a Main EQ bell written at 1 kHz, −10 dB,

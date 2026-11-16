@@ -13,7 +13,8 @@
   const comp = $derived(ch !== null ? store.state?.compressors[ch] : undefined);
   const gate = $derived(ch !== null && store.hasGate(ch) ? store.state?.gates[ch] : undefined);
   const off = $derived(!store.ready);
-  const hint = $derived(store.hint('input_eq_freq'));
+  // The input EQ is written to the MOTU; the dynamics below it are not yet.
+  const hint = $derived(store.hint('comp_threshold'));
   let band = $state(0);
   const L = DSP_LIMITS;
 
@@ -36,13 +37,13 @@
       <h2>{store.labelName(ch)} — {S.dsp}</h2>
       <button class="x" onclick={close} aria-label={S.close}>✕</button>
     </header>
-    {#if hint}<p class="hint">{hint}</p>{/if}
-
     <section>
       <h3>{S.eq}</h3>
       <EqCurve kind="input" {ch} bind:selected={band} height={180} />
       <EqBands kind="input" {ch} bind:selected={band} />
     </section>
+
+    {#if hint}<p class="hint">{hint}</p>{/if}
 
     <section>
       <div class="sh">

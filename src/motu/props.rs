@@ -25,14 +25,15 @@
 //! - DSP / reverb / clock (input EQ 8 x 4 bands, output EQ 12 slots x 3 bands,
 //!   compressor 8, gate 2, reverb, sample rate, clock source) are **decoded**
 //!   from the device (layouts read from a connect dump, 2026-11-15).
-//!   The **output EQ is active**: [`encode`] writes it (slot 1, unused, is never
-//!   written). The input EQ, gate, compressor, reverb and clock encoders exist
+//!   The **input and output EQ are active**: [`encode`] writes them (output slot
+//!   1, unused, is never written; a filter type a band does not offer is never
+//!   written). The gate, compressor, reverb and clock encoders exist
 //!   ([`encode_unverified`], unit-tested) but are **not active**: [`encode`]
 //!   returns no frame for them until each one is checked on the card.
 
 use super::protocol::{Frame, ProtocolError, Value, ValueKind};
 use crate::state::{
-    dsp_limits, output_eq_mode_allowed, ClockSource, OpticalMode, Param, SampleRate,
+    dsp_limits, eq_band_mode_allowed, ClockSource, OpticalMode, Param, SampleRate,
     OUTPUT_EQ_UNUSED_SLOT,
 };
 
@@ -241,10 +242,10 @@ pub const ENTRIES: &[PropEntry] = &[
     entry(
         1002,
         B,
-        "input_eq_mode: 32 = 8 ch x 4 bands, index = ch*4+band (dump); 0 bell, 2 shelf?, 3 high-pass",
+        "input_eq_mode: 32 = 8 ch x 4 bands, index = ch*4+band; ch 0-1 Mic 1-2, 2-7 Line 3-8; 0 bell, 1 low shelf, 2 high shelf, 3 high-pass",
         SRC_MK5,
     ),
-    entry(1003, B, "input_eq_bypass: 32, index = ch*4+band", SRC_MK5),
+    entry(1003, B, "input_eq_bypass: 32, index = ch*4+band, 1 = bypassed", SRC_MK5),
     entry(
         1004,
         L,
@@ -252,7 +253,7 @@ pub const ENTRIES: &[PropEntry] = &[
         SRC_MK5,
     ),
     entry(1005, F, "input_eq_gain: dB (8.24), index = ch*4+band", SRC_MK5),
-    entry(1006, F, "input_eq_bw: octaves (8.24), index = ch*4+band", SRC_MK5),
+    entry(1006, F, "input_eq_bw: Q of a bell (8.24, default 1), index = ch*4+band", SRC_MK5),
     entry(1007, B, "gate_bypass: 2 mic channels, 1 = bypassed", SRC_MK5),
     entry(1008, F, "gate_threshold: dB (8.24; dump -46)", SRC_MK5),
     entry(P_GATE_ATTACK, W, "gate_attack: ms (Int16)", SRC_MK5),
@@ -420,14 +421,19 @@ pub fn encode(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
             index: u16::from(output),
             value: Value::U8(mode.code()),
         }],
-        // Output EQ is active (slot layout: see `encode_output_eq`).
-        Param::OutputEqMode { .. }
+        // Input and output EQ are active (see `encode_eq_param`).
+        Param::InputEqMode { .. }
+        | Param::InputEqBypass { .. }
+        | Param::InputEqFreq { .. }
+        | Param::InputEqGain { .. }
+        | Param::InputEqBw { .. }
+        | Param::OutputEqMode { .. }
         | Param::OutputEqBypass { .. }
         | Param::OutputEqFreq { .. }
         | Param::OutputEqGain { .. }
-        | Param::OutputEqBw { .. } => encode_output_eq(param)?,
+        | Param::OutputEqBw { .. } => encode_eq_param(param)?,
         // Unmapped: write not verified (MixVol/MixPan/MixMute/MixSolo, and the
-        // input EQ / gate / compressor / reverb / clock params whose encoders
+        // gate / compressor / reverb / clock params whose encoders
         // exist but are NOT ACTIVE, see `encode_unverified`), semantics unknown (Route), no hardware
         // counterpart (Dim, SpeakerB), or channel out of the documented range.
         _ => Vec::new(),
@@ -627,57 +633,58 @@ fn fixed_value(v: f64, limits: (f64, f64)) -> Result<Value, ProtocolError> {
     Ok(Value::Fixed(require_finite(v)?.clamp(limits.0, limits.1)))
 }
 
-/// Frames for the output EQ params (ACTIVE: called by [`encode`]). Slot
-/// `ch` is not a mono output (see [`OUTPUT_EQ_UNUSED_SLOT`]); the unused slot,
-/// out-of-range slots and bands yield no frame.
-fn encode_output_eq(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
+/// Frames for the input and output EQ params (ACTIVE: called by [`encode`]).
+/// Output slot `ch` is not a mono output (see [`OUTPUT_EQ_UNUSED_SLOT`]); the
+/// unused slot, out-of-range channels and bands, and filter types the band
+/// does not offer yield no frame.
+fn encode_eq_param(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
     use dsp_limits as L;
     use Param as P;
-    let (ch, band, field, value) = match *param {
-        P::OutputEqMode { ch, band, mode } => (ch, band, 0, Value::U8(mode)),
-        P::OutputEqBypass { ch, band, on } => (ch, band, 1, Value::U8(u8::from(on))),
-        P::OutputEqFreq { ch, band, hz } => (ch, band, 2, freq_value(hz)?),
-        P::OutputEqGain { ch, band, db } => (ch, band, 3, fixed_value(db, L::EQ_GAIN_DB)?),
-        P::OutputEqBw { ch, band, octaves } => (ch, band, 4, fixed_value(octaves, L::EQ_BW_OCT)?),
+    let (output, ch, band, field, value) = match *param {
+        P::InputEqMode { ch, band, mode } => (false, ch, band, 0, Value::U8(mode)),
+        P::InputEqBypass { ch, band, on } => (false, ch, band, 1, Value::U8(u8::from(on))),
+        P::InputEqFreq { ch, band, hz } => (false, ch, band, 2, freq_value(hz)?),
+        P::InputEqGain { ch, band, db } => (false, ch, band, 3, fixed_value(db, L::EQ_GAIN_DB)?),
+        P::InputEqBw { ch, band, octaves } => {
+            (false, ch, band, 4, fixed_value(octaves, L::EQ_BW_OCT)?)
+        }
+        P::OutputEqMode { ch, band, mode } => (true, ch, band, 0, Value::U8(mode)),
+        P::OutputEqBypass { ch, band, on } => (true, ch, band, 1, Value::U8(u8::from(on))),
+        P::OutputEqFreq { ch, band, hz } => (true, ch, band, 2, freq_value(hz)?),
+        P::OutputEqGain { ch, band, db } => (true, ch, band, 3, fixed_value(db, L::EQ_GAIN_DB)?),
+        P::OutputEqBw { ch, band, octaves } => {
+            (true, ch, band, 4, fixed_value(octaves, L::EQ_BW_OCT)?)
+        }
         _ => return Ok(Vec::new()),
     };
-    if ch == OUTPUT_EQ_UNUSED_SLOT {
+    if output && ch == OUTPUT_EQ_UNUSED_SLOT {
         return Ok(Vec::new());
     }
-    // Only the filter types CueMix 5 offers per band (equi.js): band 0 bell /
-    // low shelf / high-pass, band 1 bell only, band 2 bell / high shelf. Any
-    // other mode byte (OSC, imported preset) is never written.
-    if let P::OutputEqMode { mode, .. } = *param {
-        if !output_eq_mode_allowed(band, mode) {
+    // Only the filter types CueMix 5 offers per band (see
+    // `state::eq_mode_allowed`). Any other mode byte (OSC, imported preset) is
+    // never written.
+    if let P::InputEqMode { mode, .. } | P::OutputEqMode { mode, .. } = *param {
+        if !eq_band_mode_allowed(output, band, mode) {
             return Ok(Vec::new());
         }
     }
-    Ok(encode_eq(true, ch, band, field, value))
+    Ok(encode_eq(output, ch, band, field, value))
 }
 
 /// Frames for the DSP / reverb / clock params.
 ///
-/// **NOT ACTIVE YET** (input EQ, gate, compressor, reverb, clock). The layouts
+/// **NOT ACTIVE YET** (gate, compressor, reverb, clock). The layouts
 /// were read from a connect dump, but no write has been checked on the
 /// hardware, so [`encode`] does not call this: these params stay unmapped
 /// ([`is_mapped`] is `false`) and nothing is sent. Each feature is enabled on
 /// its own after a test on the card, by routing its variants from [`encode`]
-/// to here (the output EQ already is: see `encode_output_eq`). Empty for any
+/// to here (the input and output EQ already are: see `encode_eq_param`). Empty for any
 /// other param or index.
 pub fn encode_unverified(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
     use dsp_limits as L;
     use Param as P;
     let b = |on: bool| Value::U8(u8::from(on));
     let frames = match *param {
-        P::InputEqMode { ch, band, mode } => encode_eq(false, ch, band, 0, Value::U8(mode)),
-        P::InputEqBypass { ch, band, on } => encode_eq(false, ch, band, 1, b(on)),
-        P::InputEqFreq { ch, band, hz } => encode_eq(false, ch, band, 2, freq_value(hz)?),
-        P::InputEqGain { ch, band, db } => {
-            encode_eq(false, ch, band, 3, fixed_value(db, L::EQ_GAIN_DB)?)
-        }
-        P::InputEqBw { ch, band, octaves } => {
-            encode_eq(false, ch, band, 4, fixed_value(octaves, L::EQ_BW_OCT)?)
-        }
         P::GateBypass { ch, on } if ch < N_GATES => frame(P_GATE_BYPASS, ch, b(on)),
         P::GateThreshold { ch, db } if ch < N_GATES => {
             frame(P_GATE_THRESHOLD, ch, fixed_value(db, L::THRESHOLD_DB)?)
@@ -1004,7 +1011,7 @@ mod tests {
                 let _ = encode(&Param::Pad { ch, on });
                 let _ = encode(&Param::Phantom { ch, on });
                 let _ = encode_unverified(&Param::GateBypass { ch, on });
-                let _ = encode_unverified(&Param::InputEqBypass {
+                let _ = encode(&Param::InputEqBypass {
                     ch,
                     band: u8::MAX,
                     on,
@@ -1033,28 +1040,6 @@ mod tests {
     /// with values already in the state's normalised form.
     fn dsp_params() -> Vec<Param> {
         let mut v = Vec::new();
-        for (ch, band) in [(0u16, 0u8), (3, 2), (7, 3)] {
-            v.extend([
-                Param::InputEqMode { ch, band, mode: 3 },
-                Param::InputEqMode { ch, band, mode: 9 },
-                Param::InputEqBypass { ch, band, on: true },
-                Param::InputEqFreq {
-                    ch,
-                    band,
-                    hz: 3_500.0,
-                },
-                Param::InputEqGain {
-                    ch,
-                    band,
-                    db: -12.7,
-                },
-                Param::InputEqBw {
-                    ch,
-                    band,
-                    octaves: 1.0,
-                },
-            ]);
-        }
         for ch in 0..N_GATES {
             v.extend([
                 Param::GateBypass { ch, on: true },
@@ -1128,6 +1113,120 @@ mod tests {
             let back = Frame::decode_write(&w, |id| kind_of(id).unwrap_or(ValueKind::U8)).unwrap();
             assert_eq!(back.encode_write().unwrap(), w);
         }
+    }
+
+    /// One sample of every input EQ param at the channel / band edges.
+    fn input_eq_params() -> Vec<Param> {
+        let mut v = Vec::new();
+        for (ch, band) in [(0u16, 0u8), (3, 2), (7, 3)] {
+            v.extend([
+                Param::InputEqMode { ch, band, mode: 0 },
+                Param::InputEqBypass { ch, band, on: true },
+                Param::InputEqFreq {
+                    ch,
+                    band,
+                    hz: 3_500.0,
+                },
+                Param::InputEqGain {
+                    ch,
+                    band,
+                    db: -12.7,
+                },
+                Param::InputEqBw {
+                    ch,
+                    band,
+                    octaves: 1.0,
+                },
+            ]);
+        }
+        v
+    }
+
+    #[test]
+    fn input_eq_is_active_and_round_trips() {
+        for p in input_eq_params() {
+            assert!(is_mapped(&p), "{p:?}");
+            let frames = encode(&p).unwrap();
+            assert_eq!(frames.len(), 1, "{p:?}");
+            assert_eq!(kind_of(frames[0].prop_id), Some(frames[0].value.kind()));
+            let bytes = frames[0].encode().unwrap();
+            let back = Frame::decode(&bytes, |id| kind_of(id).unwrap_or(ValueKind::U8)).unwrap();
+            let got = decode(&back).unwrap_or_else(|| panic!("no decode for {p:?}"));
+            assert!(close(&got, &p), "{p:?} -> {got:?}");
+        }
+        // Wire layout: prop 1002 + field, index = ch * 4 + band.
+        let f = encode(&Param::InputEqBw {
+            ch: 7,
+            band: 3,
+            octaves: 1.0,
+        })
+        .unwrap();
+        assert_eq!((f[0].prop_id, f[0].index), (1006, 31));
+        let f = encode(&Param::InputEqBypass {
+            ch: 1,
+            band: 2,
+            on: true,
+        })
+        .unwrap();
+        assert_eq!(
+            (f[0].prop_id, f[0].index, &f[0].value),
+            (1003, 6, &Value::U8(1))
+        );
+    }
+
+    #[test]
+    fn input_eq_bad_indices_and_modes_yield_nothing() {
+        for (ch, band) in [(8u16, 0u8), (u16::MAX, 0), (0, 4), (0, u8::MAX)] {
+            let p = Param::InputEqGain { ch, band, db: 1.0 };
+            assert_eq!(encode(&p), Ok(Vec::new()), "{p:?}");
+            assert!(!is_mapped(&p), "{p:?}");
+        }
+        let allowed: [&[u8]; 4] = [&[0, 1, 3], &[0], &[0], &[0, 2]];
+        for (band, ok) in allowed.iter().enumerate() {
+            let band = band as u8;
+            for mode in 0..=u8::MAX {
+                let p = Param::InputEqMode { ch: 0, band, mode };
+                assert_eq!(
+                    encode(&p).unwrap().len(),
+                    usize::from(ok.contains(&mode)),
+                    "{p:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn input_eq_values_are_clamped_to_the_limits() {
+        let one = |p: Param| encode(&p).unwrap()[0].value.clone();
+        let (ch, band) = (0, 0);
+        assert_eq!(
+            one(Param::InputEqGain { ch, band, db: 99.0 }),
+            Value::Fixed(20.0)
+        );
+        assert_eq!(
+            one(Param::InputEqBw {
+                ch,
+                band,
+                octaves: 0.01
+            }),
+            Value::Fixed(0.45)
+        );
+        assert_eq!(
+            one(Param::InputEqFreq { ch, band, hz: 1e9 }),
+            Value::U32(20_000)
+        );
+        assert_eq!(
+            one(Param::InputEqFreq { ch, band, hz: 1.0 }),
+            Value::U32(20)
+        );
+        assert!(matches!(
+            encode(&Param::InputEqGain {
+                ch,
+                band,
+                db: f64::NAN
+            }),
+            Err(ProtocolError::NonFinite(_))
+        ));
     }
 
     /// One sample of every output EQ param on a usable slot.
@@ -1247,41 +1346,6 @@ mod tests {
     }
 
     #[test]
-    fn input_eq_stays_inactive() {
-        for p in [
-            Param::InputEqMode {
-                ch: 0,
-                band: 0,
-                mode: 3,
-            },
-            Param::InputEqBypass {
-                ch: 0,
-                band: 0,
-                on: true,
-            },
-            Param::InputEqFreq {
-                ch: 0,
-                band: 0,
-                hz: 100.0,
-            },
-            Param::InputEqGain {
-                ch: 0,
-                band: 0,
-                db: 1.0,
-            },
-            Param::InputEqBw {
-                ch: 0,
-                band: 0,
-                octaves: 1.0,
-            },
-        ] {
-            assert_eq!(encode(&p), Ok(Vec::new()), "{p:?}");
-            assert!(!is_mapped(&p), "{p:?}");
-            assert_eq!(encode_unverified(&p).unwrap().len(), 1, "{p:?}");
-        }
-    }
-
-    #[test]
     fn output_eq_values_are_clamped_to_the_limits() {
         let one = |p: Param| encode(&p).unwrap()[0].value.clone();
         let (ch, band) = (0, 0);
@@ -1366,7 +1430,7 @@ mod tests {
         .unwrap();
         assert_eq!(out[0].index, 35);
         assert_eq!(
-            encode_unverified(&Param::InputEqMode {
+            encode(&Param::InputEqMode {
                 ch: 1,
                 band: 4,
                 mode: 0
@@ -1419,14 +1483,6 @@ mod tests {
     #[test]
     fn dsp_encoders_clamp_and_reject_non_finite() {
         let one = |p: Param| encode_unverified(&p).unwrap()[0].value.clone();
-        assert_eq!(
-            one(Param::InputEqFreq {
-                ch: 0,
-                band: 0,
-                hz: 99_999.0
-            }),
-            Value::U32(20_000)
-        );
         assert_eq!(
             one(Param::CompRelease { ch: 0, ms: 1e9 }),
             Value::I16(10_000)
