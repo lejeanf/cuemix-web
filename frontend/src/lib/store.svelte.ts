@@ -240,6 +240,11 @@ class Store {
   loadPreset(name: string): void {
     this.sendRaw({ cmd: 'load_preset', name });
   }
+  /** Sends a preset file's JSON (any supported version) to be stored as `name` and recalled. */
+  importPreset(name: string, text: string): void {
+    this.sendRaw({ cmd: 'import_preset', name, text });
+  }
+
   savePreset(name: string): void {
     this.sendRaw({ cmd: 'save_preset', name });
   }

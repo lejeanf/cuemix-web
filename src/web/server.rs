@@ -41,7 +41,7 @@ use crate::state::{Command, ServerEvent};
 struct Assets;
 
 /// Maximum inbound WebSocket message size.
-const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 /// Keep-alive ping period.
 const PING_EVERY: Duration = Duration::from_secs(20);
 /// Maximum time a single WebSocket write may take before the client is dropped.

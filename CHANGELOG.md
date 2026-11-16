@@ -48,6 +48,10 @@ need attention. Preset files carry `schema_version`; see
   preamp, for gain staging), and each output, Main and Phones on the Output
   tab (before trim/volume). Layout of the meter frame (prop 6000, one byte
   per patch-bus point, −0.5 dB per step) confirmed with the meter probe.
+- Settings files: Presets → *Export to file* downloads every setting
+  (preset format, with the device model and firmware); *Import file…*
+  stores a settings file as a preset and loads it. New WebSocket command
+  `import_preset`; incoming message limit raised to 256 KiB.
 - Browser tab icon.
 - `Int16` payloads (`ValueKind::I16`) for the DSP attack/release times.
 - OSC addresses for all of the above: `/eq/{ch}/band/{b}/{mode|bypass|freq|gain|bw}`,

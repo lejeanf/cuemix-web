@@ -216,6 +216,7 @@ export type Command =
   | ({ cmd: 'set' } & Param)
   | { cmd: 'load_preset'; name: string }
   | { cmd: 'save_preset'; name: string }
+  | { cmd: 'import_preset'; name: string; text: string }
   | { cmd: 'list_presets' }
   | { cmd: 'set_label'; ch: number; label: ChannelLabel | null };
 

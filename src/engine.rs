@@ -331,6 +331,82 @@ impl Engine {
         }
     }
 
+    /// Recalls a preset: validates it, sends what differs to the device and
+    /// makes it active.
+    fn recall(&mut self, origin: Origin, preset: Preset) {
+        let name = preset.name.clone();
+        if preset.state.topology != self.state.topology {
+            self.reply_error(
+                origin,
+                format!("preset {name:?} was saved for a different topology"),
+            );
+            return;
+        }
+        // Untrusted file: validate shape and clamp every value.
+        let mut next = match preset.state.clone().normalized() {
+            Ok(s) => s,
+            Err(e) => {
+                self.reply_error(origin, format!("preset {name:?} rejected: {e}"));
+                return;
+            }
+        };
+        // Trims and +48V are never recalled (maintainer ruling).
+        next.keep_excluded_from(&self.state);
+        // With an identified device the live state mirrors the
+        // hardware (read back on connect): send only what differs.
+        // Otherwise (demo, not yet synced) send every mapped param.
+        let params = if self.session.device.is_some() {
+            self.state.diff(&next)
+        } else {
+            next.all_params()
+        };
+        for p in params {
+            if !p.excluded_from_recall() {
+                self.forward(p);
+            }
+        }
+        self.state = next;
+        self.session.active_preset = Some(preset.name.clone());
+        self.active = Some(preset);
+        self.session.modified = false;
+        self.emit(origin, Target::All, self.snapshot());
+    }
+
+    /// Imports a preset file sent by a client (same format as the files in
+    /// the presets directory): checks it, stores it under `name`, recalls it.
+    async fn import(&mut self, origin: Origin, name: &str, text: &str) {
+        let preset = match presets::parse_preset(name, text) {
+            Ok(p) => p,
+            Err(e) => return self.reply_error(origin, format!("cannot import {name:?}: {e:#}")),
+        };
+        if preset.state.topology != self.state.topology {
+            return self.reply_error(
+                origin,
+                format!("preset {name:?} was saved for a different topology"),
+            );
+        }
+        let state = match preset.state.normalized() {
+            Ok(s) => s,
+            Err(e) => return self.reply_error(origin, format!("preset {name:?} rejected: {e}")),
+        };
+        match self.store.save(name, &state).await {
+            Ok(saved) => {
+                if let Err(i) = self.preset_names.binary_search(&saved.name) {
+                    self.preset_names.insert(i, saved.name.clone());
+                }
+                self.emit(
+                    origin,
+                    Target::All,
+                    ServerEvent::Presets {
+                        names: self.preset_names.clone(),
+                    },
+                );
+                self.recall(origin, saved);
+            }
+            Err(e) => self.reply_error(origin, format!("{e:#}")),
+        }
+    }
+
     async fn on_command(&mut self, origin: Origin, command: Command) {
         match command {
             Command::Set(param) => match self.state.apply(&param) {
@@ -349,44 +425,10 @@ impl Engine {
                 Err(e) => self.reply_error(origin, e.to_string()),
             },
             Command::LoadPreset { name } => match self.store.load(&name).await {
-                Ok(preset) if preset.state.topology != self.state.topology => {
-                    self.reply_error(
-                        origin,
-                        format!("preset {name:?} was saved for a different topology"),
-                    );
-                }
-                Ok(preset) => {
-                    // Untrusted file: validate shape and clamp every value.
-                    let mut next = match preset.state.clone().normalized() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            self.reply_error(origin, format!("preset {name:?} rejected: {e}"));
-                            return;
-                        }
-                    };
-                    // Trims and +48V are never recalled (maintainer ruling).
-                    next.keep_excluded_from(&self.state);
-                    // With an identified device the live state mirrors the
-                    // hardware (read back on connect): send only what differs.
-                    // Otherwise (demo, not yet synced) send every mapped param.
-                    let params = if self.session.device.is_some() {
-                        self.state.diff(&next)
-                    } else {
-                        next.all_params()
-                    };
-                    for p in params {
-                        if !p.excluded_from_recall() {
-                            self.forward(p);
-                        }
-                    }
-                    self.state = next;
-                    self.session.active_preset = Some(preset.name.clone());
-                    self.active = Some(preset);
-                    self.session.modified = false;
-                    self.emit(origin, Target::All, self.snapshot());
-                }
+                Ok(preset) => self.recall(origin, preset),
                 Err(e) => self.reply_error(origin, format!("{e:#}")),
             },
+            Command::ImportPreset { name, text } => self.import(origin, &name, &text).await,
             Command::SavePreset { name } => match self.store.save(&name, &self.state).await {
                 Ok(preset) => {
                     self.session.active_preset = Some(preset.name.clone());
@@ -610,6 +652,58 @@ mod tests {
             Some(Param::MainVol { db: -6.0 }),
             "mapped params are forwarded with their effective value"
         );
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn import_stores_and_recalls_a_preset_file() {
+        let (h, _link, dir) = setup("import").await;
+        let mut rx = h.subscribe();
+        let o = Origin::Web(3);
+        // Build a file the way the UI exports it: live state with Mono on.
+        let mut state = MotuState::new(Topology::default());
+        state.control_room.mono = true;
+        let text =
+            serde_json::json!({ "schema_version": 2, "name": "x", "state": state }).to_string();
+        h.command(
+            o,
+            Command::ImportPreset {
+                name: "imported".into(),
+                text,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            next(&mut rx).await.event,
+            ServerEvent::Presets {
+                names: vec!["imported".into()]
+            }
+        );
+        let ServerEvent::Snapshot { state, session } = next(&mut rx).await.event else {
+            panic!("snapshot")
+        };
+        assert!(state.control_room.mono);
+        assert_eq!(session.active_preset.as_deref(), Some("imported"));
+        assert!(
+            tokio::fs::metadata(dir.join("presets").join("imported.json"))
+                .await
+                .is_ok()
+        );
+
+        // Garbage is refused, to the sender only, and nothing is stored.
+        h.command(
+            o,
+            Command::ImportPreset {
+                name: "bad".into(),
+                text: "{ nope".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let env = next(&mut rx).await;
+        assert!(matches!(env.event, ServerEvent::Error { .. }));
+        assert!(env.is_for(o) && !env.is_for(Origin::Web(4)));
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 

@@ -174,6 +174,7 @@ Client → serveur (`Command`, tag `cmd`) :
 {"cmd":"set","param":"phantom","ch":0,"on":true}
 {"cmd":"load_preset","name":"live"}
 {"cmd":"save_preset","name":"live"}
+{"cmd":"import_preset","name":"from file","text":"{\"schema_version\":2,\"state\":{…}}"}
 {"cmd":"list_presets"}
 {"cmd":"set_label","ch":2,"label":{"name":"Vox","color":"#06B6D4"}}
 ```
@@ -205,7 +206,7 @@ matérielle** pour le DSP (lus sur la MOTU, pas encore écrits) : `input_eq_mode
 est idempotent ; plages dans `state::dsp_limits` (provisoires, larges ; miroir TS :
 `frontend/src/lib/protocol.ts`,
 loi de fader : `frontend/src/lib/fader.ts`, portage exact de `motu::fader`). Le serveur ne renvoie pas un `changed` au client
-qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants ≤ 64 KiB.
+qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants ≤ 256 KiB (un fichier de réglages importé fait ≈ 20 Ko). `import_preset` enregistre le JSON reçu (même format qu'un fichier de preset, toute version lisible) sous `<name>.json` puis le rappelle comme `load_preset`.
 
 ### 3.6 Table OSC (UDP `:8000`, indices **1-based**)
 

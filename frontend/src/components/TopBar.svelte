@@ -3,6 +3,7 @@
   import { S } from '../lib/strings';
   import { CLOCK_SOURCES, SAMPLE_RATES, PRESET_NAME_RE, type ClockSource, type SampleRate } from '../lib/protocol';
   import { isValidPresetName } from '../lib/validate';
+  import { PRESET_SCHEMA_VERSION, exportFileName, presetNameFromFile } from '../lib/presetFile';
   import type { Snippet } from 'svelte';
 
   /** The view tabs, shown in the same bar. */
@@ -43,6 +44,41 @@
     newName = '';
   }
   const khz = (r: string) => `${Number(r) / 1000} kHz`;
+
+  let fileInput = $state<HTMLInputElement>();
+  /** Downloads the live state in the preset file format. */
+  function exportFile() {
+    const st = store.state;
+    if (!st) return;
+    const name = session.active_preset ?? 'cuemix-settings';
+    const data = {
+      schema_version: PRESET_SCHEMA_VERSION,
+      name,
+      exported_at: new Date().toISOString(),
+      device: session.device ? { model: session.device.model, firmware: session.device.firmware } : null,
+      state: st,
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = exportFileName(name, new Date());
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  async function importFile(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      // Compact it: the WebSocket accepts up to 256 KiB per message.
+      const text = JSON.stringify(JSON.parse(await file.text()));
+      store.importPreset(presetNameFromFile(file.name), text);
+      open = '';
+    } catch {
+      store.c.toasts.push({ id: ++store.c.toastSeq, message: `${file.name} is not a valid settings file` });
+    }
+  }
 </script>
 
 <svelte:window onpointerdown={outside} onkeydown={key} />
@@ -100,6 +136,12 @@
           <button class="btn" type="submit" disabled={!nameOk}>{S.saveAs}</button>
         </form>
         {#if newName !== '' && !nameOk}<small class="err">{S.presetNameInvalid}</small>{/if}
+        <div class="files">
+          <button class="btn" onclick={exportFile}>{S.exportFile}</button>
+          <button class="btn" onclick={() => fileInput?.click()}>{S.importFile}</button>
+          <input bind:this={fileInput} type="file" accept=".json,application/json" hidden onchange={importFile} />
+        </div>
+        <p class="note">{S.fileNote}</p>
       </div>
     {/if}
   </div>
@@ -231,6 +273,12 @@
   form input {
     flex: 1;
     min-width: 0;
+  }
+  .files {
+    display: flex;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
   }
   .err {
     color: var(--red);

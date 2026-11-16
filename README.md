@@ -177,6 +177,7 @@ Endpoint `/ws`. Indices are **0-based** in JSON, and values use the native units
 {"cmd":"set","param":"phantom","ch":0,"on":true}
 {"cmd":"load_preset","name":"live"}
 {"cmd":"save_preset","name":"live"}
+{"cmd":"import_preset","name":"from file","text":"{\"schema_version\":2,\"state\":{…}}"}
 {"cmd":"list_presets"}
 {"cmd":"set_label","ch":2,"label":{"name":"Vox","color":"#06B6D4"}}
 ```
@@ -193,7 +194,7 @@ On connection the server sends `snapshot`, `labels` and `presets`. Later events:
 {"event":"error","message":"..."}
 ```
 
-`meters` is limited to 60 per second per client. Incoming messages are capped at 64 KiB. The server does not send a `changed` back to the client that caused it.
+`meters` is limited to 60 per second per client. Incoming messages are capped at 256 KiB. `import_preset` stores the JSON it carries (the preset file format, any readable version) as `<name>.json`, then recalls it like `load_preset`. The server does not send a `changed` back to the client that caused it.
 
 ## Deployment
 

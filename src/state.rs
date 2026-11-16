@@ -719,6 +719,13 @@ pub enum Command {
     SavePreset {
         name: String,
     },
+    /// Store a preset file sent by the client (same JSON as the files in the
+    /// presets directory, any supported `schema_version`) as `<name>.json`,
+    /// then recall it.
+    ImportPreset {
+        name: String,
+        text: String,
+    },
     /// Ask for a [`ServerEvent::Presets`] listing.
     ListPresets,
     /// Rename / recolour a mixer input (`None` clears it) — persisted in `labels.json`.

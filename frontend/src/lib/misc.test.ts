@@ -208,3 +208,13 @@ describe('mk5 meter map', () => {
     expect(hasMk5Meters(undefined, 100)).toBe(false);
   });
 });
+
+describe('preset files', () => {
+  it('derives valid names', async () => {
+    const { presetNameFromFile, exportFileName } = await import('./presetFile');
+    expect(presetNameFromFile('My mix (2).json')).toBe('My mix 2');
+    expect(presetNameFromFile('???.json')).toBe('imported');
+    expect(presetNameFromFile('x'.repeat(80) + '.json')).toHaveLength(64);
+    expect(exportFileName('Live set', new Date('2026-11-15T10:00:00Z'))).toBe('cuemix-Live_set-2026-11-15.json');
+  });
+});
