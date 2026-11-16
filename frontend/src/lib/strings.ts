@@ -67,7 +67,8 @@ export const S = {
   clearLabel: 'Clear',
   apply: 'Apply',
   labelInvalid: 'Name must be 1–64 printable characters',
-  routingHint: 'Rows: inputs · Columns: outputs',
+  routingHint: 'Rows: inputs · Columns: outputs (hover a dot to see the route)',
+  routingCorner: 'In ↓  Out →',
   sampleRate: 'Sample rate',
   clockSource: 'Clock source',
 } as const;

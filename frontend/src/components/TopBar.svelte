@@ -48,13 +48,7 @@
 <svelte:window onpointerdown={outside} onkeydown={key} />
 
 <header class="top" bind:this={root}>
-  <span class="brand"
-    >{S.appName}{#if store.version}<span class="ver" title="Running version">v{store.version}</span>{/if}{#if store.device}<span
-        class="ver"
-        title="Connected MOTU: model {store.device.model}, firmware {store.device.firmware}"
-        >{store.device.model} {store.device.firmware}</span
-      >{/if}</span
-  >
+  <span class="brand">{S.appName}</span>
   <nav class="tabs">{@render children?.()}</nav>
 
   <div class="pw">
@@ -137,12 +131,6 @@
     display: flex;
     overflow-x: auto;
     scrollbar-width: none;
-  }
-  .ver {
-    margin-left: 6px;
-    font-weight: 400;
-    font-size: 11px;
-    opacity: 0.6;
   }
   .modified {
     margin-left: 6px;
@@ -267,11 +255,6 @@
   .pill.offline {
     color: var(--red);
     border-color: var(--red);
-  }
-  @media (max-width: 900px) {
-    .ver {
-      display: none;
-    }
   }
   @media (max-width: 640px) {
     .brand {

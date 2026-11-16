@@ -38,6 +38,10 @@
       <output>{formatDb(main, 0)} dB</output>
     </label>
   {/if}
+  <span class="ver">
+    {#if store.version}<span title="Running version">v{store.version}</span>{/if}
+    {#if store.device}<span title="Connected MOTU: model {store.device.model}, firmware {store.device.firmware}">{store.device.model} {store.device.firmware}</span>{/if}
+  </span>
 </footer>
 
 <style>
@@ -45,9 +49,10 @@
     flex: none;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex-wrap: wrap;
-    padding: 8px 12px;
+    padding: 3px 10px;
+    font-size: 12px;
     background: var(--bg-alt);
     border-top: 1px solid var(--border);
   }
@@ -56,12 +61,13 @@
     margin-right: 4px;
   }
   .t {
-    min-width: 64px;
-    min-height: 40px;
-    padding: 0 14px;
+    min-width: 48px;
+    min-height: 24px;
+    padding: 0 8px;
+    font-size: 12px;
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: 5px;
     cursor: pointer;
     --on: var(--cyan);
   }
@@ -90,9 +96,18 @@
     border-radius: 6px;
   }
   .lv input {
-    width: 130px;
-    min-height: 32px;
+    width: 120px;
+    min-height: 20px;
     accent-color: var(--cyan);
+  }
+  .ver {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-dim);
+    opacity: 0.7;
+    white-space: nowrap;
   }
   output {
     min-width: 54px;

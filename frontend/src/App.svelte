@@ -97,7 +97,7 @@
   .toasts {
     position: fixed;
     right: 12px;
-    bottom: 76px;
+    bottom: 44px;
     z-index: 60;
     display: flex;
     flex-direction: column;

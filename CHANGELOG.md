@@ -82,6 +82,12 @@ need attention. Preset files carry `schema_version`; see
   Presets button shows the active preset), and the Output tab fits one
   screen (monitor, A/B, mono, talkback and phones in one card, trims as
   small knobs grouped by pair, EQ curve beside its bands).
+- The Control Room bar is half as tall, and the version, model and firmware
+  moved to its right end.
+- Routing matrix: inputs and outputs carry their names (Mic 1 … ADAT 8,
+  Main L … ADAT 8 on an UltraLite-mk5), grouped by connector (Analog,
+  Phones, S/PDIF, ADAT) with separators, and the hovered route is spelled
+  out ("Line 3 → Main L"). Routing is still not read from the device.
 - Writes to the MOTU had no effect: the device ignores frames without a
   payload length field. Writes are now `[id][index][len u16][payload]`
   (verified on an UltraLite-mk5: main volume follows the web UI). Reads are
