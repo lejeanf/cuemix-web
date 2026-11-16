@@ -26,6 +26,15 @@ need attention. Preset files carry `schema_version`; see
   L-R and the Reverb. The Output tab now names them that way and a preset or
   edit applies to the selected slot only (it used to treat slots as L/R pairs,
   so "Phones R" edited the reverb EQ).
+- Proxmox: the MOTU USB link no longer drops off its isolated bridge after a
+  host network reload. ifupdown2 (`ifreload -a`, or "Apply Configuration" in
+  the Proxmox GUI) detaches every bridge port not listed in `bridge-ports`,
+  and the MOTU link was attached only by the udev `add` rule, so the app fell
+  back to demo mode until the helper was re-run by hand. The bridge stanza now
+  has a `post-up` hook that runs `cuemix-motu-bridge --all`, which finds any
+  MOTU link (USB vendor 07fd, `cdc_ether`) in sysfs and re-attaches it (no-op
+  without one). `proxmox-setup.sh --update` now also refreshes the host helper,
+  udev rule and bridge file, without a network reload.
 
 ### Changed
 - Output EQ defaults match CueMix 5 (low shelf 60 Hz, bell 800 Hz, high shelf
