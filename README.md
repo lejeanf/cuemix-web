@@ -6,9 +6,11 @@ High-performance **Rust** web controller and bidirectional **OSC** bridge for th
 
 ![Mixer view: one strip per input or stereo pair with pan, fader, level meter, mute/solo and DSP; the selected mix's output meter beside the Main fader; the Control Room bar at the bottom](docs/images/webui-mixer.png)
 
-| Input | Output |
-|---|---|
-| ![Input view: mic and line preamps with gain, phase, pad, +48V and input meters; S/PDIF and optical inputs with the ADAT/TOS switch](docs/images/webui-input.png) | ![Output view: monitor and phones levels with meters, output trims per pair, and the output EQ with its curve and bands](docs/images/webui-output.png) |
+![Input view: mic and line preamps with gain, phase, pad, +48V and input meters; S/PDIF and optical inputs with the ADAT/TOS switch](docs/images/webui-input.png)
+
+![Output view: monitor and phones levels with meters, output trims per pair, and the output EQ with a preset applied: curve on the left, bands on the right](docs/images/webui-output.png)
+
+<sub>Screenshots taken from a real UltraLite-mk5 playing music through its optical input.</sub>
 
 ## Hardware coverage
 
@@ -125,8 +127,6 @@ The embedded Svelte 5 console (dark theme) has four views, each reachable direct
 - **Reverb**: reverb settings, sends (the Reverb mix) and returns.
 
 The DSP drawer and the output EQ follow CueMix 5: a curve with draggable bands, and per band an on/off button, frequency, gain, Q and the filter types the hardware offers on that band. Faders: double-click/tap resets to 0 dB, Shift-drag is fine adjustment, mouse wheel nudges. Controls whose changes are not sent to the MOTU yet get a dashed outline and a tooltip. A diagnostic **Meter probe** view (`/?probe`) shows the card's raw meter points.
-
-![DSP drawer of a line input: EQ curve with four bands, band columns, compressor](docs/images/webui-dsp.png)
 
 ```sh
 cd frontend && npm install
