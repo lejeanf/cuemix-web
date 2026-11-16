@@ -69,6 +69,8 @@ need attention. Preset files carry `schema_version`; see
   mic inputs.
 
 ### Fixed
+- Fader thumbs no longer stick out past the end of the track and cover the
+  pan readout (fader at the top) or the value (fader at the bottom).
 - Writes to the MOTU had no effect: the device ignores frames without a
   payload length field. Writes are now `[id][index][len u16][payload]`
   (verified on an UltraLite-mk5: main volume follows the web UI). Reads are

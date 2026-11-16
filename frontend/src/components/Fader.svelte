@@ -28,6 +28,11 @@
   let moved = false;
 
   const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  /** Half the thumb height: the thumb's centre travels between HALF and height - HALF,
+   *  so the thumb never sticks out of the fader and covers the labels around it. */
+  const HALF = 11;
+  const travel = (r: DOMRect) => Math.max(1, r.height - 2 * HALF);
+  const at = (p: number) => `calc(${HALF}px + ${p} * (100% - ${2 * HALF}px))`;
 
   function down(e: PointerEvent) {
     if (disabled || e.button > 0) return;
@@ -40,7 +45,7 @@
     startPos = pos;
     dragPos = pos;
     // Coarse drag jumps to the pointer once the user actually moves; a plain tap keeps the value.
-    jumpPending = fine ? null : clamp01(1 - (e.clientY - r.top) / r.height);
+    jumpPending = fine ? null : clamp01(1 - (e.clientY - r.top - HALF) / travel(r));
   }
   let jumpPending: number | null = null;
 
@@ -61,7 +66,7 @@
       startY = e.clientY;
       jumpPending = null;
     }
-    const next = clamp01(startPos + ((startY - e.clientY) / r.height) * (fine ? 0.1 : 1));
+    const next = clamp01(startPos + ((startY - e.clientY) / travel(r)) * (fine ? 0.1 : 1));
     dragPos = next;
     onchange(next, false);
   }
@@ -128,9 +133,9 @@
   use:wheel={onwheel}
 >
   <div class="rail"></div>
-  {#if mark !== undefined}<div class="mark" style:bottom="{mark * 100}%"></div>{/if}
-  <div class="fill" style:height="{shown * 100}%"></div>
-  <div class="thumb" style:bottom="{shown * 100}%"></div>
+  {#if mark !== undefined}<div class="mark" style:bottom={at(mark)}></div>{/if}
+  <div class="fill" style:height={at(shown)}></div>
+  <div class="thumb" style:bottom={at(shown)}></div>
 </div>
 
 <style>
