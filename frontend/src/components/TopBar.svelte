@@ -94,13 +94,13 @@
     {#if open === 'clock' && clock}
       <div class="pop" role="dialog" aria-label={S.clock}>
         {#if store.hint('sample_rate')}<p class="hint">{store.hint('sample_rate')}</p>{/if}
-        <label>{S.sampleRate}
-          <select value={clock.sample_rate} onchange={(e) => setRate(e.currentTarget.value as SampleRate)}>
+        <label data-unmapped={store.unmapped('sample_rate') ? '' : undefined}>{S.sampleRate}
+          <select disabled={store.locked('sample_rate')} value={clock.sample_rate} onchange={(e) => setRate(e.currentTarget.value as SampleRate)}>
             {#each SAMPLE_RATES as r (r)}<option value={r}>{khz(r)}</option>{/each}
           </select>
         </label>
-        <label>{S.clockSource}
-          <select value={clock.source} onchange={(e) => setSource(e.currentTarget.value as ClockSource)}>
+        <label data-unmapped={store.unmapped('clock_source') ? '' : undefined}>{S.clockSource}
+          <select disabled={store.locked('clock_source')} value={clock.source} onchange={(e) => setSource(e.currentTarget.value as ClockSource)}>
             {#each CLOCK_SOURCES as c (c)}<option value={c}>{c}</option>{/each}
           </select>
         </label>

@@ -20,7 +20,11 @@
 
   /** The meter probe is a diagnostic view: shown with `?probe` or `#probe` in the URL. */
   const probe = /probe/.test(location.search + location.hash);
-  const tabs: Tab[] = ['mixer', 'input', 'output', 'reverb', ...(probe ? (['probe'] as Tab[]) : [])];
+  const tabs: Tab[] = $derived(store.tabList(probe));
+  // A hidden tab (e.g. #reverb on a MOTU) falls back to the mixer.
+  $effect(() => {
+    if (!tabs.includes(store.tab)) store.tab = 'mixer';
+  });
 </script>
 
 <div class="app">

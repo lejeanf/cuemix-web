@@ -18,9 +18,9 @@
 <footer class="cr" aria-label={S.controlRoom}>
   <span class="label">{S.controlRoom}</span>
   {#if cr}
-    <button class="t amber" class:on={cr.dim} aria-pressed={cr.dim} disabled={off} data-unmapped={store.unmapped('dim') ? '' : undefined} title={store.hint('dim')} onclick={() => store.set({ param: 'dim', on: !cr.dim }, true)}>{S.dim}</button>
+    <button class="t amber" class:on={cr.dim} aria-pressed={cr.dim} disabled={off || store.locked('dim')} data-unmapped={store.unmapped('dim') ? '' : undefined} title={store.hint('dim')} onclick={() => store.set({ param: 'dim', on: !cr.dim }, true)}>{S.dim}</button>
     <button class="t" class:on={cr.mono} aria-pressed={cr.mono} disabled={off} onclick={() => store.set({ param: 'mono', on: !cr.mono }, true)}>{S.mono}</button>
-    <button class="t" class:on={cr.speaker_b} aria-pressed={cr.speaker_b} aria-label="{S.speakerAB}: speakers {cr.speaker_b ? 'B' : 'A'}" disabled={off} data-unmapped={store.unmapped('speaker_b') ? '' : undefined} title={store.hint('speaker_b')} onclick={() => store.set({ param: 'speaker_b', on: !cr.speaker_b }, true)}>{cr.speaker_b ? 'B' : 'A'}</button>
+    <button class="t" class:on={cr.speaker_b} aria-pressed={cr.speaker_b} aria-label="{S.speakerAB}: speakers {cr.speaker_b ? 'B' : 'A'}" disabled={off || store.locked('speaker_b')} data-unmapped={store.unmapped('speaker_b') ? '' : undefined} title={store.hint('speaker_b')} onclick={() => store.set({ param: 'speaker_b', on: !cr.speaker_b }, true)}>{cr.speaker_b ? 'B' : 'A'}</button>
     <button class="t red" class:on={cr.talkback} aria-pressed={cr.talkback} disabled={off} onclick={() => store.set({ param: 'talkback', on: !cr.talkback }, true)}>{S.talkback}</button>
 
     <label class="lv" data-unmapped={store.unmapped('phones_vol') ? '' : undefined} title={store.hint('phones_vol')}>

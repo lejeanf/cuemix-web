@@ -15,6 +15,8 @@
     onchange: (pos: number, final: boolean) => void;
   }
   let { pos, label, valueText, resetPos = 0.75, disabled = false, hint, mark, onchange }: Props = $props();
+  /** A hint means the MOTU doesn't take this param yet: locked like a disabled control. */
+  const off = $derived(disabled || !!hint);
 
   let track: HTMLDivElement;
   let dragging = $state(false);
@@ -35,7 +37,7 @@
   const at = (p: number) => `calc(${HALF}px + ${p} * (100% - ${2 * HALF}px))`;
 
   function down(e: PointerEvent) {
-    if (disabled || e.button > 0) return;
+    if (off || e.button > 0) return;
     track.setPointerCapture(e.pointerId);
     const r = track.getBoundingClientRect();
     fine = e.shiftKey;
@@ -86,14 +88,14 @@
   }
 
   function onwheel(e: WheelEvent) {
-    if (disabled) return;
+    if (off) return;
     e.preventDefault();
     const step = e.shiftKey ? 0.002 : 0.01;
     onchange(clamp01(pos + (e.deltaY < 0 ? step : -step)), true);
   }
 
   function key(e: KeyboardEvent) {
-    if (disabled) return;
+    if (off) return;
     const step = e.shiftKey ? 0.002 : 0.01;
     let n: number | null = null;
     if (e.key === 'ArrowUp' || e.key === 'ArrowRight') n = pos + step;
@@ -112,18 +114,18 @@
 
 <div
   class="fader"
-  class:disabled
+  class:disabled={off}
   data-unmapped={hint ? '' : undefined}
   title={hint}
   role="slider"
-  tabindex={disabled ? -1 : 0}
+  tabindex={off ? -1 : 0}
   aria-label={label}
   aria-orientation="vertical"
   aria-valuemin={0}
   aria-valuemax={1}
   aria-valuenow={Number(shown.toFixed(3))}
   aria-valuetext={valueText}
-  aria-disabled={disabled}
+  aria-disabled={off}
   bind:this={track}
   onpointerdown={down}
   onpointermove={move}
