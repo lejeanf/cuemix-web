@@ -41,6 +41,11 @@ need attention. Preset files carry `schema_version`; see
   odd-numbered line), so edit Line 3/5/7/9 for stereo pairs. The UI does not
   hide the right slot yet.
 
+### Verified on hardware
+- UltraLite-mk5 (firmware 2.0.8): a Main EQ bell written at 1 kHz, −10 dB,
+  Q 1 is audible, and the card reports it back after a service restart (from
+  its own connect dump).
+
 ## [0.4.0] - 2026-11-15
 
 First version used day to day on a real UltraLite-mk5 (firmware 2.0.8).
