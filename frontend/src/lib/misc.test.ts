@@ -142,3 +142,21 @@ describe('hardware mapping list', () => {
     }
   });
 });
+
+describe('output EQ presets', () => {
+  it('every preset round-trips through matchPreset and stays in range', async () => {
+    const { OUTPUT_EQ_PRESETS, presetBands, matchPreset } = await import('./eqPresets');
+    for (const p of OUTPUT_EQ_PRESETS) {
+      const bands = presetBands(p);
+      expect(bands).toHaveLength(3);
+      expect(matchPreset(bands)?.id).toBe(p.id);
+      for (const x of bands) {
+        expect(x.freq_hz).toBeGreaterThanOrEqual(20);
+        expect(Math.abs(x.gain_db)).toBeLessThanOrEqual(24);
+      }
+    }
+    const custom = presetBands(OUTPUT_EQ_PRESETS[1]);
+    custom[1].gain_db = 2;
+    expect(matchPreset(custom)).toBeUndefined();
+  });
+});

@@ -47,8 +47,9 @@
       {#if store.hint('reverb_decay')}<p class="hint">{store.hint('reverb_decay')}</p>{/if}
     </section>
 
+    <div class="mixes">
     {#if ret !== null && returnMixes.length}
-      <section aria-label={S.reverbReturn}>
+      <section class="ret" aria-label={S.reverbReturn}>
         <h3 title={S.reverbReturnHint}>{S.reverbReturn} <span class="sub">{S.reverbReturnHint}</span></h3>
         <div class="row">
           {#each returnMixes as m (m)}
@@ -95,6 +96,7 @@
         </div>
       </section>
     {/if}
+    </div>
   </div>
 {/if}
 
@@ -114,7 +116,18 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+    min-width: 0;
+  }
+  .mixes {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
     min-height: 0;
+  }
+  section.ret {
+    flex: none;
+    max-width: 100%;
   }
   section.head {
     flex-direction: row;
@@ -123,7 +136,7 @@
     gap: 14px;
   }
   section.grow {
-    flex: 1;
+    flex: 1 1 320px;
   }
   h3 {
     margin: 0;
@@ -145,7 +158,8 @@
     display: flex;
     gap: 4px;
     overflow-x: auto;
-    min-height: 150px;
+    overflow-y: hidden;
+    min-height: 210px;
   }
   .cell {
     flex: none;

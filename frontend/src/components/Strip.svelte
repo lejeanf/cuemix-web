@@ -34,7 +34,7 @@
   <section class="strip" class:stereo={pair !== undefined} aria-label="Channel {name}">
     <div class="bar" style:background={label?.color ?? 'transparent'}></div>
     <div class="namewrap">
-      <button class="name" onclick={() => (editing = !editing)} aria-label="{S.rename}: {name}" disabled={off}>
+      <button class="name" title={name} onclick={() => (editing = !editing)} aria-label="{S.rename}: {name}" disabled={off}>
         {name}
       </button>
       {#if editing}<LabelEditor {ch} onclose={() => (editing = false)} />{/if}
@@ -115,7 +115,8 @@
 <style>
   .strip {
     flex: none;
-    width: 66px;
+    /* Same width for every strip, mono or stereo: long names are cut with an ellipsis. */
+    width: 68px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -124,9 +125,6 @@
     background: var(--card);
     border-right: 1px solid var(--border);
     overflow: visible;
-  }
-  .strip.stereo {
-    width: 76px;
   }
   .bar {
     align-self: stretch;

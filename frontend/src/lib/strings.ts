@@ -37,6 +37,8 @@ export const S = {
   bypass: 'Bypass',
   band: 'Band',
   outputEq: 'Output EQ',
+  eqPreset: 'Preset',
+  eqPresetCustom: 'Custom',
   reverb: 'Reverb',
   reverbReturn: 'Return',
   reverbReturnHint: 'Reverb return level in each mix (mixer input "Reverb")',

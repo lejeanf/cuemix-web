@@ -3,6 +3,10 @@
   import { S } from '../lib/strings';
   import { CLOCK_SOURCES, SAMPLE_RATES, PRESET_NAME_RE, type ClockSource, type SampleRate } from '../lib/protocol';
   import { isValidPresetName } from '../lib/validate';
+  import type { Snippet } from 'svelte';
+
+  /** The view tabs, shown in the same bar. */
+  let { children }: { children?: Snippet } = $props();
 
   let root: HTMLElement;
   let open = $state<'' | 'presets' | 'clock'>('');
@@ -51,10 +55,7 @@
         >{store.device.model} {store.device.firmware}</span
       >{/if}</span
   >
-  <span class="preset">
-    {S.presetLabel}: <strong>{session.active_preset ?? S.noPreset}</strong>
-    {#if session.modified}<span class="modified">{S.modified}</span>{/if}
-  </span>
+  <nav class="tabs">{@render children?.()}</nav>
 
   <div class="pw">
     <button class="btn" aria-haspopup="dialog" aria-expanded={open === 'clock'} disabled={off} onclick={() => toggle('clock')}>
@@ -78,7 +79,10 @@
   </div>
 
   <div class="pw">
-    <button class="btn" aria-haspopup="dialog" aria-expanded={open === 'presets'} disabled={off} onclick={() => toggle('presets')}>{S.presets}</button>
+    <button class="btn" aria-haspopup="dialog" aria-expanded={open === 'presets'} disabled={off} title="{S.presetLabel}: {session.active_preset ?? S.noPreset}{session.modified ? ` (${S.modified})` : ''}"
+      onclick={() => toggle('presets')}
+      >{session.active_preset ?? S.presets}{#if session.modified}<span class="modified" aria-label={S.modified}>●</span>{/if}</button
+    >
     {#if open === 'presets'}
       <div class="pop wide" role="dialog" aria-label={S.presets}>
         <p class="note">{S.presetRecallNote}</p>
@@ -114,8 +118,9 @@
     flex: none;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 14px;
+    gap: 10px;
+    padding: 0 10px;
+    min-height: 44px;
     background: var(--bg-alt);
     border-bottom: 1px solid var(--border);
     position: relative;
@@ -123,6 +128,15 @@
   }
   .brand {
     font-weight: 700;
+    white-space: nowrap;
+  }
+  .tabs {
+    flex: 1;
+    min-width: 0;
+    align-self: stretch;
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
   .ver {
     margin-left: 6px;
@@ -130,25 +144,19 @@
     font-size: 11px;
     opacity: 0.6;
   }
-  .preset {
-    flex: 1;
-    color: var(--text-dim);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .preset strong {
-    color: var(--text);
-  }
   .modified {
-    margin-left: 8px;
+    margin-left: 6px;
     color: var(--amber);
   }
   .pw {
     position: relative;
   }
   .btn {
-    min-height: 36px;
+    min-height: 32px;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     padding: 0 12px;
     background: var(--card);
     border: 1px solid var(--border);
@@ -259,6 +267,11 @@
   .pill.offline {
     color: var(--red);
     border-color: var(--red);
+  }
+  @media (max-width: 900px) {
+    .ver {
+      display: none;
+    }
   }
   @media (max-width: 640px) {
     .brand {

@@ -42,7 +42,11 @@ need attention. Preset files carry `schema_version`; see
   `/output/{n}/eq/band/{b}/…`, `/comp/{ch}/…`, `/gate/{ch}/…`,
   `/reverb/{decay|damping|predelay|width|preset}`, `/clock/rate`,
   `/clock/source`.
-- Output tab: compact output EQ (pick an output, curve + band table).
+- Output tab: compact output EQ (pick an output, curve + band table), with
+  presets for home listening (Flat, Voice clarity, Night / dialogue,
+  Loudness, Bass boost, Tame harshness) applied to the selected output pair.
+  Like the rest of the output EQ, they reach the MOTU once EQ writes are
+  enabled.
 
 ### Changed
 - Preset recall with an identified MOTU sends only the parameters that differ
@@ -71,6 +75,13 @@ need attention. Preset files carry `schema_version`; see
 ### Fixed
 - Fader thumbs no longer stick out past the end of the track and cover the
   pan readout (fader at the top) or the value (fader at the bottom).
+- Reverb tab: the send faders overflowed their panel. Return and sends now
+  sit side by side and fit.
+- Mixer strips all have the same width (stereo strips were wider).
+- More compact layout: the header and the view tabs share one bar (the
+  Presets button shows the active preset), and the Output tab fits one
+  screen (monitor, A/B, mono, talkback and phones in one card, trims as
+  small knobs grouped by pair, EQ curve beside its bands).
 - Writes to the MOTU had no effect: the device ignores frames without a
   payload length field. Writes are now `[id][index][len u16][payload]`
   (verified on an UltraLite-mk5: main volume follows the web UI). Reads are

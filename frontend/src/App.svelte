@@ -20,14 +20,15 @@
 </script>
 
 <div class="app">
-  <TopBar />
-  <div class="tabs" role="tablist" aria-label="Views">
-    {#each tabs as t (t)}
-      <button role="tab" aria-selected={store.tab === t} class:sel={store.tab === t} onclick={() => (store.tab = t)}>
-        {S.tabs[t]}
-      </button>
-    {/each}
-  </div>
+  <TopBar>
+    <div class="tabs" role="tablist" aria-label="Views">
+      {#each tabs as t (t)}
+        <button role="tab" aria-selected={store.tab === t} class:sel={store.tab === t} onclick={() => (store.tab = t)}>
+          {S.tabs[t]}
+        </button>
+      {/each}
+    </div>
+  </TopBar>
   {#if !store.socketOpen}
     <div class="offline" role="alert">{S.offlineBanner}</div>
   {/if}
@@ -63,17 +64,13 @@
     height: 100%;
   }
   .tabs {
-    flex: none;
     display: flex;
-    gap: 4px;
-    padding: 6px 14px 0;
-    background: var(--bg-alt);
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
+    gap: 2px;
   }
   .tabs button {
-    min-height: 34px;
-    padding: 0 14px;
+    height: 100%;
+    padding: 0 12px;
+    white-space: nowrap;
     background: none;
     border: 0;
     border-bottom: 3px solid transparent;
