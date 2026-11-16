@@ -100,6 +100,21 @@ describe('EQ math', () => {
     expect(eqModeName(9)).toBe('Type 9');
     expect(eqModeName(EQ_MODE.HIGH_PASS)).toBe('HPF');
   });
+  it('band types follow CueMix: low shelf / HPF first, high shelf last, bells between', async () => {
+    const { eqModesForBand } = await import('./protocol');
+    expect(eqModesForBand(0, 4)).toEqual([EQ_MODE.BELL, EQ_MODE.LOW_SHELF, EQ_MODE.HIGH_PASS]);
+    expect(eqModesForBand(1, 4)).toEqual([EQ_MODE.BELL]);
+    expect(eqModesForBand(3, 4)).toEqual([EQ_MODE.BELL, EQ_MODE.HIGH_SHELF]);
+    expect(eqModesForBand(2, 3)).toEqual([EQ_MODE.BELL, EQ_MODE.HIGH_SHELF]);
+  });
+  it('the stored value is the bell Q', () => {
+    const eq = flat();
+    eq[1] = { ...eq[1], gain_db: 6, bw_oct: 4 };
+    // A narrow bell (Q 4) is ~0 dB one octave away; a wide one (Q 0.5) is not.
+    expect(Math.abs(eqResponseDb(eq, 2000))).toBeLessThan(1);
+    eq[1].bw_oct = 0.5;
+    expect(eqResponseDb(eq, 2000)).toBeGreaterThan(3);
+  });
   it('bandwidth 1 octave is Q ~1.41', () => {
     expect(bwToQ(1)).toBeCloseTo(Math.SQRT2, 6);
   });

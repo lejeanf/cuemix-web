@@ -97,6 +97,11 @@ need attention. Preset files carry `schema_version`; see
   mic inputs.
 
 ### Fixed
+- EQ: the band's width value is a Q (0.45-10, as in CueMix 5), not a
+  bandwidth in octaves; the curve now draws bells with the right width, the
+  table shows "Q" and only for bells. Gain range ±20 dB. Each band offers
+  the hardware's types: low shelf / HPF on the first band, high shelf on the
+  last, bells in between. Output EQ presets use real shelves.
 - Output trims (prop 5000) were written to the wrong outputs: the device
   indexes its DACs in hardware order (Line 5-10 first, Main 1-2 at 6-7).
   The trim of "output 1" actually changed Line 5. Now translated both ways.

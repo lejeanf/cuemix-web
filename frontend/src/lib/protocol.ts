@@ -54,7 +54,7 @@ export interface EqBand {
   /** Whole Hz. */
   freq_hz: number;
   gain_db: number;
-  /** Bandwidth in octaves. */
+  /** Q of a bell band (named `bw_oct` for preset compatibility; shelves and HPF ignore it). */
   bw_oct: number;
 }
 
@@ -251,8 +251,9 @@ export const PRESET_NAME_RE = /^[A-Za-z0-9 _.-]{1,64}$/;
 /** Provisional ranges (src/state.rs dsp_limits), wide so MOTU values are never distorted. */
 export const DSP_LIMITS = {
   FREQ_HZ: [20, 20_000],
-  EQ_GAIN_DB: [-24, 24],
-  EQ_BW_OCT: [0.01, 4],
+  /** CueMix 5 ranges: gain ±20 dB, Q 0.45-10 (the Q lives in `bw_oct`). */
+  EQ_GAIN_DB: [-20, 20],
+  EQ_BW_OCT: [0.45, 10],
   THRESHOLD_DB: [-100, 0],
   COMP_RATIO: [1, 100],
   /** Linear make-up gain. */
@@ -269,6 +270,14 @@ export const OUTPUT_EQ_BANDS = 3;
 
 /** EQ band filter types (props 1002 / 1022), as CueMix 5 defines them. */
 export const EQ_MODE = { BELL: 0, LOW_SHELF: 1, HIGH_SHELF: 2, HIGH_PASS: 3 } as const;
+
+/** Filter types each band offers, as in CueMix 5: the first band can be a low
+ *  shelf or a high-pass, the last a high shelf, the others are bells. */
+export function eqModesForBand(band: number, bands: number): number[] {
+  if (band === 0) return [EQ_MODE.BELL, EQ_MODE.LOW_SHELF, EQ_MODE.HIGH_PASS];
+  if (band === bands - 1) return [EQ_MODE.BELL, EQ_MODE.HIGH_SHELF];
+  return [EQ_MODE.BELL];
+}
 
 /** Short name of an EQ mode byte; unknown values are shown as their number. */
 export function eqModeName(mode: number): string {

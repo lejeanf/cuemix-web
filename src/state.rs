@@ -162,7 +162,9 @@ pub struct EqBand {
     pub freq_hz: f64,
     /// dB (hardware: 8.24).
     pub gain_db: f64,
-    /// Bandwidth in octaves (hardware: 8.24).
+    /// Q of a bell band (hardware: 8.24, CueMix 5 range 0.45-10; ignored by
+    /// shelves and the high-pass). Named `bw_oct` for preset compatibility:
+    /// it was first read as a bandwidth in octaves.
     pub bw_oct: f64,
 }
 
@@ -732,8 +734,9 @@ pub enum Param {
 /// chosen wide enough that a value read from the MOTU is never distorted.
 pub mod dsp_limits {
     pub const FREQ_HZ: (f64, f64) = (20.0, 20_000.0);
-    pub const EQ_GAIN_DB: (f64, f64) = (-24.0, 24.0);
-    pub const EQ_BW_OCT: (f64, f64) = (0.01, 4.0);
+    /// CueMix 5 ranges for the EQ: gain ±20 dB, Q 0.45-10.
+    pub const EQ_GAIN_DB: (f64, f64) = (-20.0, 20.0);
+    pub const EQ_BW_OCT: (f64, f64) = (0.45, 10.0);
     pub const THRESHOLD_DB: (f64, f64) = (-100.0, 0.0);
     pub const COMP_RATIO: (f64, f64) = (1.0, 100.0);
     /// Linear make-up gain (`16.0` ≈ +24 dB).

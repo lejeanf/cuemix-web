@@ -69,7 +69,8 @@
     if (pointers.size >= 2) {
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
-      store.setEq(kind, ch, selected, { bw_oct: round(pinchBw * (d / pinchStart), 2) });
+      // Spreading the fingers widens the bell, i.e. lowers its Q.
+      store.setEq(kind, ch, selected, { bw_oct: round(pinchBw * (pinchStart / d), 2) });
     } else if (dragBand >= 0) {
       const patch: { freq_hz: number; gain_db?: number } = { freq_hz: xToFreq(p.x / W) };
       if (bands[dragBand].mode !== EQ_MODE.HIGH_PASS) patch.gain_db = round(dbOf(p.y), 1);
@@ -88,7 +89,8 @@
     if (off || !bands) return;
     e.preventDefault();
     selected = band;
-    store.setEq(kind, ch, band, { bw_oct: round(bands[band].bw_oct * Math.exp(e.deltaY * 0.002), 2) }, true);
+    // Scrolling down widens the bell (lower Q), as before.
+    store.setEq(kind, ch, band, { bw_oct: round(bands[band].bw_oct * Math.exp(-e.deltaY * 0.002), 2) }, true);
   }
   function key(e: KeyboardEvent, band: number) {
     if (off || !bands) return;
@@ -137,7 +139,7 @@
         fill={COLORS[i % COLORS.length]}
         role="slider"
         tabindex="0"
-        aria-label="EQ band {i + 1}: {Math.round(b.freq_hz)} Hz, {b.gain_db.toFixed(1)} dB, {b.bw_oct.toFixed(2)} oct"
+        aria-label="EQ band {i + 1}: {Math.round(b.freq_hz)} Hz, {b.gain_db.toFixed(1)} dB, Q {b.bw_oct.toFixed(2)}"
         aria-valuenow={b.gain_db}
         aria-valuemin={-EQ_RANGE_DB}
         aria-valuemax={EQ_RANGE_DB}

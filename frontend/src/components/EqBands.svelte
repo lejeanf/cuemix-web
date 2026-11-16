@@ -1,7 +1,7 @@
 <script lang="ts">
   import { store } from '../lib/store.svelte';
   import { S } from '../lib/strings';
-  import { DSP_LIMITS, EQ_MODE, eqModeName, type EqBand } from '../lib/protocol';
+  import { DSP_LIMITS, EQ_MODE, eqModeName, eqModesForBand, type EqBand } from '../lib/protocol';
   import NumField from './NumField.svelte';
 
   /** Compact per-band table (type, bypass, frequency, gain, bandwidth) of one input or output EQ. */
@@ -10,9 +10,11 @@
   const bands: EqBand[] | undefined = $derived(kind === 'input' ? store.state?.input_eq[ch] : store.state?.output_eq[ch]);
   const off = $derived(!store.ready);
   const L = DSP_LIMITS;
-  const KNOWN = [EQ_MODE.BELL, EQ_MODE.LOW_SHELF, EQ_MODE.HIGH_SHELF, EQ_MODE.HIGH_PASS] as number[];
-  /** Known types, plus the band's own value when the MOTU reports one we do not know. */
-  const modes = (m: number) => (KNOWN.includes(m) ? KNOWN : [...KNOWN, m]);
+  /** The band's types, plus its own value when the MOTU reports one it does not offer. */
+  const modes = (band: number, m: number) => {
+    const known = eqModesForBand(band, bands?.length ?? 0);
+    return known.includes(m) ? known : [...known, m];
+  };
 </script>
 
 {#if bands}
@@ -26,7 +28,7 @@
           disabled={off}
           onchange={(e) => store.setEq(kind, ch, i, { mode: Number(e.currentTarget.value) }, true)}
         >
-          {#each modes(b.mode) as m (m)}<option value={m}>{eqModeName(m)}</option>{/each}
+          {#each modes(i, b.mode) as m (m)}<option value={m}>{eqModeName(m)}</option>{/each}
         </select>
         <button
           class="t"
@@ -39,7 +41,9 @@
         <NumField label="" ariaLabel="{S.band} {i + 1} frequency" unit="Hz" value={b.freq_hz} min={L.FREQ_HZ[0]} max={L.FREQ_HZ[1]} step={1} disabled={off} onchange={(v) => store.setEq(kind, ch, i, { freq_hz: v }, true)} />
         {#if b.mode !== EQ_MODE.HIGH_PASS}
           <NumField label="" ariaLabel="{S.band} {i + 1} gain" unit="dB" value={b.gain_db} min={L.EQ_GAIN_DB[0]} max={L.EQ_GAIN_DB[1]} step={0.1} disabled={off} onchange={(v) => store.setEq(kind, ch, i, { gain_db: v }, true)} />
-          <NumField label="" ariaLabel="{S.band} {i + 1} bandwidth" unit="oct" value={b.bw_oct} min={L.EQ_BW_OCT[0]} max={L.EQ_BW_OCT[1]} step={0.01} disabled={off} onchange={(v) => store.setEq(kind, ch, i, { bw_oct: v }, true)} />
+          {#if b.mode === EQ_MODE.BELL}
+            <NumField label="" ariaLabel="{S.band} {i + 1} Q" unit="Q" value={b.bw_oct} min={L.EQ_BW_OCT[0]} max={L.EQ_BW_OCT[1]} step={0.01} disabled={off} onchange={(v) => store.setEq(kind, ch, i, { bw_oct: v }, true)} />
+          {/if}
         {/if}
       </div>
     {/each}

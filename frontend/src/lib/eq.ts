@@ -75,7 +75,7 @@ export function bandBiquad(b: EqBand): Biquad | null {
     case EQ_MODE.HIGH_SHELF:
       return b.gain_db === 0 ? null : shelfBiquad(b.freq_hz, b.gain_db, b.mode === EQ_MODE.HIGH_SHELF);
     case EQ_MODE.BELL:
-      return b.gain_db === 0 ? null : peakingBiquad(b.freq_hz, b.gain_db, bwToQ(b.bw_oct));
+      return b.gain_db === 0 ? null : peakingBiquad(b.freq_hz, b.gain_db, b.bw_oct);
     default:
       return null;
   }
