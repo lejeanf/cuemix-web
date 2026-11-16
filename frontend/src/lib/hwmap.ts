@@ -1,5 +1,7 @@
 import type { ParamName } from './protocol';
 
+export type Tab = 'mixer' | 'input' | 'output' | 'reverb' | 'probe';
+
 /** Params actually written to the MOTU today (ARCHITECTURE §8 Q3). Everything else is state-only. */
 export const HW_MAPPED_PARAMS: ReadonlySet<ParamName> = new Set<ParamName>([
   'preamp_gain',
@@ -31,6 +33,14 @@ export const HW_MAPPED_PARAMS: ReadonlySet<ParamName> = new Set<ParamName>([
   'output_eq_gain',
   'output_eq_bw',
 ]);
+
+/** Tab list for the header: Reverb is hidden online while its params are not written. */
+export function visibleTabs(o: { online: boolean; reverbWritable: boolean; probe: boolean }): Tab[] {
+  const t: Tab[] = ['mixer', 'input', 'output'];
+  if (!o.online || o.reverbWritable) t.push('reverb');
+  if (o.probe) t.push('probe');
+  return t;
+}
 
 export const isHwMapped = (p: ParamName): boolean => HW_MAPPED_PARAMS.has(p);
 

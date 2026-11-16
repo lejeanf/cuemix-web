@@ -82,7 +82,7 @@
         class:on={mc.mute}
         aria-pressed={mc.mute}
         aria-label="{S.mute} {name}"
-        disabled={off}
+        disabled={off || store.locked('mix_mute')}
         data-unmapped={store.unmapped('mix_mute') ? '' : undefined}
         title={store.hint('mix_mute')}
         onclick={() => both((c) => store.set({ param: 'mix_mute', bus, ch: c, on: !mc.mute }, true))}>M</button
@@ -92,7 +92,7 @@
         class:on={mc.solo}
         aria-pressed={mc.solo}
         aria-label="{S.solo} {name}"
-        disabled={off}
+        disabled={off || store.locked('mix_solo')}
         data-unmapped={store.unmapped('mix_solo') ? '' : undefined}
         title={store.hint('mix_solo')}
         onclick={() => both((c) => store.set({ param: 'mix_solo', bus, ch: c, on: !mc.solo }, true))}>S</button

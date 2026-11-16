@@ -66,13 +66,15 @@
   let startY = 0;
   let startNorm = 0;
   let moved = false;
+  /** A hint means the MOTU doesn't take this param yet: locked like a disabled control. */
+  const off = $derived(disabled || !!hint);
   /** Axis chosen when the drag starts moving; locked so a diagonal drag never jumps. */
   let axis: 'x' | 'y' = 'y';
   let fine = false;
   let last = 0;
 
   function down(e: PointerEvent) {
-    if (disabled || e.button > 0) return;
+    if (off || e.button > 0) return;
     // Buttons inside a shared surface stay plain buttons.
     if (surface && (e.target as Element).closest('button, a, select, input, textarea')) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -138,7 +140,7 @@
     };
   });
   function onwheel(e: WheelEvent) {
-    if (disabled) return;
+    if (off) return;
     e.preventDefault();
     const d = (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 0.002 : 0.02);
     let v = fromNorm(toNorm(value) + d);
@@ -146,7 +148,7 @@
     onchange(v, true);
   }
   function key(e: KeyboardEvent) {
-    if (disabled) return;
+    if (off) return;
     const d = e.key === 'ArrowUp' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowDown' || e.key === 'ArrowLeft' ? -1 : 0;
     if (d) {
       e.preventDefault();
@@ -175,19 +177,19 @@
   const ptr = $derived(pt(norm));
 </script>
 
-<div class="knob" class:disabled data-unmapped={hint ? '' : undefined} title={hint}>
+<div class="knob" class:disabled={off} data-unmapped={hint ? '' : undefined} title={hint}>
   <div
     class="dial"
     style:width="{size}px"
     style:height="{size}px"
     role="slider"
-    tabindex={disabled ? -1 : 0}
+    tabindex={off ? -1 : 0}
     aria-label={ariaLabel ?? label}
     aria-valuemin={min}
     aria-valuemax={max}
     aria-valuenow={Math.round(value * 100) / 100}
     aria-valuetext={format(value)}
-    aria-disabled={disabled}
+    aria-disabled={off}
     onpointerdown={surface ? undefined : down}
     onpointermove={surface ? undefined : move}
     onpointerup={surface ? undefined : up}

@@ -130,7 +130,7 @@ The embedded Svelte 5 console (dark theme) has four views, each reachable direct
 
 On a phone the UI opens in a **Simple** view: two large rotary knobs, Monitor (Main) and Phones, each with vertical meters (drag up or right for more; no double-tap reset), a Main on/off button that fades the Main volume out and back in over about a second (back to the level it had, never above it), and preset recall. **Advanced** in the header switches to the full console (which also fits phone and tablet screens); the choice is remembered per browser.
 
-The DSP drawer and the output EQ follow CueMix 5: a curve with draggable bands, and per band an on/off button, frequency, gain, Q and the filter types the hardware offers on that band. Faders: double-click/tap resets to 0 dB, Shift-drag is fine adjustment, mouse wheel nudges. Controls whose changes are not sent to the MOTU yet get a dashed outline and a tooltip. A diagnostic **Meter probe** view (`/?probe`) shows the card's raw meter points.
+The DSP drawer and the output EQ follow CueMix 5: a curve with draggable bands, and per band an on/off button, frequency, gain, Q and the filter types the hardware offers on that band. Faders: double-click/tap resets to 0 dB, Shift-drag is fine adjustment, mouse wheel nudges. Controls whose changes are not sent to the MOTU yet (compressor, gate, clock, Dim, Speaker A/B) are greyed out and disabled, with a tooltip saying why; the Reverb tab is hidden while a MOTU is connected until reverb can be written. A diagnostic **Meter probe** view (`/?probe`) shows the card's raw meter points.
 
 ```sh
 cd frontend && npm install

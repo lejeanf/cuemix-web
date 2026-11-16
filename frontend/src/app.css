@@ -66,10 +66,14 @@ button {
   outline-offset: 2px;
 }
 
-/* Param not written to the MOTU yet (online only) — see src/lib/hwmap.ts */
+/* Param not written to the MOTU yet (online only) — greyed out; the control is
+   also disabled in its component (store.locked). See src/lib/hwmap.ts */
 [data-unmapped] {
-  outline: 1px dashed #6b7280;
-  outline-offset: 2px;
+  opacity: 0.4;
+  outline: none;
+}
+[data-unmapped] [data-unmapped] {
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -12,6 +12,12 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+### Changed
+- Controls that are not sent to the MOTU yet (compressor, gate, clock, Dim,
+  Speaker A/B, reverb) are now greyed out and disabled instead of staying
+  interactive with a dashed outline, so they no longer look broken. The Reverb
+  tab is hidden while a MOTU is connected and returns once reverb is written.
+
 ### Added
 - Output EQ writes: the five output EQ props (1022-1026: type, bypass,
   frequency, gain, Q) are now sent to the MOTU, coalesced per parameter by the
