@@ -2,24 +2,29 @@
 
 High-performance **Rust** web controller and bidirectional **OSC** bridge for the **MOTU UltraLite-mk5** audio interface. A single Rust binary embeds a dark-theme Svelte web UI and serves it together with a WebSocket API. OSC controllers (TouchOSC, QLab, ...) and browsers share one state core, so every change made from either side is applied, clamped and broadcast back to all clients.
 
-**Status:** Phases 1–4 implemented (engine, bridges, web UI, deployment scripts) — runs in demo mode; hardware control partially mapped and not yet verified on a real device.
+**Status:** in daily use on a real UltraLite-mk5 (firmware 2.0.8). The device is identified on connect, its whole state is read back, levels are metered, and the mixes, preamps, trims and monitoring are controlled. DSP, reverb and clock are read from the card; writing them is enabled one feature at a time after a test on a card.
 
-![cuemix-web mixer view: channel strips with faders, pan, mute/solo, EQ and DSP buttons, main fader and the Control Room bar](docs/images/webui-mixer.png)
+![Mixer view: one strip per input or stereo pair with pan, fader, level meter, mute/solo and DSP; the selected mix's output meter beside the Main fader; the Control Room bar at the bottom](docs/images/webui-mixer.png)
 
-<sub>Mixer view in demo mode (no MOTU connected); channel names, colours and levels set through the regular WebSocket API.</sub>
+| Input | Output |
+|---|---|
+| ![Input view: mic and line preamps with gain, phase, pad, +48V and input meters; S/PDIF and optical inputs with the ADAT/TOS switch](docs/images/webui-input.png) | ![Output view: monitor and phones levels with meters, output trims per pair, and the output EQ with its curve and bands](docs/images/webui-output.png) |
 
 ## Hardware coverage
 
-Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`docs/MOTU-PROTOCOL.md`](docs/MOTU-PROTOCOL.md). Everything marked "mapped" is encoded in code but has not yet been verified on a device.
+Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`docs/MOTU-PROTOCOL.md`](docs/MOTU-PROTOCOL.md). The property layouts come from a real connect dump and from CueMix 5's own property table.
 
-- **Mapped:** preamp gain and phase (8 inputs), pad and 48 V phantom (2 mic inputs), main and headphone trims, analog output trims (outputs 1–10), mono, talkback, mix faders, pan, mute and solo (written with the layout read from the device; a stereo strip moves both halves of its pair; pan direction still to be confirmed on a card).
-- **Read from the device, not written yet:** input EQ (analog inputs 1–8, 4 bands: type, bypass, frequency, gain, bandwidth), compressor (inputs 1–8), gate (mic 1–2), output EQ (12 outputs, 3 bands), reverb (decay, damping, pre-delay, width, preset), sample rate and clock source. The UI shows the MOTU's settings; changing them in the UI does not change the hardware yet (the encoders exist and are tested, but are switched off until each feature is checked on a card). Reverb sends are the Reverb mix faders and the reverb return is the "Reverb" mixer input pair (0-based indices 30-31) in every mix, so both follow the mix matrix.
-- **Detected on connect:** model, firmware, channel counts, stereo pairs and default channel/mix names (the UI sizes itself to the device).
-- **Not mapped yet:** routing (prop 5010: one source per output; no UI, the mixes cover normal use), DIM (no hardware property), A/B / speaker B (properties 5015–5017 unknown), mix bus output level (1027). There is no global EQ bypass on the hardware: bypass is per band.
+- **Read and written:** preamp gain and phase (8 inputs), pad and +48 V (2 mic inputs), main volume (verified on a card), phones level, analog output trims (outputs 1–10, in the device's DAC order), mono, talkback, mix faders, pan, mute and solo (written with the layout read from the device; a stereo strip moves both halves of its pair), optical input/output format (ADAT / TOSLINK).
+- **Metered:** every mixer input (after the input DSP), each preamp (before the DSP), every analog output and the phones (before the trim), S/PDIF and optical inputs. One byte per point, −0.5 dB per step, about 30 updates per second.
+- **Read from the device, not written yet:** input EQ (analog inputs 1–8, 4 bands: type, on/off, frequency, gain, Q), compressor (inputs 1–8), gate (mic 1–2), output EQ (12 outputs, 3 bands), reverb (decay, damping, pre-delay, width, preset), sample rate and clock source. The UI shows the card's settings and says when a change is not sent yet. Reverb sends are the Reverb mix faders and the reverb return is the "Reverb" mixer input pair in every mix.
+- **Detected on connect:** model, firmware, channel counts, stereo pairs and the CueMix 5 channel/mix names (the UI sizes itself to the device).
+- **Known but not implemented:** routing (prop 5010: one source per output; the mixes cover normal use), A/B speakers (5015–5017), talkback settings (5026–5031), loopback source (5014). DIM has no hardware property. There is no global EQ bypass on the hardware: on/off is per band.
 
 ## Features
 
-- Web UI for mixes, channel faders, pan, mute/solo, preamps (gain, 48 V, pad, phase), input DSP (EQ, compressor, gate), output EQ, reverb (settings, sends, return), control room and clock. Only the controls listed above are wired to hardware; the rest is planned.
+- Web UI for mixes, channel faders, pan, mute/solo, preamps (gain, +48 V, pad, phase), digital inputs, input DSP (EQ, compressor, gate), output trims and EQ (with presets such as *Voice clarity* or *Night*), reverb, control room and clock, with level meters everywhere.
+- Presets stored on the server, plus **Export to file / Import file** to keep or share every setting as one JSON file.
+- Update notice in the UI, by release channel (stable or pre-release), with a user-triggered **Install** (see [Updating](#updating)).
 - Bidirectional OSC over UDP `:8000` with 1-based indices (TouchOSC / QLab friendly), with feedback to every controller.
 - One state core: all changes go through a single `Param` type, are clamped, then broadcast to Web and OSC clients. The engine never echoes a change back to the client that sent it.
 - Native units in state, presets and JSON (`gain` for mix faders, `db` for main, phones and preamps). The `0..1` fader position exists only at the edges: OSC and the UI fader.
@@ -112,7 +117,16 @@ Once running:
 
 ## Web UI
 
-The embedded Svelte 5 console (dark theme) has Mixer, Input, Output and Reverb views, a DSP drawer on the analog-input strips (interactive EQ curve, compressor, and a gate on the mic inputs), an output EQ on the Output tab, a presets popover and an always-visible Control Room bar. Faders: double-click/tap resets to 0 dB, Shift-drag is fine adjustment, mouse wheel nudges. Level meters come from the MOTU (mixer strips, preamps, outputs) and stay idle in demo mode. When online, controls not yet written to the MOTU get a dashed outline.
+The embedded Svelte 5 console (dark theme) has four views, each reachable directly with a URL fragment (`#mixer`, `#input`, `#output`, `#reverb`):
+
+- **Mixer**: one tab per mix (Main 1-2, Phones, Line 3-4 … Reverb, in CueMix 5 order), one strip per input or stereo pair (pan, fader, meter, mute/solo, DSP drawer on the analog inputs), the Main volume with the selected mix's output meter.
+- **Input**: mic and line preamps with their meters, S/PDIF and optical inputs (ADAT/TOS).
+- **Output**: monitor and phones levels, mono, A/B, talkback, output trims per pair, and the output EQ (curve on the left, bands on the right, presets).
+- **Reverb**: reverb settings, sends (the Reverb mix) and returns.
+
+The DSP drawer and the output EQ follow CueMix 5: a curve with draggable bands, and per band an on/off button, frequency, gain, Q and the filter types the hardware offers on that band. Faders: double-click/tap resets to 0 dB, Shift-drag is fine adjustment, mouse wheel nudges. Controls whose changes are not sent to the MOTU yet get a dashed outline and a tooltip. A diagnostic **Meter probe** view (`/?probe`) shows the card's raw meter points.
+
+![DSP drawer of a line input: EQ curve with four bands, band columns, compressor](docs/images/webui-dsp.png)
 
 ```sh
 cd frontend && npm install
@@ -210,9 +224,19 @@ Both scripts are idempotent: an existing `config.toml` is never overwritten. The
 
 ## Updating
 
-Updates are **manual** (no automatic updates, no update button in the web UI, and the box never contacts GitHub on its own). The running version is shown next to the app name in the web UI and by `cuemix-web --version`. Release notes: [GitHub Releases](https://github.com/lejeanf/cuemix-web/releases) and [`CHANGELOG.md`](CHANGELOG.md).
+Updates are never automatic. The running version is shown at the bottom right of the web UI and by `cuemix-web --version`. Release notes: [GitHub Releases](https://github.com/lejeanf/cuemix-web/releases) and [`CHANGELOG.md`](CHANGELOG.md).
 
-**Raspberry Pi / Linux** (installed by `linux-setup.sh`):
+**From the web UI.** The setup scripts install two small root systemd units next to the service. `cuemix-update-check.timer` checks GitHub once a day and writes the result to `/var/lib/cuemix-web/update-status.json`. When a newer release exists in the configured channel, the UI shows **vX available** next to the version, with the release notes and an **Install** button. Pressing it only creates `/var/lib/cuemix-web/update-request`; `cuemix-update-request.path` sees that file and runs `cuemix-update` as root, with every safety check below, and the page reconnects to the new version. The web service itself stays unprivileged and never downloads anything.
+
+**Channels** are chosen in `config.toml`, not in the UI (anyone who can open the UI could otherwise switch a device to pre-releases):
+
+```toml
+[update]
+channel = "stable"        # published releases (vX.Y.Z)
+# channel = "prerelease"  # newest release, alphas/betas included (vX.Y.Z-alpha.N)
+```
+
+**From a shell.** **Raspberry Pi / Linux** (installed by `linux-setup.sh`):
 
 ```bash
 sudo cuemix-update --check      # installed vs latest; exit 10 if an update is available
@@ -222,7 +246,7 @@ sudo cuemix-update --version v0.3.0   # pin an exact version (up or down)
 sudo cuemix-update --rollback   # go back to the previous binary
 ```
 
-**Proxmox VE** (from the host, in your checkout): `sudo deploy/proxmox-setup.sh --update` (same `--pre` / `--version` flags, `--ctid N` to pick the container). It only touches the binary inside the container — not bridges, udev or the container config. Inside the container, `cuemix-update` works as above (`pct exec <CTID> -- cuemix-update`).
+**Proxmox VE** (from the host, in your checkout): `sudo deploy/proxmox-setup.sh --update` (same `--pre` / `--version` flags, `--ctid N` to pick the container). It refreshes `cuemix-update` and the update units inside the container, then updates the binary; bridges, udev and the container config are not touched. Inside the container, `cuemix-update` works as above (`pct exec <CTID> -- cuemix-update`).
 
 **Docker**: `docker compose pull && docker compose up -d` (or pin a version tag such as `ghcr.io/lejeanf/cuemix-web:0.3.0` in `docker-compose.yml`). `latest` only follows stable releases.
 
@@ -244,7 +268,8 @@ How an update stays safe:
 ## Documentation
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (in French): living technical source of truth covering module map, contracts, protocol details and decision log. Structural changes must update it together with this README.
-- [`docs/MOTU-PROTOCOL.md`](docs/MOTU-PROTOCOL.md) (in French): hardware protocol findings. Every entry is still `verified: false`; open questions are listed there and in ARCHITECTURE §8.
+- [`docs/MOTU-PROTOCOL.md`](docs/MOTU-PROTOCOL.md) (in French): hardware protocol findings, from a real connect dump, meter-probe sessions and CueMix 5's property table; open questions are listed there and in ARCHITECTURE §8.
+- [`docs/CUEMIX-CAPTURE.md`](docs/CUEMIX-CAPTURE.md): how to capture CueMix 5's traffic, for anything still unknown.
 - [`docs/HANDOFF.md`](docs/HANDOFF.md): original project specification (v12.0.0).
 
 ## License

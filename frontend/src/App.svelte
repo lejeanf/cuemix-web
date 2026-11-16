@@ -25,7 +25,10 @@
   <TopBar>
     <div class="tabs" role="tablist" aria-label="Views">
       {#each tabs as t (t)}
-        <button role="tab" aria-selected={store.tab === t} class:sel={store.tab === t} onclick={() => (store.tab = t)}>
+        <button role="tab" aria-selected={store.tab === t} class:sel={store.tab === t} onclick={() => {
+            store.tab = t;
+            history.replaceState(null, '', `#${t}`);
+          }}>
           {S.tabs[t]}
         </button>
       {/each}

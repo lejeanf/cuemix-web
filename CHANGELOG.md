@@ -67,6 +67,8 @@ need attention. Preset files carry `schema_version`; see
   `GET /api/update` and `POST /api/update/install` (needs the
   `x-cuemix-update` header). The setup scripts install the units
   (`proxmox-setup.sh --update` adds them to an existing container).
+- Each view opens directly from the URL: `#mixer`, `#input`, `#output`,
+  `#reverb` (kept in the address bar when switching tabs).
 - Browser tab icon.
 - `Int16` payloads (`ValueKind::I16`) for the DSP attack/release times.
 - OSC addresses for all of the above: `/eq/{ch}/band/{b}/{mode|bypass|freq|gain|bw}`,

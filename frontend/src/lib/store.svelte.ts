@@ -33,13 +33,20 @@ export function healthUrl(loc: Pick<Location, 'pathname'>): string {
   return `${base}api/health`;
 }
 
+const TABS: readonly Tab[] = ['mixer', 'input', 'output', 'reverb', 'probe'];
+function tabFromHash(): Tab {
+  const h = typeof location === 'undefined' ? '' : location.hash.slice(1);
+  return (TABS as readonly string[]).includes(h) ? (h as Tab) : 'mixer';
+}
+
 class Store {
   c: ClientState = $state(initialClientState());
   socketOpen = $state(false);
-  /** Running server version (from `/api/health`), shown in the top bar. No
-   *  update check: the box never contacts GitHub (maintainer decision). */
+  /** Running server version (from `/api/health`). The web server never
+   *  contacts GitHub; release checks are a root timer (see UpdateBadge). */
   version: string | null = $state(null);
-  tab: Tab = $state('mixer');
+  /** Current view; `#mixer`, `#input`, `#output`, `#reverb` in the URL open it directly. */
+  tab: Tab = $state(tabFromHash());
   /** Latest raw meter frame (meter probe); not deep-reactive. */
   meterRaw: number[] | null = $state.raw(null);
   bus = $state(0);
