@@ -57,6 +57,11 @@ need attention. Preset files carry `schema_version`; see
 - UltraLite-mk5 (firmware 2.0.8): a Main EQ bell written at 1 kHz, −10 dB,
   Q 1 is audible, and the card reports it back after a service restart (from
   its own connect dump).
+- Measured on the card's meters (music on Line 7-8, speakers on Main): all
+  three Main output EQ bands at −20 dB lower the Main output meter by about
+  26 dB, with Phones unchanged (it has its own slot); all four input EQ bands
+  at −20 dB on Line 7 and 8 lower their post-EQ meters by about 29 dB. Both
+  return to their previous level once the original values are written back.
 
 ## [0.4.0] - 2026-11-15
 
