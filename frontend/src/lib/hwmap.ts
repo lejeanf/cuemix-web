@@ -16,6 +16,8 @@ export const HW_MAPPED_PARAMS: ReadonlySet<ParamName> = new Set<ParamName>([
   'mix_pan',
   'mix_mute',
   'mix_solo',
+  // Prop 5006, from CueMix 5's property table.
+  'optical_mode',
 ]);
 
 export const isHwMapped = (p: ParamName): boolean => HW_MAPPED_PARAMS.has(p);

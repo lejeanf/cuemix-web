@@ -119,3 +119,16 @@ Pour vérifier une autre carte, cuemix-web transmet la trame brute (`ServerEvent
 ## Inconnus à lever sur matériel
 
 Écriture de la matrice de mix et des params DSP / réverbe / horloge (layouts de lecture connus, encodeurs écrits mais non actifs) ; sens du pan ; sens exact des modes d'EQ (2 = shelf ?) et des numéros de preset de réverbe ; plages réelles des paramètres DSP ; sémantique de 5010 (routage) et 5015-5017 ; plage réelle de gain ligne/micro par canal ; valeur 100 du trim ; linéarité de `mix_fader` ; chemin WebSocket selon firmware ; format des meters (6000).
+
+## Table des propriétés de CueMix 5 (UltraLite-mk5)
+
+CueMix 5 (installé, `resources/app/src/www/dev.js`) décrit chaque propriété du mk5 (id, type, sens). Faits retenus, vérifiés quand c'était possible :
+
+- **5000 (trims de sortie)** : indexé dans l'**ordre matériel des DAC**, pas l'ordre de l'interface : 0-5 = Line 5-10, 6-7 = Main 1-2, 8-9 = Line 3-4, 10-11 = Phones. Octet 0-100 = 0 à −100 dB. cuemix-web traduit (`OUTPUT_TRIM_INDEX`).
+- **1002 / 1022 (type de bande EQ)** : 0 = cloche, 1 = plateau grave, 2 = plateau aigu, 3 = passe-haut.
+- **5006 (format optique)** : octet, index 0 = entrée, 1 = sortie ; 0 = ADAT, 1 = TOSLINK. Écrit par cuemix-web (`optical_mode`).
+- **5001 (gain d'entrée)** : micros 0-74 dB, lignes 0-20 dB.
+- **5010 (patch/routage)** : un octet par destination (`kOD_*`), valeur = source du bus de patch (même numérotation que les meters). Non encore implémenté.
+- **5014** : source du loopback ; **5015-5019** : A/B, A, B, mono et mute *enable* ; **5024** sortie word clock ; **5025** expandeur optique ; **5026-5031** talkback (latch, enable, level, dim, source, destination).
+- Entrées analogiques dans l'ordre matériel (bus de patch 32 + n) : Mic 2, Line 7, Line 8, Line 5, Line 6, Mic 1, Line 3, Line 4.
+

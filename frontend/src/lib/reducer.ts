@@ -224,6 +224,10 @@ export function applyParam(st: MotuState, p: Param): void {
     case 'clock_source':
       st.clock.source = p.source;
       break;
+    case 'optical_mode':
+      if (p.output) st.clock.optical_out = p.mode;
+      else st.clock.optical_in = p.mode;
+      break;
   }
 }
 

@@ -52,6 +52,9 @@ need attention. Preset files carry `schema_version`; see
   (preset format, with the device model and firmware); *Import file…*
   stores a settings file as a preset and loads it. New WebSocket command
   `import_preset`; incoming message limit raised to 256 KiB.
+- Input tab: S/PDIF and Optical in sections with their level meters, and
+  the optical input format (ADAT 8 channels / TOS stereo, prop 5006,
+  new param `optical_mode`, OSC `/optical/{in|out}/mode`).
 - Browser tab icon.
 - `Int16` payloads (`ValueKind::I16`) for the DSP attack/release times.
 - OSC addresses for all of the above: `/eq/{ch}/band/{b}/{mode|bypass|freq|gain|bw}`,
@@ -89,6 +92,11 @@ need attention. Preset files carry `schema_version`; see
   mic inputs.
 
 ### Fixed
+- Output trims (prop 5000) were written to the wrong outputs: the device
+  indexes its DACs in hardware order (Line 5-10 first, Main 1-2 at 6-7).
+  The trim of "output 1" actually changed Line 5. Now translated both ways.
+- EQ band types: 1 is a low shelf and 2 a high shelf (was shown as
+  "Type 1" / "Shelf"); the curve draws both.
 - Fader thumbs no longer stick out past the end of the track and cover the
   pan readout (fader at the top) or the value (fader at the bottom).
 - Reverb tab: the send faders overflowed their panel. Return and sends now

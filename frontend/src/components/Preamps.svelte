@@ -10,6 +10,15 @@
   const off = $derived(!store.ready);
   let confirming = $state<Record<number, boolean>>({});
   const nMic = $derived(st?.topology.mic_inputs ?? 0);
+  // Digital inputs are mixer inputs 8-9 (S/PDIF) and 10-17 (optical).
+  const SPDIF_IN = [8, 9];
+  const OPTICAL_IN = [10, 11, 12, 13, 14, 15, 16, 17];
+  const opticalIn = $derived(st?.clock.optical_in ?? 'adat');
+  /** TOSLINK carries a stereo pair: only the first two optical channels are used. */
+  const opticalShown = $derived(opticalIn === 'toslink' ? OPTICAL_IN.slice(0, 2) : OPTICAL_IN);
+  function setOptical(mode: 'adat' | 'toslink') {
+    store.set({ param: 'optical_mode', output: false, mode }, true);
+  }
   const all = $derived((st?.preamps ?? []).map((pa, ch) => ({ pa, ch })));
   /** Mic preamps and line inputs, each in its own group. */
   const groups = $derived([
@@ -104,6 +113,36 @@
         </div>
       </section>
     {/each}
+    {#if st.topology.mixer_inputs >= 18}
+      <section class="group" aria-label="S/PDIF">
+        <h3>S/PDIF</h3>
+        <div class="dig" title="S/PDIF input level">
+          {#each SPDIF_IN as ch (ch)}<Meter index={METER_SLOT.mixerInput(ch)} label="S/PDIF {ch - 7} meter" />{/each}
+        </div>
+      </section>
+      <section class="group" aria-label="Optical in">
+        <h3>Optical in</h3>
+        <div class="optrow">
+          <div class="fmt" role="radiogroup" aria-label="Optical input format">
+            <span class="lbl">Format</span>
+            {#each [['adat', 'ADAT'], ['toslink', 'TOS']] as [m, label] (m)}
+              <button
+                class="b"
+                class:on={opticalIn === m}
+                role="radio"
+                aria-checked={opticalIn === m}
+                disabled={off}
+                title={m === 'adat' ? 'ADAT: 8 channels' : 'TOSLINK: optical S/PDIF, stereo'}
+                onclick={() => setOptical(m as 'adat' | 'toslink')}>{label}</button
+              >
+            {/each}
+          </div>
+          <div class="dig" title="Optical input level">
+            {#each opticalShown as ch (ch)}<Meter index={METER_SLOT.mixerInput(ch)} label="Optical {ch - 9} meter" />{/each}
+          </div>
+        </div>
+      </section>
+    {/if}
   </div>
 {/if}
 
@@ -156,6 +195,30 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .dig {
+    display: flex;
+    gap: 3px;
+    height: 96px;
+    padding: 2px 4px;
+  }
+  .dig :global(canvas) {
+    min-height: 0;
+  }
+  .optrow {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .fmt {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    justify-content: center;
+  }
+  .lbl {
+    font-size: 11px;
+    color: var(--text-dim);
   }
   .kr {
     display: flex;

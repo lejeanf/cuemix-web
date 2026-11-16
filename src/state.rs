@@ -141,8 +141,10 @@ pub struct Preamp {
 pub mod eq_mode {
     /// Peak / bell (most bands in the dump).
     pub const BELL: u8 = 0;
-    /// Seen once in the dump on an upper band; assumed to be a shelf.
-    pub const SHELF: u8 = 2;
+    /// Low shelf.
+    pub const LOW_SHELF: u8 = 1;
+    /// High shelf.
+    pub const HIGH_SHELF: u8 = 2;
     /// High-pass (band 0 of every input in the dump).
     pub const HIGH_PASS: u8 = 3;
 }
@@ -314,6 +316,39 @@ pub struct ControlRoom {
 pub struct Clock {
     pub sample_rate: SampleRate,
     pub source: ClockSource,
+    /// Format of the optical input (prop 5006 index 0).
+    #[serde(default)]
+    pub optical_in: OpticalMode,
+    /// Format of the optical output (prop 5006 index 1).
+    #[serde(default)]
+    pub optical_out: OpticalMode,
+}
+
+/// Optical port format (prop 5006: `0` = ADAT, 8 channels; `1` = TOSLINK
+/// stereo S/PDIF), per CueMix 5's property table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpticalMode {
+    #[default]
+    Adat,
+    Toslink,
+}
+
+impl OpticalMode {
+    pub const fn code(self) -> u8 {
+        match self {
+            OpticalMode::Adat => 0,
+            OpticalMode::Toslink => 1,
+        }
+    }
+
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(OpticalMode::Adat),
+            1 => Some(OpticalMode::Toslink),
+            _ => None,
+        }
+    }
 }
 
 // Defaults used when an older/partial preset file lacks a field (tolerant
@@ -323,6 +358,8 @@ impl Default for Clock {
         Self {
             sample_rate: SampleRate::Hz48000,
             source: ClockSource::Internal,
+            optical_in: OpticalMode::Adat,
+            optical_out: OpticalMode::Adat,
         }
     }
 }
@@ -445,10 +482,7 @@ impl MotuState {
                 talkback: false,
                 phones_db: 0.0,
             },
-            clock: Clock {
-                sample_rate: SampleRate::Hz48000,
-                source: ClockSource::Internal,
-            },
+            clock: Clock::default(),
         };
         s.reset_dsp();
         s
@@ -685,6 +719,11 @@ pub enum Param {
     },
     ClockSource {
         source: ClockSource,
+    },
+    /// Optical port format; `output` = the optical output, else the input.
+    OpticalMode {
+        output: bool,
+        mode: OpticalMode,
     },
 }
 
@@ -1272,6 +1311,14 @@ impl MotuState {
             P::ReverbPreset { preset } => (set(&mut self.reverb.preset, preset), *param),
             P::SampleRate { rate } => (set(&mut self.clock.sample_rate, rate), *param),
             P::ClockSource { source } => (set(&mut self.clock.source, source), *param),
+            P::OpticalMode { output, mode } => {
+                let slot = if output {
+                    &mut self.clock.optical_out
+                } else {
+                    &mut self.clock.optical_in
+                };
+                (set(slot, mode), *param)
+            }
         };
         Ok(changed.then_some(effective))
     }
@@ -1441,6 +1488,18 @@ impl MotuState {
         if all || self.clock.source != target.clock.source {
             out.push(Param::ClockSource {
                 source: target.clock.source,
+            });
+        }
+        if all || self.clock.optical_in != target.clock.optical_in {
+            out.push(Param::OpticalMode {
+                output: false,
+                mode: target.clock.optical_in,
+            });
+        }
+        if all || self.clock.optical_out != target.clock.optical_out {
+            out.push(Param::OpticalMode {
+                output: true,
+                mode: target.clock.optical_out,
             });
         }
         for (input, (ra, rb)) in self
@@ -1818,7 +1877,7 @@ mod all_params_tests {
             + usize::from(t.mic_inputs) * 4 // gate
             + OUTPUT_EQ_OUTPUTS * OUTPUT_EQ_BANDS * 5
             + 5 // reverb
-            + 2 // sample rate, clock source
+            + 4 // sample rate, clock source, optical in/out format
             + usize::from(t.routing_inputs) * usize::from(t.routing_outputs)
             + 5 // control room
             + OUTPUT_TRIMS;

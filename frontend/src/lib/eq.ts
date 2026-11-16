@@ -1,7 +1,6 @@
 // EQ response math (UI preview only). Standard RBJ cookbook biquads evaluated
 // at a fixed 48 kHz reference rate. PROVISIONAL: the MOTU's real filter
-// topology / bandwidth definition may differ slightly, and the meaning of the
-// "shelf" mode byte is a guess (see EQ_MODE in ./protocol).
+// topology / bandwidth definition may differ slightly.
 import { EQ_MODE, type EqBand } from './protocol';
 
 export const EQ_FS = 48_000;
@@ -72,8 +71,9 @@ export function bandBiquad(b: EqBand): Biquad | null {
   switch (b.mode) {
     case EQ_MODE.HIGH_PASS:
       return hpfBiquad(b.freq_hz);
-    case EQ_MODE.SHELF:
-      return b.gain_db === 0 ? null : shelfBiquad(b.freq_hz, b.gain_db, b.freq_hz >= 1000);
+    case EQ_MODE.LOW_SHELF:
+    case EQ_MODE.HIGH_SHELF:
+      return b.gain_db === 0 ? null : shelfBiquad(b.freq_hz, b.gain_db, b.mode === EQ_MODE.HIGH_SHELF);
     case EQ_MODE.BELL:
       return b.gain_db === 0 ? null : peakingBiquad(b.freq_hz, b.gain_db, bwToQ(b.bw_oct));
     default:

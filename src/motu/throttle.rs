@@ -68,6 +68,7 @@ pub fn key_of(p: &Param) -> ParamKey {
         P::ReverbPreset { .. } => ParamKey("reverb_preset", 0, 0),
         P::SampleRate { .. } => ParamKey("sample_rate", 0, 0),
         P::ClockSource { .. } => ParamKey("clock_source", 0, 0),
+        P::OpticalMode { output, .. } => ParamKey("optical_mode", u32::from(output), 0),
     }
 }
 

@@ -10,7 +10,7 @@
   const bands: EqBand[] | undefined = $derived(kind === 'input' ? store.state?.input_eq[ch] : store.state?.output_eq[ch]);
   const off = $derived(!store.ready);
   const L = DSP_LIMITS;
-  const KNOWN = [EQ_MODE.BELL, EQ_MODE.SHELF, EQ_MODE.HIGH_PASS] as number[];
+  const KNOWN = [EQ_MODE.BELL, EQ_MODE.LOW_SHELF, EQ_MODE.HIGH_SHELF, EQ_MODE.HIGH_PASS] as number[];
   /** Known types, plus the band's own value when the MOTU reports one we do not know. */
   const modes = (m: number) => (KNOWN.includes(m) ? KNOWN : [...KNOWN, m]);
 </script>

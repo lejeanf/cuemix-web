@@ -92,7 +92,7 @@ describe('EQ math', () => {
   });
   it('shelf reaches its gain far past the corner; unknown modes are not drawn', () => {
     const eq = flat();
-    eq[3] = { ...eq[3], mode: EQ_MODE.SHELF, freq_hz: 5000, gain_db: 6 };
+    eq[3] = { ...eq[3], mode: EQ_MODE.HIGH_SHELF, freq_hz: 5000, gain_db: 6 };
     expect(eqResponseDb(eq, 20000)).toBeCloseTo(6, 0);
     expect(Math.abs(eqResponseDb(eq, 100))).toBeLessThan(0.1);
     eq[3].mode = 9;

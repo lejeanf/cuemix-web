@@ -119,7 +119,7 @@ export interface MotuState {
   control_room: ControlRoom;
   /** Analog line output trims, whole dB -100..0 (index 0 = output 1). */
   output_trims: number[];
-  clock: { sample_rate: SampleRate; source: ClockSource };
+  clock: { sample_rate: SampleRate; source: ClockSource; optical_in?: OpticalMode; optical_out?: OpticalMode };
 }
 
 export interface SessionInfo {
@@ -205,7 +205,11 @@ export type Param =
   | { param: 'reverb_width'; value: number }
   | { param: 'reverb_preset'; preset: number }
   | { param: 'sample_rate'; rate: SampleRate }
-  | { param: 'clock_source'; source: ClockSource };
+  | { param: 'clock_source'; source: ClockSource }
+  | { param: 'optical_mode'; output: boolean; mode: OpticalMode };
+
+/** Optical port format: ADAT (8 channels) or TOSLINK (stereo). */
+export type OpticalMode = 'adat' | 'toslink';
 
 export type ParamName = Param['param'];
 
@@ -263,16 +267,18 @@ export const INPUT_EQ_BANDS = 4;
 export const OUTPUT_EQ_OUTPUTS = 12;
 export const OUTPUT_EQ_BANDS = 3;
 
-/** EQ band filter types seen in the MOTU dump (props 1002 / 1022). */
-export const EQ_MODE = { BELL: 0, SHELF: 2, HIGH_PASS: 3 } as const;
+/** EQ band filter types (props 1002 / 1022), as CueMix 5 defines them. */
+export const EQ_MODE = { BELL: 0, LOW_SHELF: 1, HIGH_SHELF: 2, HIGH_PASS: 3 } as const;
 
 /** Short name of an EQ mode byte; unknown values are shown as their number. */
 export function eqModeName(mode: number): string {
   switch (mode) {
     case EQ_MODE.BELL:
       return 'Bell';
-    case EQ_MODE.SHELF:
-      return 'Shelf';
+    case EQ_MODE.LOW_SHELF:
+      return 'Low shelf';
+    case EQ_MODE.HIGH_SHELF:
+      return 'High shelf';
     case EQ_MODE.HIGH_PASS:
       return 'HPF';
     default:

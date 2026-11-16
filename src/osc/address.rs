@@ -15,7 +15,7 @@ use rosc::{OscMessage, OscType};
 use thiserror::Error;
 
 use crate::motu::fader;
-use crate::state::{ClockSource, Command, Param, SampleRate, TRIM_MIN_DB};
+use crate::state::{ClockSource, Command, OpticalMode, Param, SampleRate, TRIM_MIN_DB};
 
 #[derive(Debug, Error, PartialEq)]
 pub enum OscError {
@@ -326,6 +326,17 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
             },
             _ => return Err(OscError::ArgType(addr.to_owned())),
         },
+        ["optical", port @ ("in" | "out"), "mode"] => match single(addr, args)? {
+            OscType::String(s) => Param::OpticalMode {
+                output: *port == "out",
+                mode: match s.as_str() {
+                    "adat" => OpticalMode::Adat,
+                    "toslink" | "tos" => OpticalMode::Toslink,
+                    _ => return Err(OscError::ArgType(addr.to_owned())),
+                },
+            },
+            _ => return Err(OscError::ArgType(addr.to_owned())),
+        },
         ["routing", "in", input, "out", output] => Param::Route {
             input: index_u16(input, addr)?,
             output: index_u16(output, addr)?,
@@ -405,6 +416,16 @@ pub fn feedback(param: &Param) -> Option<OscMessage> {
         P::ClockSource { source } => (
             "/clock/source".to_owned(),
             OscType::String(clock_source_name(source).to_owned()),
+        ),
+        P::OpticalMode { output, mode } => (
+            format!("/optical/{}/mode", if output { "out" } else { "in" }),
+            OscType::String(
+                match mode {
+                    OpticalMode::Adat => "adat",
+                    OpticalMode::Toslink => "toslink",
+                }
+                .to_owned(),
+            ),
         ),
         Param::MixVol { bus, ch, gain } => (
             format!("/mix/{}/ch/{}/vol", n(bus.into()), n(ch)),

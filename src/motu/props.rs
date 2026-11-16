@@ -30,7 +30,7 @@
 //!   is checked on the card.
 
 use super::protocol::{Frame, ProtocolError, Value, ValueKind};
-use crate::state::{dsp_limits, ClockSource, Param, SampleRate};
+use crate::state::{dsp_limits, ClockSource, OpticalMode, Param, SampleRate};
 
 /// One row of the property table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +73,7 @@ const P_INPUT_PAD: u16 = 5003;
 const P_INPUT_48V: u16 = 5004;
 const P_MAIN_TRIM: u16 = 5011;
 const P_MONO: u16 = 5018;
+const P_OPTICAL_MODE: u16 = 5006;
 const P_TALKBACK_ENABLE: u16 = 5027;
 const P_SAMPLE_RATE: u16 = 10;
 const P_CLOCK_SOURCE: u16 = 11;
@@ -117,6 +118,21 @@ const N_MICS: u16 = 2;
 const PHONES_L: u16 = 10;
 /// Analog line outputs with a trim, before the phones pair (indices 0..=9).
 const N_LINE_OUTPUTS: u16 = 10;
+/// Prop 5000 index of each analog output in UI order (Main 1, Main 2,
+/// Line 3 … Line 10): the device indexes its DACs in hardware order, where
+/// Line 5-10 come first (CueMix 5 `LocalOutputs`).
+const OUTPUT_TRIM_INDEX: [u16; N_LINE_OUTPUTS as usize] = [6, 7, 8, 9, 0, 1, 2, 3, 4, 5];
+
+fn output_trim_index(ch: u16) -> Option<u16> {
+    OUTPUT_TRIM_INDEX.get(usize::from(ch)).copied()
+}
+
+fn output_from_trim_index(index: u16) -> Option<u16> {
+    OUTPUT_TRIM_INDEX
+        .iter()
+        .position(|&i| i == index)
+        .and_then(|p| u16::try_from(p).ok())
+}
 const PHONES_R: u16 = 11;
 /// Mic input gain ceiling in dB (line inputs stop at 20 dB).
 const GAIN_MAX_DB: f64 = 74.0;
@@ -363,14 +379,23 @@ pub fn encode(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
                 })
                 .collect()
         }
-        // Same property as the phones trim (5000), analog outputs 0..=9.
-        Param::OutputTrim { ch, db } if ch < N_LINE_OUTPUTS => vec![Frame {
-            prop_id: P_OUTPUT_TRIM,
-            index: ch,
-            value: Value::U8(db_to_trim(db)?),
-        }],
+        // Same property as the phones trim (5000), analog outputs in hardware order.
+        Param::OutputTrim { ch, db } => match output_trim_index(ch) {
+            Some(index) => vec![Frame {
+                prop_id: P_OUTPUT_TRIM,
+                index,
+                value: Value::U8(db_to_trim(db)?),
+            }],
+            None => Vec::new(),
+        },
         Param::Mono { on } => vec![bool_frame(P_MONO, 0, on)],
         Param::Talkback { on } => vec![bool_frame(P_TALKBACK_ENABLE, 0, on)],
+        // Index 0 = optical input, 1 = output (CueMix 5 `kOpticalMode`).
+        Param::OpticalMode { output, mode } => vec![Frame {
+            prop_id: P_OPTICAL_MODE,
+            index: u16::from(output),
+            value: Value::U8(mode.code()),
+        }],
         // Unmapped: write not verified (MixVol/MixPan/MixMute/MixSolo, and the
         // DSP / reverb / clock params whose encoders exist but are NOT ACTIVE,
         // see `encode_unverified`), semantics unknown (Route), no hardware
@@ -678,12 +703,16 @@ pub fn decode(frame: &Frame) -> Option<Param> {
         P_OUTPUT_TRIM if ch == PHONES_L => Some(Param::PhonesVol {
             db: trim_to_db(byte),
         }),
-        P_OUTPUT_TRIM if ch < N_LINE_OUTPUTS => Some(Param::OutputTrim {
-            ch,
+        P_OUTPUT_TRIM => output_from_trim_index(ch).map(|out| Param::OutputTrim {
+            ch: out,
             db: trim_to_db(byte),
         }),
         P_MONO if ch == 0 => Some(Param::Mono { on }),
         P_TALKBACK_ENABLE if ch == 0 => Some(Param::Talkback { on }),
+        P_OPTICAL_MODE if ch < 2 => OpticalMode::from_code(byte).map(|mode| Param::OpticalMode {
+            output: ch == 1,
+            mode,
+        }),
         _ => None,
     }
 }
@@ -692,6 +721,38 @@ pub fn decode(frame: &Frame) -> Option<Param> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn optical_mode_round_trips_on_prop_5006() {
+        for output in [false, true] {
+            for mode in [OpticalMode::Adat, OpticalMode::Toslink] {
+                let p = Param::OpticalMode { output, mode };
+                let f = encode(&p).unwrap();
+                assert_eq!((f[0].prop_id, f[0].index), (5006, u16::from(output)));
+                assert_eq!(decode(&f[0]), Some(p));
+            }
+        }
+    }
+
+    #[test]
+    fn output_trims_use_the_hardware_dac_order() {
+        // Main 1 is DAC 6 on the device, Line 5 is DAC 0 (CueMix 5 LocalOutputs).
+        let main1 = encode(&Param::OutputTrim { ch: 0, db: -3.0 }).unwrap();
+        assert_eq!((main1[0].prop_id, main1[0].index), (P_OUTPUT_TRIM, 6));
+        let line5 = encode(&Param::OutputTrim { ch: 4, db: 0.0 }).unwrap();
+        assert_eq!(line5[0].index, 0);
+        assert_eq!(
+            decode(&Frame {
+                prop_id: P_OUTPUT_TRIM,
+                index: 9,
+                value: Value::U8(6)
+            }),
+            Some(Param::OutputTrim { ch: 3, db: -6.0 })
+        );
+        assert!(encode(&Param::OutputTrim { ch: 10, db: 0.0 })
+            .unwrap()
+            .is_empty());
+    }
 
     fn mapped_params() -> Vec<Param> {
         let mut v = Vec::new();
