@@ -66,8 +66,8 @@
             onchange={(v, f) => store.set({ param: 'main_vol', db: Math.round(v) }, f)}
           />
           <div class="km" title="Main output level (before the volume)">
-            <Meter index={METER_SLOT.output(0)} horizontal label="Main L meter" />
-            <Meter index={METER_SLOT.output(1)} horizontal label="Main R meter" />
+            <Meter index={METER_SLOT.output(0)} label="Main L meter" />
+            <Meter index={METER_SLOT.output(1)} label="Main R meter" />
           </div>
           <div class="btns">
             <button class="t" class:on={st.control_room.mono} aria-pressed={st.control_room.mono} disabled={off}
@@ -94,8 +94,8 @@
             onchange={(v, f) => store.set({ param: 'phones_vol', db: Math.round(v) }, f)}
           />
           <div class="km" title="Phones level (before the volume)">
-            <Meter index={METER_SLOT.output(10)} horizontal label="Phones L meter" />
-            <Meter index={METER_SLOT.output(11)} horizontal label="Phones R meter" />
+            <Meter index={METER_SLOT.output(10)} label="Phones L meter" />
+            <Meter index={METER_SLOT.output(11)} label="Phones R meter" />
           </div>
         </div>
       </section>
@@ -123,11 +123,11 @@
                     onchange={(v, f) => store.set({ param: 'output_trim', ch, db: Math.round(v) }, f)}
                   />
                 {/each}
-              </div>
-              <div class="pm" title="Output level before the trim">
-                {#each [ch0, ch0 + 1].filter((c) => c < OUTPUTS) as ch (ch)}
-                  <Meter index={METER_SLOT.output(ch)} horizontal label="Output {ch + 1} meter" />
-                {/each}
+                <div class="vm" title="Output level before the trim">
+                  {#each [ch0, ch0 + 1].filter((c) => c < OUTPUTS) as ch (ch)}
+                    <Meter index={METER_SLOT.output(ch)} label="Output {ch + 1} meter" />
+                  {/each}
+                </div>
               </div>
             </div>
           {/each}
@@ -267,16 +267,19 @@
     display: flex;
     gap: 4px;
   }
-  .pm,
-  .km {
-    align-self: stretch;
+  .km,
+  .vm {
     display: flex;
-    flex-direction: column;
     gap: 2px;
-    margin-top: 3px;
+    align-self: stretch;
   }
   .km {
-    width: 56px;
+    height: 72px;
+    align-self: center;
+  }
+  .vm :global(canvas),
+  .km :global(canvas) {
+    min-height: 0;
   }
   .eqhead {
     display: flex;

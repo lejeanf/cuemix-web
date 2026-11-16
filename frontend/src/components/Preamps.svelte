@@ -42,6 +42,7 @@
             <div class="ch" aria-label="Preamp {store.labelName(ch)}" role="group">
               <div class="bar" style:background={store.label(ch)?.color ?? 'transparent'}></div>
               <span class="nm" title={store.labelName(ch)}>{store.labelName(ch)}</span>
+              <div class="kr">
               <Knob
                 value={pa.gain_db}
                 min={0}
@@ -56,8 +57,9 @@
                 hint={store.hint('preamp_gain')}
                 onchange={(v, f) => store.set({ param: 'preamp_gain', ch, db: Math.round(v) }, f)}
               />
-              <div class="hm" title="Input level after the preamp (before EQ and dynamics)">
-                <Meter index={METER_SLOT.preamp(ch)} horizontal label="Input meter {store.labelName(ch)}" />
+              <div class="vm" title="Input level after the preamp (before EQ and dynamics)">
+                <Meter index={METER_SLOT.preamp(ch)} label="Input meter {store.labelName(ch)}" />
+              </div>
               </div>
               <div class="btns">
                 <button
@@ -155,9 +157,16 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .hm {
-    align-self: stretch;
-    padding: 0 2px;
+  .kr {
+    display: flex;
+    gap: 4px;
+    align-items: stretch;
+  }
+  .vm {
+    display: flex;
+  }
+  .vm :global(canvas) {
+    min-height: 0;
   }
   .btns,
   .row {
