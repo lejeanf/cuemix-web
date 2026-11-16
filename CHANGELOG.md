@@ -45,6 +45,15 @@ need attention. Preset files carry `schema_version`; see
   resets it to 0 dB, which was a jump to full volume. Those knobs have no reset.
 - Double-clicking or double-tapping an output trim knob (Output tab) no longer
   resets it to 0 dB (no attenuation, full level). Trim knobs have no reset.
+- Proxmox: the MOTU USB link no longer drops off its isolated bridge after a
+  host network reload. ifupdown2 (`ifreload -a`, or "Apply Configuration" in
+  the Proxmox GUI) detaches every bridge port not listed in `bridge-ports`,
+  and the MOTU link was attached only by the udev `add` rule, so the app fell
+  back to demo mode until the helper was re-run by hand. The bridge stanza now
+  has a `post-up` hook that runs `cuemix-motu-bridge --all`, which finds any
+  MOTU link (USB vendor 07fd, `cdc_ether`) in sysfs and re-attaches it (no-op
+  without one). `proxmox-setup.sh --update` now also refreshes the host helper,
+  udev rule and bridge file, without a network reload.
 
 ### Changed
 - Phone (Simple) view redesigned after the desktop Monitoring card: two large
