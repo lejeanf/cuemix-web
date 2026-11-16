@@ -22,6 +22,21 @@
     link === 'online' ? S.online : link === 'connecting' ? S.connecting : link === 'demo' ? S.demo : S.offline,
   );
 
+  // The status is a small dot; its text shows on hover or focus, on a tap
+  // (phones have no hover), and for a few seconds whenever the state changes.
+  let showStatus = $state(false);
+  let statusTimer: ReturnType<typeof setTimeout> | undefined;
+  function flashStatus(ms = 4000) {
+    showStatus = true;
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => (showStatus = false), ms);
+  }
+  $effect(() => {
+    void link;
+    flashStatus();
+    return () => clearTimeout(statusTimer);
+  });
+
   function toggle(which: 'presets' | 'clock') {
     open = open === which ? '' : which;
     if (open === 'presets') store.listPresets();
@@ -108,6 +123,7 @@
     {/if}
   </div>
 
+  {#if !store.simple}
   <div class="pw">
     <button class="btn" aria-haspopup="dialog" aria-expanded={open === 'presets'} disabled={off} title="{S.presetLabel}: {session.active_preset ?? S.noPreset}{session.modified ? ` (${S.modified})` : ''}"
       onclick={() => toggle('presets')}
@@ -145,11 +161,15 @@
       </div>
     {/if}
   </div>
+  {/if}
 
   <button class="btn mode" aria-pressed={!store.simple} title={store.simple ? 'Show every control' : 'Volume remote for phones'} onclick={() => store.setSimple(!store.simple)}
     >{store.simple ? 'Advanced' : 'Simple'}</button
   >
-  <span class="pill {link}" role="status">{linkText}</span>
+  <span class="sr" role="status">{linkText}</span>
+  <button class="status {link}" class:show={showStatus} aria-label="Connection: {linkText}" title={linkText} onclick={() => flashStatus()}>
+    <span class="dot" aria-hidden="true"></span><span class="txt" aria-hidden="true">{linkText}</span>
+  </button>
 </header>
 
 <style>
@@ -286,26 +306,74 @@
   .err {
     color: var(--red);
   }
-  .pill {
-    padding: 3px 12px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--card);
-    color: var(--text-dim);
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .status {
+    --c: var(--text-dim);
+    position: relative;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--c);
     font-size: 12px;
     white-space: nowrap;
+    cursor: default;
+    touch-action: manipulation;
   }
-  .pill.online {
-    color: var(--meter-green);
-    border-color: var(--meter-green);
+  .status.online {
+    --c: var(--meter-green);
   }
-  .pill.connecting {
-    color: var(--amber);
-    border-color: var(--amber);
+  .status.connecting {
+    --c: var(--amber);
   }
-  .pill.offline {
-    color: var(--red);
-    border-color: var(--red);
+  .status.demo {
+    --c: var(--red);
+  }
+  .dot {
+    flex: none;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--c);
+  }
+  .status.connecting .dot {
+    animation: pulse 1s ease-in-out infinite alternate;
+  }
+  @keyframes pulse {
+    to {
+      opacity: 0.3;
+    }
+  }
+  /* The label floats under the dot, so showing it never moves
+     or wraps anything. */
+  .txt {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 2px);
+    z-index: 30;
+    padding: 3px 10px;
+    border: 1px solid var(--c);
+    border-radius: 999px;
+    background: var(--bg-alt);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .status:hover .txt,
+  .status:focus-visible .txt,
+  .status.show .txt {
+    opacity: 1;
   }
   /* Phones: tabs get their own scrolling row under the buttons; the clock
      (rarely changed) is left to larger screens. */
@@ -313,10 +381,14 @@
     .top {
       flex-wrap: wrap;
       gap: 6px;
-      padding: 4px 8px 0;
+      padding: 0 8px;
     }
+    /* The first row is as tall in Simple and Advanced views. */
     .brand {
       flex: 1;
+      display: flex;
+      align-items: center;
+      min-height: 44px;
     }
     .tabs {
       order: 10;

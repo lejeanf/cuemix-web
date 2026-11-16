@@ -13,6 +13,11 @@ need attention. Preset files carry `schema_version`; see
 ## [Unreleased]
 
 ### Changed
+- Top bar: the connection status is now a small dot (green online, amber
+  pulsing while connecting, red when the server has no MOTU, grey when the
+  server is unreachable). Its text shows on hover, focus or tap, and for a few
+  seconds whenever the state changes. The Presets button is hidden in the
+  Simple (phone) view.
 - Controls that are not sent to the MOTU yet (compressor, gate, clock, Dim,
   Speaker A/B, reverb) are now greyed out and disabled instead of staying
   interactive with a dashed outline, so they no longer look broken. The Reverb
