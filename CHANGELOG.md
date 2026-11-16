@@ -12,6 +12,10 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-15
+
+First version used day to day on a real UltraLite-mk5 (firmware 2.0.8).
+
 ### Added
 - The device is identified from its connect dump: model, firmware, channel
   counts, stereo pairs and channel/mix names in CueMix 5 order (Mic 1 … Line 8,
@@ -168,6 +172,16 @@ need attention. Preset files carry `schema_version`; see
 ### Verified on hardware
 - An UltraLite-mk5 is discovered through its UDP announcement and accepts the
   WebSocket connection on port 1280 without a path.
+
+### Compatibility
+- Presets: format **v2**. v1 presets still load (mixes, preamps, trims,
+  control room, labels kept; their old DSP section is dropped). Files are
+  rewritten as v2 on the next save. A v2 preset is refused by 0.3.0.
+- `config.toml`: new optional `[update]` section (channel and file paths);
+  older configs work unchanged.
+- Deployment: run `deploy/proxmox-setup.sh --update` (or `linux-setup.sh`)
+  once to install the update units; without them the UI simply shows no
+  update notice.
 
 ## [0.3.0] - 2026-11-14
 
