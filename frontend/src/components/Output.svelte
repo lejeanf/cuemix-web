@@ -200,7 +200,7 @@
     padding: 6px 10px 8px;
   }
   .trimcard {
-    flex: 1;
+    flex: 1 1 320px;
     min-width: 0;
   }
   h3 {
@@ -293,6 +293,7 @@
   }
   .outs {
     display: flex;
+    flex-wrap: wrap;
     gap: 2px;
   }
   .o {

@@ -116,4 +116,22 @@
     color: var(--text);
     font-variant-numeric: tabular-nums;
   }
+  @media (max-width: 640px) {
+    /* Phones: only the two volumes (the buttons are on the Output tab). */
+    .label,
+    .ver,
+    .t {
+      display: none;
+    }
+    .lv {
+      flex: 1 1 150px;
+    }
+    .lv input {
+      flex: 1;
+      min-width: 0;
+    }
+    .cr {
+      padding: 4px 8px;
+    }
+  }
 </style>

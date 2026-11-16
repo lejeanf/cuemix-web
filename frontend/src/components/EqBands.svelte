@@ -213,6 +213,15 @@
     margin-top: 0;
     justify-content: flex-end;
   }
+  @media (max-width: 560px) {
+    .rows .band {
+      grid-template-columns: 26px repeat(3, minmax(0, 1fr));
+    }
+    .rows .types {
+      grid-column: 2 / -1;
+      justify-content: flex-start;
+    }
+  }
   button:disabled,
   input:disabled {
     cursor: not-allowed;
