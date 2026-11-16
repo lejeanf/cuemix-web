@@ -94,6 +94,8 @@ class Store {
   }
   /** Latest raw meter frame (meter probe); not deep-reactive. */
   meterRaw: number[] | null = $state.raw(null);
+  /** Output patch table read from the card (prop 5010); null = unknown. */
+  patch: number[] | null = $state.raw(null);
   bus = $state(0);
   dspChannel: number | null = $state(null);
 
@@ -217,6 +219,8 @@ class Store {
     ws.onopen = () => {
       this.attempt = 0;
       this.socketOpen = true;
+      // The server replays the patch only when it knows one: drop ours.
+      this.patch = null;
       if (this.measureStopPending) this.measureStop();
       // Re-read on every (re)connect: the server may have just been updated.
       void this.refreshVersion();
@@ -245,7 +249,11 @@ class Store {
   private handle(ev: ServerEvent): void {
     if (ev.event === 'meter_raw') {
       this.meterRaw = ev.raw;
-      if (hasMk5Meters(this.c.session.device?.model, ev.raw.length)) meterBank.push(mk5MeterLevels(ev.raw));
+      if (hasMk5Meters(this.c.session.device?.model, ev.raw.length)) meterBank.push(mk5MeterLevels(ev.raw, this.patch));
+      return;
+    }
+    if (ev.event === 'patch') {
+      this.patch = ev.sources.length ? ev.sources : null;
       return;
     }
     if (ev.event === 'meters') {

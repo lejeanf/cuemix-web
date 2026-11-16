@@ -100,6 +100,8 @@ pub enum DeviceEvent {
     Meters(Vec<f32>),
     /// Raw meter frame payload (see [`ServerEvent::MeterRaw`]).
     MeterRaw(Vec<u8>),
+    /// Output patch table (property 5010, read-only), whole table.
+    Patch(Vec<u8>),
     Status(ConnectionStatus),
 }
 
@@ -265,6 +267,7 @@ pub async fn start(cfg: EngineConfig) -> (EngineHandle, DeviceLink, JoinHandle<(
         active: None,
         labels,
         measure: MeasureStatus::default(),
+        patch: Vec::new(),
         measure_tx: None,
         measure_owner: None,
         labels_file: cfg.labels_file,
@@ -294,6 +297,8 @@ struct Engine {
     labels: Labels,
     /// Room-test state, replayed to every new client.
     measure: MeasureStatus,
+    /// Last patch table read from the device (empty = unknown), replayed to new clients.
+    patch: Vec<u8>,
     measure_tx: Option<mpsc::Sender<MeasureRequest>>,
     /// Web client that started the running room test.
     measure_owner: Option<Origin>,
@@ -366,14 +371,20 @@ impl Engine {
     }
 
     async fn initial_events(&self) -> Vec<ServerEvent> {
-        vec![
+        let mut events = vec![
             self.snapshot(),
             ServerEvent::Labels(self.labels.clone()),
             ServerEvent::Presets {
                 names: self.preset_names.clone(),
             },
             ServerEvent::Measure(self.measure.clone()),
-        ]
+        ];
+        if !self.patch.is_empty() {
+            events.push(ServerEvent::Patch {
+                sources: self.patch.clone(),
+            });
+        }
+        events
     }
 
     fn forward(&self, param: Param) {
@@ -643,11 +654,29 @@ impl Engine {
             DeviceEvent::MeterRaw(raw) => {
                 self.emit(origin, Target::All, ServerEvent::MeterRaw { raw })
             }
+            DeviceEvent::Patch(sources) => {
+                if self.patch != sources {
+                    self.patch = sources.clone();
+                    self.emit(origin, Target::All, ServerEvent::Patch { sources });
+                }
+            }
             DeviceEvent::Status(connection) => {
                 if self.session.connection != connection {
                     self.session.connection = connection;
                     self.emit(origin, Target::All, ServerEvent::Status { connection });
-                    // Demo mode: no device behind the state any more.
+                    // Link lost (reconnecting) or demo mode: the patch read
+                    // from the previous session may not describe the next
+                    // device; the next session's dump re-sends it.
+                    if connection != ConnectionStatus::Online && !self.patch.is_empty() {
+                        self.patch.clear();
+                        self.emit(
+                            origin,
+                            Target::All,
+                            ServerEvent::Patch {
+                                sources: Vec::new(),
+                            },
+                        );
+                    }
                     if connection == ConnectionStatus::Demo && self.session.device.take().is_some()
                     {
                         self.emit(
@@ -1043,6 +1072,70 @@ mod tests {
         let init = h.initial_events().await.unwrap();
         // Snapshot, labels, presets, room-test state.
         assert_eq!(init.len(), 4);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn patch_is_broadcast_once_replayed_and_cleared_in_demo() {
+        let (h, link, dir) = setup("patch").await;
+        let mut rx = h.subscribe();
+        let table = vec![46, 47, 78, 79];
+        link.events
+            .send(DeviceEvent::Patch(table.clone()))
+            .await
+            .unwrap();
+        assert_eq!(
+            next(&mut rx).await.event,
+            ServerEvent::Patch {
+                sources: table.clone()
+            }
+        );
+        // Same table again: no new broadcast.
+        link.events
+            .send(DeviceEvent::Patch(table.clone()))
+            .await
+            .unwrap();
+        let init = h.initial_events().await.unwrap();
+        assert_eq!(init.len(), 5);
+        assert_eq!(
+            init[4],
+            ServerEvent::Patch {
+                sources: table.clone()
+            }
+        );
+        link.events
+            .send(DeviceEvent::Status(ConnectionStatus::Online))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await; // status
+                                     // Link lost: the patch is dropped until the next session re-reads it.
+        link.events
+            .send(DeviceEvent::Status(ConnectionStatus::Connecting))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await; // status
+        assert_eq!(
+            next(&mut rx).await.event,
+            ServerEvent::Patch {
+                sources: Vec::new()
+            }
+        );
+        link.events
+            .send(DeviceEvent::Patch(table.clone()))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await; // patch
+        link.events
+            .send(DeviceEvent::Status(ConnectionStatus::Demo))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await; // status
+        assert_eq!(
+            next(&mut rx).await.event,
+            ServerEvent::Patch {
+                sources: Vec::new()
+            }
+        );
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 

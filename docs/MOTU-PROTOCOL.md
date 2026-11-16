@@ -63,7 +63,7 @@ Réverbe : les **départs** sont les faders du mix « Reverb » (mix 6 = bus mon
 
 Pas de trame : `MixVol/MixPan/MixMute/MixSolo` et les params gate / compresseur / réverbe / horloge ci-dessus (lus seulement), le slot 1 de l'EQ de sortie (inutilisé), `Route`, `Dim`, `SpeakerB`, et tout canal hors plage documentée.
 - Mix (1016 fader 8.24 linéaire, 1017 pan 8.24 `0..1` avec 0,5 = centre, 1018 solo, 1019 mute ; 448 entrées) : **index = `bus × 32 + entrée`** (déduit du dump du 2026-11-15 : la diagonale « bus k ← retour USB k » tombe exactement sur `33k + 18`). Bus mono par paires : 0-1 Main 1-2, 2-3 Line 3-4, 4-5 Line 5-6, 6-7 Line 7-8, 8-9 Line 9-10, **10-11 Phones**, 12-13 Reverb. Une entrée mono est portée par le bus gauche du mix ; une paire stéréo par le bus gauche (entrée gauche) et le bus droit (entrée droite). Écriture : même layout que la lecture (`motu::identify::encode_mix`) ; une tranche stéréo de l'UI écrit les deux moitiés (fader, mute, solo), le pan seulement à gauche. **À confirmer sur la carte** : l'écriture elle-même et le sens du pan (0 = gauche supposé).
-- Routage : 5010 est une table de 80 octets de sémantique inconnue, pas une matrice booléenne.
+- Routage : 5010 est une table de 80 octets (une source par destination), pas une matrice booléenne ; lue seulement, sans encodeur (voir ci-dessus).
 - EQ : 1003 = bypass **par bande** (index `ch × 4 + bande`, voir ci-dessus) ; pas de bypass global (le `eq_bypass` de cuemix-web ≤ 0.3 a été retiré).
 - Dim : aucun paramètre matériel (licanccc l'émule avec le trim). SpeakerB : 5015-5017 (`ab/a/b_enable`) de sémantique inconnue.
 
@@ -130,7 +130,7 @@ CueMix 5 (installé, `resources/app/src/www/dev.js`) décrit chaque propriété 
 - **1002 / 1022 (type de bande EQ)** : 0 = cloche, 1 = plateau grave, 2 = plateau aigu, 3 = passe-haut.
 - **5006 (format optique)** : octet, index 0 = entrée, 1 = sortie ; 0 = ADAT, 1 = TOSLINK. Écrit par cuemix-web (`optical_mode`).
 - **5001 (gain d'entrée)** : micros 0-74 dB, lignes 0-20 dB.
-- **5010 (patch/routage)** : un octet par destination (`kOD_*`), valeur = source du bus de patch (même numérotation que les meters). Non encore implémenté.
+- **5010 (patch/routage)** : un octet par destination (`kOD_*`), valeur = source du bus de patch (même numérotation que les meters ; 255 = rien). **Lu seulement, jamais écrit** : le client l'accumule (`apply_patch_frame` : les octets d'une trame `[5010][index][octets…]` remplacent les entrées à partir de la destination `index`, donc table complète, mise à jour partielle et entrée seule fonctionnent) et le relaie tel quel (`ServerEvent::Patch`). Mesuré : la prise casque n'est pas câblée au mix Phones (points 64/65, ≈ −82 dB alors que la musique est dans le mix Main) ; le patch dit quelle source alimente chaque sortie. **Inconnu pour l'instant** : l'indice de destination de chaque sortie (`MK5_PATCH_DEST` dans `meterMap.ts`, à remplir après lecture de la table « Patch (5010) » du Meter probe sur la carte).
 - **5014** : source du loopback ; **5015-5019** : A/B, A, B, mono et mute *enable* ; **5024** sortie word clock ; **5025** expandeur optique ; **5026-5031** talkback (latch, enable, level, dim, source, destination).
 - Entrées analogiques dans l'ordre matériel (bus de patch 32 + n) : Mic 2, Line 7, Line 8, Line 5, Line 6, Mic 1, Line 3, Line 4.
 

@@ -56,6 +56,10 @@ pub const DEFAULT_SYNC_WINDOW: Duration = Duration::from_millis(500);
 pub const SYNC_MAX: Duration = Duration::from_secs(5);
 /// Meter stream property (motu-mk5-linux `METERS_ID`; format still unknown).
 pub const METERS_PROP_ID: u16 = 6000;
+/// Output patch property (`fpga_patch`): one byte per destination, read-only.
+pub const PATCH_PROP_ID: u16 = 5010;
+/// Largest patch table accepted (the mk5 has 80 entries; guards bad indexes).
+const PATCH_MAX: usize = 256;
 /// Minimum spacing between two raw meter frames forwarded to the engine.
 const METER_RAW_INTERVAL: Duration = Duration::from_millis(33);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -310,6 +314,30 @@ fn meter_payload(bytes: &[u8]) -> Option<&[u8]> {
         .flatten()
 }
 
+/// Applies one patch frame (`[5010][index][bytes…]`) to `table`: the bytes
+/// replace the entries starting at destination `index`, so a full table
+/// (index 0, 80 bytes), a partial update and a single-entry frame all work.
+/// Returns whether `table` changed; non-patch or malformed frames change nothing.
+fn apply_patch_frame(table: &mut Vec<u8>, bytes: &[u8]) -> bool {
+    if bytes.get(..2) != Some(&PATCH_PROP_ID.to_be_bytes()[..]) {
+        return false;
+    }
+    let (Some(idx), Some(data)) = (bytes.get(2..HEADER_LEN), bytes.get(HEADER_LEN..)) else {
+        return false;
+    };
+    let start = usize::from(u16::from_be_bytes([idx[0], idx[1]]));
+    let end = start + data.len();
+    if data.is_empty() || end > PATCH_MAX {
+        return false;
+    }
+    let before = table.clone();
+    if table.len() < end {
+        table.resize(end, 255);
+    }
+    table[start..end].copy_from_slice(data);
+    *table != before
+}
+
 fn decode_bytes<C: PropCodec>(
     codec: &C,
     bytes: &[u8],
@@ -439,6 +467,19 @@ async fn session_inner<C: PropCodec>(
             return SessionEnd::Stop;
         }
     }
+    let mut patch: Vec<u8> = Vec::new();
+    for frame in &dump {
+        apply_patch_frame(&mut patch, frame);
+    }
+    if !patch.is_empty()
+        && link
+            .events
+            .send(DeviceEvent::Patch(patch.clone()))
+            .await
+            .is_err()
+    {
+        return SessionEnd::Stop;
+    }
     let synced: Vec<Param> = dump
         .iter()
         .filter_map(|bytes| decode_bytes(codec, bytes, device.as_ref()))
@@ -504,6 +545,12 @@ async fn session_inner<C: PropCodec>(
                         }
                         continue;
                     }
+                    if apply_patch_frame(&mut patch, &bytes) {
+                        if link.events.send(DeviceEvent::Patch(patch.clone())).await.is_err() {
+                            return SessionEnd::Stop;
+                        }
+                        continue;
+                    }
                     if let Some(param) = decode_bytes(codec, &bytes, device.as_ref()) {
                         if link.events.send(DeviceEvent::Changed(vec![param])).await.is_err() {
                             return SessionEnd::Stop;
@@ -519,7 +566,47 @@ async fn session_inner<C: PropCodec>(
 
 #[cfg(test)]
 mod meter_tests {
-    use super::meter_payload;
+    use super::{apply_patch_frame, meter_payload};
+
+    fn frame(index: u16, data: &[u8]) -> Vec<u8> {
+        let mut f = vec![0x13, 0x92];
+        f.extend(index.to_be_bytes());
+        f.extend(data);
+        f
+    }
+
+    #[test]
+    fn patch_full_table_then_partial_and_single_updates() {
+        let mut t = Vec::new();
+        assert!(apply_patch_frame(&mut t, &frame(0, &[46, 47, 48, 49])));
+        assert_eq!(t, [46, 47, 48, 49]);
+        // Same content: unchanged.
+        assert!(!apply_patch_frame(&mut t, &frame(0, &[46, 47, 48, 49])));
+        // Partial update from index 2.
+        assert!(apply_patch_frame(&mut t, &frame(2, &[78, 79])));
+        assert_eq!(t, [46, 47, 78, 79]);
+        // Single entry frame (index = destination).
+        assert!(apply_patch_frame(&mut t, &frame(1, &[64])));
+        assert_eq!(t, [46, 64, 78, 79]);
+    }
+
+    #[test]
+    fn patch_index_frames_build_the_table_and_gaps_read_as_nothing() {
+        let mut t = Vec::new();
+        assert!(apply_patch_frame(&mut t, &frame(3, &[7])));
+        assert_eq!(t, [255, 255, 255, 7]);
+    }
+
+    #[test]
+    fn patch_ignores_other_and_malformed_frames() {
+        let mut t = vec![1, 2];
+        assert!(!apply_patch_frame(&mut t, &[0x17, 0x70, 0, 0, 9]));
+        assert!(!apply_patch_frame(&mut t, &[0x13, 0x92]));
+        assert!(!apply_patch_frame(&mut t, &frame(0, &[])));
+        assert!(!apply_patch_frame(&mut t, &frame(300, &[1])));
+        assert!(!apply_patch_frame(&mut t, &frame(255, &[1, 2])));
+        assert_eq!(t, [1, 2]);
+    }
 
     #[test]
     fn meter_payload_is_the_bytes_after_the_header() {

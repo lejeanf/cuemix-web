@@ -13,6 +13,12 @@ need attention. Preset files carry `schema_version`; see
 ## [Unreleased]
 
 ### Changed
+- Phones meter: it now shows what the headphone jack plays. Output meters
+  follow the card's output patch (property 5010): on the card the jack is fed
+  by the Main mix, not by the Phones mix, so the meter read the (near-silent)
+  Phones mix and stayed empty. An output with nothing patched reads silent.
+- The accent colour is now blue (#3b93e0) instead of cyan, everywhere.
+- Top bar: the status label shows only on hover, focus or a tap.
 - Top bar: the connection status is now a small dot (green online, amber
   pulsing while connecting, red when the server has no MOTU, grey when the
   server is unreachable). Its text shows on hover, focus or tap, and for a few
@@ -24,6 +30,13 @@ need attention. Preset files carry `schema_version`; see
   tab is hidden while a MOTU is connected and returns once reverb is written.
 
 ### Added
+- The output patch table of the card (property 5010) is now read, never
+  written, and sent to the web UI (`patch` message). The meter probe
+  (`/?probe`) shows it as a "Patch (5010)" table (destination to source
+  point, highlighted when the source has signal), and the output meters are
+  ready to follow it once the destination of each output is known (the
+  Phones meter stays empty meanwhile: the headphone jack is not fed by the
+  Phones mix).
 - Room test (optional, `[measure]` in `config.toml`, off by default): the
   server asks your MPD / myMPD to play pink noise (served by the new
   `GET /api/measure/noise.wav`, 90 s, 48 kHz, 16-bit, about -20 dBFS RMS,
