@@ -68,6 +68,11 @@ need attention. Preset files carry `schema_version`; see
   enabled.
 
 ### Changed
+- The Routing tab is gone: it was never wired to the device, and its
+  input × output grid did not match the hardware (each output takes one
+  source, prop 5010). The mixes cover normal use; a per-output source menu
+  can come later on the Output tab. The `route` param and the state's
+  routing matrix stay (state only) for preset compatibility.
 - Preset recall with an identified MOTU sends only the parameters that differ
   from the live state (which mirrors the hardware), instead of every mapped
   parameter.

@@ -6,7 +6,6 @@
   import Mixer from './components/Mixer.svelte';
   import Preamps from './components/Preamps.svelte';
   import Output from './components/Output.svelte';
-  import Routing from './components/Routing.svelte';
   import Reverb from './components/Reverb.svelte';
   import ControlRoom from './components/ControlRoom.svelte';
   import DspPanel from './components/DspPanel.svelte';
@@ -19,7 +18,7 @@
 
   /** The meter probe is a diagnostic view: shown with `?probe` or `#probe` in the URL. */
   const probe = /probe/.test(location.search + location.hash);
-  const tabs: Tab[] = ['mixer', 'input', 'output', 'routing', 'reverb', ...(probe ? (['probe'] as Tab[]) : [])];
+  const tabs: Tab[] = ['mixer', 'input', 'output', 'reverb', ...(probe ? (['probe'] as Tab[]) : [])];
 </script>
 
 <div class="app">
@@ -43,8 +42,6 @@
       <Preamps />
     {:else if store.tab === 'output'}
       <Output />
-    {:else if store.tab === 'routing'}
-      <Routing />
     {:else if store.tab === 'probe'}
       <Probe />
     {:else}

@@ -11,7 +11,7 @@ export const S = {
   offline: 'offline',
   demo: 'Demo — no MOTU',
   offlineBanner: 'Offline — reconnecting…',
-  tabs: { mixer: 'Mixer', input: 'Input', output: 'Output', routing: 'Routing', reverb: 'Reverb', probe: 'Meter probe' },
+  tabs: { mixer: 'Mixer', input: 'Input', output: 'Output', reverb: 'Reverb', probe: 'Meter probe' },
   monitoring: 'Monitoring',
   mics: 'Mic',
   lines: 'Line',
@@ -73,8 +73,6 @@ export const S = {
   clearLabel: 'Clear',
   apply: 'Apply',
   labelInvalid: 'Name must be 1–64 printable characters',
-  routingHint: 'Rows: inputs · Columns: outputs (hover a dot to see the route)',
-  routingCorner: 'In ↓  Out →',
   sampleRate: 'Sample rate',
   clockSource: 'Clock source',
 } as const;

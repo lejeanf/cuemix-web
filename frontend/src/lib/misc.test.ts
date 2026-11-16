@@ -161,19 +161,6 @@ describe('output EQ presets', () => {
   });
 });
 
-describe('routing names', () => {
-  it('names mk5 inputs and outputs and groups them', async () => {
-    const { routingInputs, routingOutputs, groupSpans } = await import('./io');
-    const dev = { model: 'UL5E', input_names: ['Mic 1', 'Mic 2', 'Line 3', 'Line 4', 'Line 5', 'Line 6', 'Line 7', 'Line 8', 'S/PDIF 1', 'S/PDIF 2', ...Array.from({ length: 8 }, (_, i) => `ADAT ${i + 1}`)] } as never;
-    const outs = routingOutputs(22, dev);
-    expect(outs[0].name).toBe('Main L');
-    expect(outs[21].name).toBe('ADAT 8');
-    expect(groupSpans(outs).map((g) => [g.group, g.span])).toEqual([['Analog', 10], ['Phones', 2], ['S/PDIF', 2], ['ADAT', 8]]);
-    expect(groupSpans(routingInputs(18, dev)).map((g) => g.span)).toEqual([8, 2, 8]);
-    expect(routingOutputs(4, null)[3].name).toBe('Out 4');
-  });
-});
-
 describe('meter probe', () => {
   it('rolling stats and baseline diff', async () => {
     const { ProbeWindow, changedFrom } = await import('./probe');
