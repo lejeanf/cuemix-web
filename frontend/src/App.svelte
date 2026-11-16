@@ -11,6 +11,7 @@
   import DspPanel from './components/DspPanel.svelte';
   import Probe from './components/Probe.svelte';
   import Remote from './components/Remote.svelte';
+  import RoomTest from './components/RoomTest.svelte';
 
   onMount(() => {
     store.start();
@@ -60,6 +61,10 @@
   {#if !store.simple}
     <ControlRoom />
     <DspPanel />
+  {/if}
+
+  {#if store.roomOpen}
+    <RoomTest />
   {/if}
 
   <div class="toasts" aria-live="polite">

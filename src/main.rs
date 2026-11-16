@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use cuemix_web::config::Config;
 use cuemix_web::engine::{self, EngineConfig};
+use cuemix_web::measure;
 use cuemix_web::motu::client::{self, ClientConfig};
 use cuemix_web::osc::bridge::OscBridge;
 use cuemix_web::state::Topology;
@@ -124,6 +125,18 @@ async fn main() -> Result<()> {
                 tracing::error!(error = %e, "web server stopped");
             }
         });
+    }
+    if let Some(settings) =
+        measure::Settings::from_config(&config.measure, config.network.http_bind.port())
+    {
+        tracing::info!("room test enabled (MPD configured)");
+        let settings = settings.with_restore_file(
+            config
+                .storage
+                .labels_file
+                .with_file_name("measure-restore.json"),
+        );
+        tasks.spawn(measure::run(settings, engine.clone(), shutdown.clone()));
     }
     let mdns = zeroconf::announce(
         &config.network.mdns_hostname,

@@ -106,7 +106,7 @@ async fn expect_silence(ws: &mut Ws) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn drain_initial(ws: &mut Ws) -> Result<(), Box<dyn std::error::Error>> {
-    for _ in 0..3 {
+    for _ in 0..4 {
         next_json(ws).await?;
     }
     Ok(())
@@ -173,6 +173,44 @@ async fn ws_connect_receives_snapshot_labels_presets_in_order(
     assert_eq!(next_json(&mut ws).await?["event"], "snapshot");
     assert_eq!(next_json(&mut ws).await?["event"], "labels");
     assert_eq!(next_json(&mut ws).await?["event"], "presets");
+    let m = next_json(&mut ws).await?;
+    assert_eq!(m["event"], "measure");
+    assert_eq!(m["state"], "unavailable", "no MPD configured here");
+    Ok(())
+}
+
+#[tokio::test]
+async fn noise_wav_streams_with_a_correct_header() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("noise").await?;
+    let mut s = TcpStream::connect(h.addr).await?;
+    s.write_all(
+        b"GET /api/measure/noise.wav HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    )
+    .await?;
+    // Read only the start: the body is streamed, no need to take all 17 MB.
+    let mut raw = vec![0u8; 4096];
+    let mut got = 0;
+    while got < 1500 {
+        let n = tokio::time::timeout(T, s.read(&mut raw[got..])).await??;
+        if n == 0 {
+            break;
+        }
+        got += n;
+    }
+    let raw = &raw[..got];
+    let split = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or("no header end")?;
+    let head = String::from_utf8_lossy(&raw[..split]).to_ascii_lowercase();
+    assert!(head.starts_with("http/1.1 200"), "{head}");
+    assert!(head.contains("content-type: audio/wav"), "{head}");
+    assert!(head.contains("content-length: 17280044"), "{head}");
+    let body = &raw[split + 4..];
+    assert_eq!(&body[0..4], b"RIFF");
+    assert_eq!(&body[8..12], b"WAVE");
+    assert_eq!(&body[36..40], b"data");
+    assert!(body.len() > 44, "samples follow the header");
     Ok(())
 }
 

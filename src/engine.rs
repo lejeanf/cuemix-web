@@ -34,7 +34,8 @@ use crate::motu::client::ConnectionStatus;
 use crate::motu::props;
 use crate::presets::{self, PresetStore};
 use crate::state::{
-    Command, DeviceInfo, Labels, MotuState, Param, Preset, ServerEvent, SessionInfo, Topology,
+    Command, DeviceInfo, Labels, MeasureState, MeasureStatus, MotuState, Param, Preset,
+    ServerEvent, SessionInfo, Topology,
 };
 
 /// Capacity of the client → engine request queue.
@@ -147,8 +148,24 @@ impl Shutdown {
 
 #[derive(Debug)]
 enum Request {
-    Command { origin: Origin, command: Command },
+    Command {
+        origin: Origin,
+        command: Command,
+    },
     Initial(oneshot::Sender<Vec<ServerEvent>>),
+    /// From `measure`: register its control channel.
+    MeasureAttach(mpsc::Sender<MeasureRequest>),
+    /// From `measure`: the room-test state changed.
+    MeasureStatus(MeasureStatus),
+    /// A Web client disconnected.
+    ClientGone(Origin),
+}
+
+/// What the engine forwards to the room-test task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeasureRequest {
+    Start,
+    Stop,
 }
 
 /// Cheap, cloneable handle used by the Web and OSC bridges.
@@ -180,6 +197,33 @@ impl EngineHandle {
             .await
             .map_err(|_| EngineClosed)?;
         rx.await.map_err(|_| EngineClosed)
+    }
+
+    /// Room test: register the channel `MeasureStart` / `MeasureStop` go to.
+    pub async fn measure_attach(
+        &self,
+        tx: mpsc::Sender<MeasureRequest>,
+    ) -> Result<(), EngineClosed> {
+        self.tx
+            .send(Request::MeasureAttach(tx))
+            .await
+            .map_err(|_| EngineClosed)
+    }
+
+    /// Room test: publish its state to every client (and to later connects).
+    pub async fn measure_status(&self, status: MeasureStatus) -> Result<(), EngineClosed> {
+        self.tx
+            .send(Request::MeasureStatus(status))
+            .await
+            .map_err(|_| EngineClosed)
+    }
+
+    /// A Web client's connection ended: a room test it started is stopped.
+    pub async fn client_gone(&self, origin: Origin) -> Result<(), EngineClosed> {
+        self.tx
+            .send(Request::ClientGone(origin))
+            .await
+            .map_err(|_| EngineClosed)
     }
 
     /// Unique id for a new Web connection.
@@ -220,6 +264,9 @@ pub async fn start(cfg: EngineConfig) -> (EngineHandle, DeviceLink, JoinHandle<(
         session: SessionInfo::default(),
         active: None,
         labels,
+        measure: MeasureStatus::default(),
+        measure_tx: None,
+        measure_owner: None,
         labels_file: cfg.labels_file,
         preset_names,
         store,
@@ -245,6 +292,11 @@ struct Engine {
     session: SessionInfo,
     active: Option<Preset>,
     labels: Labels,
+    /// Room-test state, replayed to every new client.
+    measure: MeasureStatus,
+    measure_tx: Option<mpsc::Sender<MeasureRequest>>,
+    /// Web client that started the running room test.
+    measure_owner: Option<Origin>,
     labels_file: PathBuf,
     /// Cached preset list (no disk I/O on every client connect, audit #12).
     preset_names: Vec<String>,
@@ -267,6 +319,21 @@ impl Engine {
                     Some(Request::Command { origin, command }) => self.on_command(origin, command).await,
                     Some(Request::Initial(reply)) => {
                         let _ = reply.send(self.initial_events().await);
+                    }
+                    Some(Request::MeasureAttach(tx)) => self.measure_tx = Some(tx),
+                    Some(Request::MeasureStatus(status)) => {
+                        if matches!(status.state, MeasureState::Idle | MeasureState::Unavailable) {
+                            self.measure_owner = None;
+                        }
+                        self.measure = status.clone();
+                        self.emit(Origin::System, Target::All, ServerEvent::Measure(status));
+                    }
+                    Some(Request::ClientGone(origin)) => {
+                        // Only the client that started the test ends it.
+                        if self.measure_owner == Some(origin) {
+                            self.measure_owner = None;
+                            self.on_measure(origin, MeasureRequest::Stop);
+                        }
                     }
                     // Every handle dropped: shut down.
                     None => break,
@@ -305,6 +372,7 @@ impl Engine {
             ServerEvent::Presets {
                 names: self.preset_names.clone(),
             },
+            ServerEvent::Measure(self.measure.clone()),
         ]
     }
 
@@ -409,8 +477,32 @@ impl Engine {
         }
     }
 
+    /// `MeasureStart` / `MeasureStop`: checked here, run by `measure`.
+    fn on_measure(&mut self, origin: Origin, request: MeasureRequest) {
+        if request == MeasureRequest::Start {
+            match self.measure.state {
+                MeasureState::Idle => {}
+                MeasureState::Unavailable => {
+                    return self.reply_error(origin, "room test is not available".into())
+                }
+                _ => return self.reply_error(origin, "a room test is already running".into()),
+            }
+        }
+        let sent = self
+            .measure_tx
+            .as_ref()
+            .is_some_and(|tx| tx.try_send(request).is_ok());
+        if !sent && request == MeasureRequest::Start {
+            self.reply_error(origin, "room test is not available".into());
+        } else if sent && request == MeasureRequest::Start && matches!(origin, Origin::Web(_)) {
+            self.measure_owner = Some(origin);
+        }
+    }
+
     async fn on_command(&mut self, origin: Origin, command: Command) {
         match command {
+            Command::MeasureStart => self.on_measure(origin, MeasureRequest::Start),
+            Command::MeasureStop => self.on_measure(origin, MeasureRequest::Stop),
             Command::Set(param) => {
                 match crate::state::check_writable(&param).and_then(|()| self.state.apply(&param)) {
                     Ok(Some(effective)) => {
@@ -949,7 +1041,8 @@ mod tests {
         );
 
         let init = h.initial_events().await.unwrap();
-        assert_eq!(init.len(), 3);
+        // Snapshot, labels, presets, room-test state.
+        assert_eq!(init.len(), 4);
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 

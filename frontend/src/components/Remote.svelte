@@ -183,6 +183,10 @@
       </select>
     </label>
   {/if}
+
+  {#if store.roomTestAvailable}
+    <button class="room" disabled={off} onclick={() => (store.roomOpen = true)}>{S.roomTest}</button>
+  {/if}
 </div>
 
 <style>
@@ -279,6 +283,18 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 0 8px;
+  }
+  .room {
+    align-self: center;
+    min-height: 40px;
+    padding: 0 16px;
+    font-size: 14px;
+    background: var(--bg-alt);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    touch-action: manipulation;
   }
   button:disabled,
   select:disabled {

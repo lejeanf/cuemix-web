@@ -100,7 +100,24 @@ Environment overrides:
 | `CUEMIX_OSC_LISTEN` | `[network] osc_listen` (UDP OSC listen address) |
 | `CUEMIX_MOTU_IP` | `[motu] ip` (device address; empty means auto-discovery) |
 
-Main sections of `config.example.toml`: `[network]` (listen addresses, feedback targets, MOTU interface, mDNS name), `[motu]` (device IP and WebSocket port), `[engine]` (throttle, sync policy, offline fallback), `[storage]` (presets and labels paths), `[web]` (trust of `X-Forwarded-*` headers).
+Main sections of `config.example.toml`: `[network]` (listen addresses, feedback targets, MOTU interface, mDNS name), `[motu]` (device IP and WebSocket port), `[engine]` (throttle, sync policy, offline fallback), `[storage]` (presets and labels paths), `[web]` (trust of `X-Forwarded-*` headers), `[measure]` (room test, see below).
+
+## Room test
+
+The UltraLite has no noise generator, so the test noise comes from your own MPD / myMPD server. Wire its analog output to a MOTU line input (default: Line 7-8, mixer inputs 6 and 7), then add to `config.toml`:
+
+```toml
+[measure]
+mpd = "192.0.2.20:6600"          # MPD protocol address (plain TCP)
+# mpd_password = ""              # if MPD has one; keep it out of tracked files
+# noise_url = ""                 # default: this server as seen from MPD, port of http_bind
+# source_inputs = [6, 7]         # 0-based mixer inputs carrying the MPD signal
+# max_seconds = 60               # watchdog, 20-80
+```
+
+How it works: a "Room test" button (phone view) or "Measure room..." (Output EQ) opens the test. The server saves the Main mix mutes and solos, the Main output EQ and the source inputs' EQ, mutes every other input, flattens those EQs (through the normal write path, so the card and every open page follow), then has MPD play `GET /api/measure/noise.wav` (pink noise, about -20 dBFS). The phone records it with its microphone; the browser analyses the room response and proposes up to three Main output EQ cuts below 500 Hz, which you can apply and undo. If MPD is playing, the server pauses it first (you do not need to), and the room stays quiet for 3.5 s so the phone can record the background; then the noise starts. The test also stops if the browser page that started it disconnects (closing or reloading it, losing the network); other pages disconnecting change nothing. When the test ends, fails, is stopped, or after `max_seconds`, everything is restored exactly (inputs that were already muted stay muted) and MPD goes back to what it was playing (same song, position, paused or stopped, repeat/random/single/consume). Mutes are written before unmutes, so no input is briefly heard that should not be. The mixer values to put back are saved to `measure-restore.json` (next to `labels.json`) before anything changes and kept until the card has received them: if the MOTU link drops, the MOTU is unplugged or the service stops or crashes during a test, the mixer is restored as soon as the MOTU is online again (also after a restart). After a crash, MPD is not restored (the noise ends by itself after 90 s and stays in the queue). Values you change yourself during a test (mutes, solos, those EQ bypasses) are overwritten by the restore. Only one test runs at a time; any open page can stop it. Pause your music before starting: the phone first records 3 s of room background.
+
+Limits: a phone microphone is not a measurement microphone. Below about 50 Hz and above about 500 Hz its response is not reliable for this purpose, so only cuts of room modes in 30-500 Hz are proposed, never boosts. Keep Main at your usual listening level, put the phone at the listening position, microphone pointing up. The browser only gives microphone access on a secure origin: serve the UI over HTTPS (reverse proxy) or open it from `localhost`. MPD must be able to reach this server over HTTP (and needs its HTTP input plugin); the noise URL is not authenticated.
 
 ## Running
 
@@ -198,9 +215,11 @@ Endpoint `/ws`. Indices are **0-based** in JSON, and values use the native units
 {"cmd":"import_preset","name":"from file","text":"{\"schema_version\":2,\"state\":{…}}"}
 {"cmd":"list_presets"}
 {"cmd":"set_label","ch":2,"label":{"name":"Vox","color":"#06B6D4"}}
+{"cmd":"measure_start"}
+{"cmd":"measure_stop"}
 ```
 
-On connection the server sends `snapshot`, `labels` and `presets`. Later events:
+On connection the server sends `snapshot`, `labels`, `presets` and `measure`. Later events:
 
 ```json
 {"event":"changed","params":[{"param":"dim","on":true}]}
@@ -209,6 +228,7 @@ On connection the server sends `snapshot`, `labels` and `presets`. Later events:
 {"event":"presets","names":["default","live"]}
 {"event":"labels","channels":{"2":{"name":"Vox","color":"#06B6D4"}}}
 {"event":"meters","levels":[0.0,0.12]}
+{"event":"measure","state":"playing","source":[6,7],"until":"2026-11-16T20:15:30Z"}
 {"event":"error","message":"..."}
 ```
 

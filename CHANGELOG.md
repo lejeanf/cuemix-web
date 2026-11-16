@@ -13,6 +13,23 @@ need attention. Preset files carry `schema_version`; see
 ## [Unreleased]
 
 ### Added
+- Room test (optional, `[measure]` in `config.toml`, off by default): the
+  server asks your MPD / myMPD to play pink noise (served by the new
+  `GET /api/measure/noise.wav`, 90 s, 48 kHz, 16-bit, about -20 dBFS RMS,
+  streamed), mutes every other input of the Main mix, clears solos, bypasses
+  the Main output EQ and the source inputs' EQ, then restores all of it (and
+  what MPD was playing) when the test ends, fails, is stopped or hits the
+  `max_seconds` watchdog (20-80 s). The values to restore are kept in
+  `measure-restore.json` until the card has them, so a link loss, unplug,
+  restart or crash mid-test is repaired when the MOTU is back. New WebSocket messages `measure_start` /
+  `measure_stop` and a `measure` event (`unavailable`, `idle`, `starting`,
+  `quiet`, `playing`, `restoring`, `error`). The phone measures the room with its
+  microphone and proposes up to three Main output EQ cuts below 500 Hz; the
+  analysis runs in the browser. The card has no noise generator, hence MPD.
+  The microphone needs the UI served over HTTPS.
+  MPD is paused by the server for a 3.5 s quiet phase (background recording)
+  before the noise; the test also ends when the page that started it
+  disconnects.
 - Output EQ writes: the five output EQ props (1022-1026: type, bypass,
   frequency, gain, Q) are now sent to the MOTU, coalesced per parameter by the
   existing throttle. A filter type is written only on a band where CueMix 5
