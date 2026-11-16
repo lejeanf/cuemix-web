@@ -34,6 +34,18 @@ export function healthUrl(loc: Pick<Location, 'pathname'>): string {
 }
 
 const TABS: readonly Tab[] = ['mixer', 'input', 'output', 'reverb', 'probe'];
+const VIEW_KEY = 'cuemix.view';
+/** Simple (phone remote) or advanced view: remembered per browser, phones start simple. */
+function initialSimple(): boolean {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === 'simple' || v === 'advanced') return v === 'simple';
+  } catch {
+    /* storage blocked: fall back to the screen size */
+  }
+  return typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches;
+}
+
 function tabFromHash(): Tab {
   const h = typeof location === 'undefined' ? '' : location.hash.slice(1);
   return (TABS as readonly string[]).includes(h) ? (h as Tab) : 'mixer';
@@ -47,6 +59,16 @@ class Store {
   version: string | null = $state(null);
   /** Current view; `#mixer`, `#input`, `#output`, `#reverb` in the URL open it directly. */
   tab: Tab = $state(tabFromHash());
+  /** Phone remote (Main / Phones volume) instead of the full console. */
+  simple = $state(initialSimple());
+  setSimple(on: boolean): void {
+    this.simple = on;
+    try {
+      localStorage.setItem(VIEW_KEY, on ? 'simple' : 'advanced');
+    } catch {
+      /* not remembered, still applied */
+    }
+  }
   /** Latest raw meter frame (meter probe); not deep-reactive. */
   meterRaw: number[] | null = $state.raw(null);
   bus = $state(0);

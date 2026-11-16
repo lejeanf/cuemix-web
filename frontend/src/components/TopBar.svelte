@@ -85,10 +85,10 @@
 
 <header class="top" bind:this={root}>
   <span class="brand">{S.appName}</span>
-  <nav class="tabs">{@render children?.()}</nav>
+  {#if !store.simple}<nav class="tabs">{@render children?.()}</nav>{/if}
 
   <div class="pw">
-    <button class="btn" aria-haspopup="dialog" aria-expanded={open === 'clock'} disabled={off} onclick={() => toggle('clock')}>
+    <button class="btn clock" aria-haspopup="dialog" aria-expanded={open === 'clock'} disabled={off} onclick={() => toggle('clock')}>
       {#if clock}{khz(clock.sample_rate)} · {clock.source}{:else}{S.clock}{/if}
     </button>
     {#if open === 'clock' && clock}
@@ -146,6 +146,9 @@
     {/if}
   </div>
 
+  <button class="btn mode" aria-pressed={!store.simple} title={store.simple ? 'Show every control' : 'Volume remote for phones'} onclick={() => store.setSimple(!store.simple)}
+    >{store.simple ? 'Advanced' : 'Simple'}</button
+  >
   <span class="pill {link}" role="status">{linkText}</span>
 </header>
 
@@ -304,9 +307,28 @@
     color: var(--red);
     border-color: var(--red);
   }
+  /* Phones: tabs get their own scrolling row under the buttons; the clock
+     (rarely changed) is left to larger screens. */
   @media (max-width: 640px) {
+    .top {
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 4px 8px 0;
+    }
     .brand {
+      flex: 1;
+    }
+    .tabs {
+      order: 10;
+      flex-basis: 100%;
+      min-height: 40px;
+    }
+    .clock {
       display: none;
+    }
+    .btn {
+      min-height: 30px;
+      padding: 0 10px;
     }
   }
 </style>
