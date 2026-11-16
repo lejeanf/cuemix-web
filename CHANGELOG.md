@@ -55,6 +55,18 @@ need attention. Preset files carry `schema_version`; see
 - Input tab: S/PDIF and Optical in sections with their level meters, and
   the optical input format (ADAT 8 channels / TOS stereo, prop 5006,
   new param `optical_mode`, OSC `/optical/{in|out}/mode`).
+- Updates from the web UI, by release channel: `[update] channel =
+  "stable" | "prerelease"` in `config.toml`. A root systemd timer
+  (`cuemix-update-check.timer`, daily) runs `cuemix-update --check
+  --status-file …`; the UI shows "vX available" next to the version, with
+  the release notes and an **Install** button. Installing is always a
+  person's decision: the button only creates a request file that the root
+  `cuemix-update-request.path` unit turns into a normal `cuemix-update` run
+  (sha256 check, health check, automatic rollback). The web service itself
+  stays unprivileged and never downloads anything. New endpoints
+  `GET /api/update` and `POST /api/update/install` (needs the
+  `x-cuemix-update` header). The setup scripts install the units
+  (`proxmox-setup.sh --update` adds them to an existing container).
 - Browser tab icon.
 - `Int16` payloads (`ValueKind::I16`) for the DSP attack/release times.
 - OSC addresses for all of the above: `/eq/{ch}/band/{b}/{mode|bypass|freq|gain|bw}`,

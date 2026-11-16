@@ -609,6 +609,20 @@ provision_container() {
   run pct push "${CTID}" "${UPDATE_SCRIPT}" /usr/local/sbin/cuemix-update --perms 0755
   run pct exec "${CTID}" -- env CUEMIX_MOTU_IFACE=eth1 bash /root/cuemix-provision.sh
   run pct exec "${CTID}" -- rm -f /root/cuemix-provision.sh
+  push_update_units "${CTID}"
+}
+
+# push_update_units CTID : install the daily release check (timer) and the
+# web-requested install (path unit) in the container, and run a first check.
+push_update_units() {
+  local ctid="$1" u
+  for u in cuemix-update-check.service cuemix-update-check.timer cuemix-update-request.path cuemix-update-request.service; do
+    [[ -f "${SCRIPT_DIR}/systemd/${u}" ]] || die "missing ${SCRIPT_DIR}/systemd/${u} (run from a repository checkout)"
+    run pct push "${ctid}" "${SCRIPT_DIR}/systemd/${u}" "/etc/systemd/system/${u}" --perms 0644
+  done
+  run pct exec "${ctid}" -- systemctl daemon-reload
+  run pct exec "${ctid}" -- systemctl enable --now cuemix-update-check.timer cuemix-update-request.path
+  run pct exec "${ctid}" -- systemctl start --no-block cuemix-update-check.service || log_warn "first update check could not start"
 }
 
 # update_container : re-push the current cuemix-update.sh into the container
@@ -637,6 +651,7 @@ update_container() {
     dry_args+=(--dry-run)
   fi
   run pct push "${ctid}" "${UPDATE_SCRIPT}" /usr/local/sbin/cuemix-update --perms 0755
+  push_update_units "${ctid}"
   run pct exec "${ctid}" -- /usr/local/sbin/cuemix-update "${dry_args[@]}" "${UPDATE_ARGS[@]}"
   log_info "Update later with: ./deploy/proxmox-setup.sh --update  (or: pct exec ${ctid} -- cuemix-update)"
 }

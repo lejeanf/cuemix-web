@@ -3,6 +3,7 @@
   import { S } from '../lib/strings';
   import { TRIM_MIN_DB } from '../lib/protocol';
   import { formatDb, trimDbToPos, trimPosToDb } from '../lib/fader';
+  import UpdateBadge from './UpdateBadge.svelte';
 
   const cr = $derived(store.state?.control_room);
   const main = $derived(store.state?.main.db ?? TRIM_MIN_DB);
@@ -39,6 +40,7 @@
     </label>
   {/if}
   <span class="ver">
+    <UpdateBadge />
     {#if store.version}<span title="Running version">v{store.version}</span>{/if}
     {#if store.device}<span title="Connected MOTU: model {store.device.model}, firmware {store.device.firmware}">{store.device.model} {store.device.firmware}</span>{/if}
   </span>
@@ -105,8 +107,8 @@
     display: flex;
     gap: 8px;
     font-size: 11px;
+    align-items: center;
     color: var(--text-dim);
-    opacity: 0.7;
     white-space: nowrap;
   }
   output {

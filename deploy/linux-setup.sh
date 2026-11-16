@@ -28,6 +28,8 @@ UDEV_RULE="/etc/udev/rules.d/99-motu-mk5.rules"
 HELPER_PATH="/usr/local/sbin/cuemix-motu-linklocal"
 NM_CONF="/etc/NetworkManager/conf.d/99-cuemix-motu.conf"
 UPDATER_PATH="/usr/local/sbin/cuemix-update"
+# Daily release check + install requested from the web UI (deploy/systemd).
+UPDATE_UNITS=(cuemix-update-check.service cuemix-update-check.timer cuemix-update-request.path cuemix-update-request.service)
 
 RELEASE_API="https://api.github.com/repos/lejeanf/cuemix-web/releases/latest"
 RELEASE_BASE="https://github.com/lejeanf/cuemix-web/releases/download"
@@ -169,6 +171,9 @@ uninstall() {
   log_step "Uninstall cuemix-web"
 
   run systemctl disable --now cuemix-web || log_warn "cuemix-web service was not active"
+  run systemctl disable --now cuemix-update-check.timer cuemix-update-request.path || true
+  local u
+  for u in "${UPDATE_UNITS[@]}"; do run rm -f -- "/etc/systemd/system/${u}"; done
   run rm -f -- "${UNIT_PATH}"
   run systemctl daemon-reload
 
@@ -447,6 +452,25 @@ install_unit() {
   run systemctl daemon-reload
   run systemctl enable cuemix-web
   run systemctl restart cuemix-web
+  install_update_units
+}
+
+# install_update_units : daily check timer + web-requested install (path unit).
+# Only for the default binary location, which is what cuemix-update manages.
+install_update_units() {
+  if [[ "${INSTALL_DIR}" != "/usr/local/bin" ]]; then
+    log_warn "update units skipped: cuemix-update only manages /usr/local/bin/cuemix-web"
+    return 0
+  fi
+  log_step "Update check and web-requested updates"
+  local u
+  for u in "${UPDATE_UNITS[@]}"; do
+    install_if_changed "${SCRIPT_DIR}/systemd/${u}" "/etc/systemd/system/${u}" 0644 || true
+  done
+  run systemctl daemon-reload
+  run systemctl enable --now cuemix-update-check.timer cuemix-update-request.path
+  # First check now, so the UI knows the update status right away.
+  run systemctl start --no-block cuemix-update-check.service || log_warn "first update check could not start"
 }
 
 print_summary() {

@@ -56,6 +56,7 @@ pub struct WebConfig {
     pub trust_forwarded_headers: bool,
     /// Extra origins (`scheme://host[:port]`) allowed to open `/ws`.
     pub allowed_origins: Vec<String>,
+    pub update: crate::config::Update,
 }
 
 impl WebConfig {
@@ -63,14 +64,15 @@ impl WebConfig {
         Self {
             trust_forwarded_headers: cfg.web.trust_forwarded_headers,
             allowed_origins: cfg.web.allowed_origins.clone(),
+            update: cfg.update.clone(),
         }
     }
 }
 
 #[derive(Clone)]
-struct AppState {
+pub(super) struct AppState {
     engine: EngineHandle,
-    cfg: WebConfig,
+    pub(super) cfg: WebConfig,
 }
 
 /// Build the router (HTTP + WebSocket).
@@ -78,6 +80,11 @@ pub fn router(engine: EngineHandle, cfg: WebConfig) -> Router {
     Router::new()
         .route("/ws", get(ws_handler))
         .route("/api/health", get(health))
+        .route("/api/update", get(super::update::status))
+        .route(
+            "/api/update/install",
+            axum::routing::post(super::update::install),
+        )
         .fallback(get(static_handler))
         .with_state(AppState { engine, cfg })
 }
@@ -399,6 +406,7 @@ mod tests {
         let cfg = WebConfig {
             trust_forwarded_headers: false,
             allowed_origins: vec!["https://Mixer.Example.com".into()],
+            update: Default::default(),
         };
         let ok = |p: &[(&'static str, &'static str)]| origin_allowed(&hm(p), &cfg);
         assert!(ok(&[("host", "pi.local:8080")]));
