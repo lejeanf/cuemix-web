@@ -61,7 +61,7 @@ changements venant du matériel sont appliqués et diffusés, **jamais renvoyés
 | `src/presets.rs` | Présets (`<presets_dir>/<nom>.json`), `labels.json`, écritures atomiques | ✅ |
 | `src/motu/fader.rs` | Lois de fader `0..1` (mix et trims) — utilisées **uniquement aux bords** | ✅ |
 | `src/motu/protocol.rs` | Trames BE, `8.24`, `Int16`, `Value`/`ValueKind` | ✅ |
-| `src/motu/props.rs` | Table `prop_id` (69 entrées, `verified: false`), `encode`/`decode` ; DSP/réverbe/horloge décodés, encodeurs `encode_unverified` **non actifs** | 🟡 partiel (§8) |
+| `src/motu/props.rs` | Table `prop_id` (69 entrées, `verified: false`), `encode`/`decode` ; DSP/réverbe/horloge décodés ; **EQ de sortie actif** (écrit) ; encodeurs `encode_unverified` (EQ d'entrée, dynamique, réverbe, horloge) **non actifs** | 🟡 partiel (§8) |
 | `src/motu/throttle.rs` | Limiteur par paramètre, dernière valeur garantie | ✅ |
 | `src/motu/client.rs` | Client WS, `PropCodec`, sync Option A, backoff 1→10 s, mode démo | ✅ |
 | `src/motu/discovery.rs` | IP explicite → mDNS (provisoire) → ARP + sonde TCP | 🟡 (§8) |
@@ -120,7 +120,7 @@ MotuState
 ├── input_eq[8][4]: { mode, bypass, freq_hz, gain_db, bw_oct }   (préamplis × INPUT_EQ_BANDS ; lu, non écrit)
 ├── compressors[8]: { bypass, threshold_db, attack_ms, release_ms, ratio, makeup }   (lu, non écrit)
 ├── gates[2]: { bypass, threshold_db, attack_ms, release_ms }     (entrées micro ; lu, non écrit)
-├── output_eq[12][3]: { mode, bypass, freq_hz, gain_db, bw_oct }  (OUTPUT_EQ_OUTPUTS × OUTPUT_EQ_BANDS ; lu, non écrit)
+├── output_eq[12][3]: { mode, bypass, freq_hz, gain_db, bw_oct }  (OUTPUT_EQ_OUTPUTS slots × OUTPUT_EQ_BANDS ; lu et écrit, slot 1 jamais écrit)
 ├── reverb: { decay, damping, predelay_ms, width, preset }        (lu, non écrit ; départs/retour = mixes)
 ├── routing: { matrix[input][output]: bool }                          (non mappé)
 ├── control_room: { dim, mono, speaker_b, talkback, phones_db }
@@ -196,9 +196,9 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 `param` : `mix_vol` (`gain`), `mix_pan` (`value`), `mix_mute`, `mix_solo`, `main_vol` (`db`),
 `preamp_gain` (`db`), `phantom`, `pad`, `phase`, `route`, `dim`, `mono`, `speaker_b`,
 `talkback`, `phones_vol` (`db`), `output_trim` (`ch`, `db`), et **un param par propriété
-matérielle** pour le DSP (lus sur la MOTU, pas encore écrits) : `input_eq_mode` (`ch`, `band`,
+matérielle** pour le DSP (lus sur la MOTU ; seul l'EQ de sortie est écrit) : `input_eq_mode` (`ch`, `band`,
 `mode` octet brut), `input_eq_bypass` (`on`), `input_eq_freq` (`hz` entiers), `input_eq_gain`
-(`db`), `input_eq_bw` (`octaves`), idem `output_eq_*` (`ch` = sortie 0–11, `band` 0–2),
+(`db`), `input_eq_bw` (`octaves` = Q), idem `output_eq_*` (`ch` = **slot** d'EQ 0–11 : 0 Main L-R, 1 inutilisé, 2–9 Line 3–10, 10 Phones L-R, 11 Reverb ; `band` 0–2),
 `gate_bypass` / `comp_bypass` (`on` = bypass), `gate_threshold` / `comp_threshold` (`db`),
 `gate_attack` / `gate_release` / `comp_attack` / `comp_release` (`ms` entiers), `comp_ratio`
 (`ratio`), `comp_makeup` (`gain` linéaire), `reverb_decay` / `reverb_damping` / `reverb_width`
@@ -219,7 +219,7 @@ qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants �
 | `/mix/main/vol` | float `0..1` | `main_vol` (trim : 1.0 = 0 dB, 0 = −100 dB) |
 | `/preamp/{ch}/gain` | float dB `0..74` | `preamp_gain` |
 | `/preamp/{ch}/48v` · `/pad` · `/phase` | int | `phantom` · `pad` · `phase` |
-| `/eq/{ch}/band/{b}/mode` · `/bypass` · `/freq` · `/gain` · `/bw` | int / float | `input_eq_*` (`ch` 1–8, `b` 1–4 ; Hz, dB, octaves) |
+| `/eq/{ch}/band/{b}/mode` · `/bypass` · `/freq` · `/gain` · `/bw` | int / float | `input_eq_*` (`ch` 1–8, `b` 1–4 ; Hz, dB, Q) |
 | `/output/{n}/eq/band/{b}/mode` · `/bypass` · `/freq` · `/gain` · `/bw` | int / float | `output_eq_*` (`n` 1–12, `b` 1–3) |
 | `/comp/{ch}/bypass` · `/threshold` · `/attack` · `/release` · `/ratio` · `/makeup` | int / float | `comp_*` (dB, ms, `n:1`, make-up linéaire) |
 | `/gate/{ch}/bypass` · `/threshold` · `/attack` · `/release` | int / float | `gate_*` (`ch` 1–2) |
@@ -310,7 +310,7 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 | D20 | Présets **schema v2** : migration v0/v1 → v2 dans `presets::parse_preset` (suppression de `channels` et de l'ancien `reverb`, puis `reset_dsp` aux dimensions du préset) ; fixtures figées `preset-v1.json` et `preset-v2.json` | L'ancien DSP (32 tranches, HPF séparé, Q) ne correspond à aucun réglage matériel : rien à convertir honnêtement |
 | D21 | Départs/retour de réverbe = paramètres de mix (mix « Reverb », entrée « Reverb ») ; plus de `reverb_send` ni de `return_gain` | C'est ainsi que la MOTU les stocke (dump) |
 | D22 | Mode d'EQ = octet brut (`u8`) + noms côté UI ; pas de bypass global d'EQ (`eq_bypass`, `/eq/{ch}/bypass` retirés) | Valeurs inconnues conservées ; le matériel n'a qu'un bypass par bande |
-| D23 | Encodeurs DSP écrits et testés (`props::encode_unverified`) mais **non branchés** sur `encode` : `is_mapped` faux, rien n'est envoyé | Activation une fonction à la fois après un essai sur la carte |
+| D23 | Encodeurs DSP écrits et testés ; **seul l'EQ de sortie est actif** (`props::encode` → `encode_output_eq`, le slot 1 inutilisé n'est jamais écrit). EQ d'entrée, compresseur, gate, réverbe et horloge restent dans `props::encode_unverified`, **non branchés** : `is_mapped` faux, rien n'est envoyé | Activation une fonction à la fois après un essai sur la carte |
 | D24 | Mises à jour **déclenchées par l'utilisateur depuis l'UI**, par canal de release (`[update] channel` = `stable` ou `prerelease`, dans `config.toml`, pas dans l'UI) ; jamais automatiques (arbitrage mainteneur 2026-11-15, remplace D16). Un timer root quotidien (`cuemix-update --check --status-file`) écrit le statut ; le bouton *Install* ne fait que créer un fichier de demande vide que l'unité `.path` root transforme en `cuemix-update` | Le service web reste non-root et sans accès réseau sortant ; seul le dernier release officiel du canal (sha256, santé, retour arrière) peut être installé, et seulement à la demande d'une personne |
 | D25 | Meters : trame 6000 brute relayée (`meter_raw`, ≈ 30/s) et décodée **côté client** avec la table du bus de patch du mk5 (`frontend/src/lib/meterMap.ts`), confirmée au *Meter probe* et par la table de CueMix 5 | Le serveur reste agnostique ; d'autres modèles = une autre table |
 | D26 | Onglet *Routing* supprimé ; `route` et la matrice restent dans l'état (inertes) pour la compatibilité des présets | La matrice booléenne ne correspond pas au matériel (5010 = une source par sortie) ; les mixes couvrent l'usage |

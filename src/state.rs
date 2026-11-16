@@ -149,6 +149,52 @@ pub mod eq_mode {
     pub const HIGH_PASS: u8 = 3;
 }
 
+/// Output EQ slot that does not exist on the device (slot 0 = Main L-R,
+/// 1 = unused, 2..=9 = Line 3..10, 10 = Phones L-R, 11 = Reverb).
+pub const OUTPUT_EQ_UNUSED_SLOT: u16 = 1;
+
+/// Is `mode` a filter type CueMix 5 offers on output EQ band `band`? Band 0:
+/// bell / low shelf / high-pass, band 1: bell, band 2: bell / high shelf.
+/// Single source of truth for the state (`apply`) and the device encoder.
+pub fn output_eq_mode_allowed(band: u8, mode: u8) -> bool {
+    match band {
+        0 => matches!(
+            mode,
+            eq_mode::BELL | eq_mode::LOW_SHELF | eq_mode::HIGH_PASS
+        ),
+        1 => mode == eq_mode::BELL,
+        2 => matches!(mode, eq_mode::BELL | eq_mode::HIGH_SHELF),
+        _ => false,
+    }
+}
+
+/// Refuses a change asked by a client (web UI, OSC) that the device would
+/// never receive: the unused output EQ slot, or a filter type the output EQ
+/// band does not offer. Checked on the command path only: values reported by
+/// the device itself always go into the state, the card being the reference.
+pub fn check_writable(param: &Param) -> Result<(), StateError> {
+    let Some((true, ch, band, field)) = eq_parts(param) else {
+        return Ok(());
+    };
+    if ch == OUTPUT_EQ_UNUSED_SLOT {
+        return Err(StateError::Index {
+            what: "unused output eq slot",
+            index: usize::from(ch),
+            len: OUTPUT_EQ_OUTPUTS,
+        });
+    }
+    if let EqField::Mode(mode) = field {
+        if !output_eq_mode_allowed(band, mode) {
+            return Err(StateError::Index {
+                what: "output eq mode for this band",
+                index: usize::from(mode),
+                len: 4,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// One EQ band, as the hardware stores it (props `1002..=1006` for the
 /// inputs, `1022..=1026` for the outputs).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -199,13 +245,13 @@ impl EqBand {
         ]
     }
 
-    /// Output EQ defaults (three bells; the dump's output values are not
-    /// recorded, so these are neutral placeholders).
+    /// Output EQ defaults of every slot (CueMix 5 values): low shelf 60 Hz,
+    /// bell 800 Hz, high shelf 14 kHz, 0 dB, Q 1, not bypassed.
     fn output_defaults() -> Vec<EqBand> {
         vec![
-            Self::at(eq_mode::BELL, 100.0),
-            Self::at(eq_mode::BELL, 1_000.0),
-            Self::at(eq_mode::BELL, 10_000.0),
+            Self::at(eq_mode::LOW_SHELF, 60.0),
+            Self::at(eq_mode::BELL, 800.0),
+            Self::at(eq_mode::HIGH_SHELF, 14_000.0),
         ]
     }
 }
@@ -933,8 +979,31 @@ impl MotuState {
             self.output_trims = vec![0.0; OUTPUT_TRIMS];
         }
         self.check_shape()?;
+        // Output EQ values `apply` rejects (unused slot, filter type the band
+        // does not offer) are reset to the defaults instead of failing the
+        // whole preset.
+        let defaults = EqBand::output_defaults();
+        for (slot, bands) in self.output_eq.iter_mut().enumerate() {
+            let unused = slot == usize::from(OUTPUT_EQ_UNUSED_SLOT);
+            for (band, (b, d)) in bands.iter_mut().zip(&defaults).enumerate() {
+                let allowed = u8::try_from(band).is_ok_and(|n| output_eq_mode_allowed(n, b.mode));
+                if unused {
+                    *b = *d;
+                } else if !allowed {
+                    b.mode = d.mode;
+                }
+            }
+        }
         for p in self.all_params() {
-            self.apply(&p)?;
+            match self.apply(&p) {
+                Ok(_) => {}
+                // Never written by the device, so never part of a preset.
+                Err(StateError::Index {
+                    what: "unused output eq slot",
+                    ..
+                }) => {}
+                Err(e) => return Err(e),
+            }
         }
         Ok(self)
     }
@@ -2035,8 +2104,86 @@ mod dsp_param_tests {
         assert_eq!(s.gates.len(), 2);
         assert_eq!(s.output_eq.len(), OUTPUT_EQ_OUTPUTS);
         assert!(s.output_eq.iter().all(|c| c.len() == OUTPUT_EQ_BANDS));
+        let modes: Vec<u8> = s.output_eq[0].iter().map(|b| b.mode).collect();
+        assert_eq!(
+            modes,
+            [eq_mode::LOW_SHELF, eq_mode::BELL, eq_mode::HIGH_SHELF]
+        );
+        let freqs: Vec<f64> = s.output_eq[7].iter().map(|b| b.freq_hz).collect();
+        assert_eq!(freqs, [60.0, 800.0, 14_000.0]);
         assert_eq!(s.reverb.decay, 86.0);
         assert!(s.check_shape().is_ok());
+    }
+
+    #[test]
+    fn output_eq_rejects_what_the_device_never_gets() {
+        let mut s = MotuState::default();
+        // Unused slot 1: rejected, state untouched.
+        for p in [
+            Param::OutputEqGain {
+                ch: 1,
+                band: 0,
+                db: 3.0,
+            },
+            Param::OutputEqBypass {
+                ch: 1,
+                band: 2,
+                on: true,
+            },
+        ] {
+            assert!(
+                matches!(check_writable(&p), Err(StateError::Index { .. })),
+                "{p:?}"
+            );
+        }
+        // Filter type the band does not offer.
+        for (band, mode) in [(0u8, 2u8), (1, 1), (1, 3), (2, 1), (2, 3), (0, 255)] {
+            let p = Param::OutputEqMode { ch: 0, band, mode };
+            assert!(
+                matches!(check_writable(&p), Err(StateError::Index { .. })),
+                "{p:?}"
+            );
+        }
+        assert_eq!(s, MotuState::default());
+        // The device itself is the reference: what it reports is kept.
+        let dev = Param::OutputEqGain {
+            ch: 1,
+            band: 0,
+            db: 3.0,
+        };
+        assert_eq!(s.apply(&dev), Ok(Some(dev)));
+        s = MotuState::default();
+        // Allowed ones go through; the input EQ keeps accepting any mode.
+        let ok = Param::OutputEqMode {
+            ch: 0,
+            band: 0,
+            mode: eq_mode::HIGH_PASS,
+        };
+        assert_eq!(s.apply(&ok), Ok(Some(ok)));
+        assert!(s
+            .apply(&Param::InputEqMode {
+                ch: 0,
+                band: 1,
+                mode: 7
+            })
+            .is_ok());
+    }
+
+    #[test]
+    fn normalized_repairs_invalid_output_eq_instead_of_failing() {
+        let mut s = MotuState::default();
+        s.output_eq[1][0].gain_db = 9.0;
+        s.output_eq[1][1].bypass = true;
+        s.output_eq[4][1].mode = eq_mode::HIGH_PASS;
+        s.output_eq[4][2].mode = 200;
+        s.output_eq[4][2].gain_db = 5.0;
+        let n = s.normalized();
+        let n = n.unwrap_or_default();
+        let fresh = EqBand::output_defaults();
+        assert_eq!(n.output_eq[1], fresh, "unused slot reset");
+        assert_eq!(n.output_eq[4][1].mode, fresh[1].mode);
+        assert_eq!(n.output_eq[4][2].mode, fresh[2].mode);
+        assert_eq!(n.output_eq[4][2].gain_db, 5.0, "other fields kept");
     }
 
     #[test]

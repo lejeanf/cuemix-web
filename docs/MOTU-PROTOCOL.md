@@ -29,9 +29,9 @@ Pas d'accès à `app.asar` de CueMix 5 : les IDs viennent de `motu-mk5-linux` qu
 
 Conversion volume (décision D8, unités natives) : `MainVol`/`PhonesVol` portent des **dB entiers -100..0** dans l'état ; le codec fait une copie directe `octet = -dB` (saturé à 0 dB : le trim ne sait qu'atténuer). La loi `0..1` n'existe qu'en OSC et dans l'UI. Non vérifié : si 100 = -inf ou -100 dB. Rappel de préset : trims et +48V ne sont **jamais** réécrits (règle 6 ci-dessous, arbitrage mainteneur).
 
-## Propriétés DSP / réverbe / horloge — lues sur le matériel, écriture non active
+## Propriétés DSP / réverbe / horloge — lues sur le matériel ; seul l'EQ de sortie est écrit
 
-**Lu dans le dump ; écritures non vérifiées.** Layouts déduits du dump de connexion d'un UltraLite-mk5 (firmware 2.0.8, 2026-11-15) : les motifs d'index sont sans ambiguïté (valeurs par défaut répétées par canal). `props::decode` les lit ; `props::encode_unverified` sait les encoder (testé en aller-retour), mais **`props::encode` ne l'appelle pas** : `is_mapped` reste faux et rien n'est écrit. Chaque fonction sera activée séparément après un essai sur la carte.
+**Lu dans le dump ; écritures non vérifiées.** Layouts déduits du dump de connexion d'un UltraLite-mk5 (firmware 2.0.8, 2026-11-15) : les motifs d'index sont sans ambiguïté (valeurs par défaut répétées par canal). `props::decode` les lit. **L'EQ de sortie est actif** : `props::encode` l'écrit (valeurs bornées par `dsp_limits`). Pour les autres (EQ d'entrée, gate, compresseur, réverbe, horloge), `props::encode_unverified` sait les encoder (testé en aller-retour) mais **`props::encode` ne l'appelle pas** : `is_mapped` reste faux et rien n'est écrit. Chaque fonction sera activée séparément après un essai sur la carte.
 
 | Param | prop_id | index | payload | Unité / remarque (valeurs du dump) |
 |---|---|---|---|---|
@@ -39,8 +39,8 @@ Conversion volume (décision D8, unités natives) : `MainVol`/`PhonesVol` porten
 | `InputEqBypass{ch,band,on}` | 1003 | idem | U8 | 1 = bypass (tout à 0 dans le dump) |
 | `InputEqFreq{ch,band,hz}` | 1004 | idem | Int32 (U32 lu signé) | Hz entiers (défauts 45 / 350 / 3500 / 7000) |
 | `InputEqGain{ch,band,db}` | 1005 | idem | 8.24 | dB (ex. −2,0, 2,0, −12,7) |
-| `InputEqBw{ch,band,octaves}` | 1006 | idem | 8.24 | octaves (1,0 partout) |
-| `OutputEq{Mode,Bypass,Freq,Gain,Bw}` | 1022–1026 | `out × 3 + band` (12 sorties × 3 bandes) | comme 1002–1006 | mêmes unités |
+| `InputEqBw{ch,band,octaves}` | 1006 | idem | 8.24 | **Q** (0,45–10 ; 1,0 partout) ; le champ s'appelle `octaves` pour la compatibilité |
+| `OutputEq{Mode,Bypass,Freq,Gain,Bw}` | 1022–1026 | `slot × 3 + band` (12 slots × 3 bandes), **actif en écriture** | comme 1002–1006 | mode : 0 cloche, 1 shelf grave, 2 shelf aigu, 3 passe-haut (écrit seulement si CueMix l'offre sur la bande : bande 0 = 0/1/3, bande 1 = 0, bande 2 = 0/2) ; bypass : 1 = bypassé (défaut 0) ; Hz entiers ; gain dB ; 1026 = **Q** (défaut 1, plage CueMix 0,45–10), pas des octaves. Défauts CueMix de chaque slot : shelf grave 60 Hz, cloche 800 Hz, shelf aigu 14 kHz, 0 dB |
 | `GateBypass{ch,on}` | 1007 | `ch` 0–1 (micros) | U8 | 1 = bypass |
 | `GateThreshold{ch,db}` | 1008 | idem | 8.24 | dB (−46) |
 | `GateAttack{ch,ms}` / `GateRelease` | 1009 / 1010 | idem | Int16 | ms (10 / 1000) |
@@ -55,11 +55,13 @@ Conversion volume (décision D8, unités natives) : `MainVol`/`PhonesVol` porten
 | `SampleRate{rate}` | 10 | 0 | U32 | Hz (48000) ; débit inconnu → ignoré |
 | `ClockSource{source}` | 11 | 0 | U8 | 0 = S/PDIF, 2 = Optique, 3 = Interne ; autre code → ignoré |
 
+Slots de l'EQ de sortie (d'après la table de propriétés de CueMix 5) : les 12 slots ne sont **pas** 12 sorties mono. 0 = Main L-R (un seul slot stéréo), 1 = inutilisé, 2–9 = Line 3–10, 10 = Phones L-R, 11 = EQ du processeur de réverbe.
+
 Réverbe : les **départs** sont les faders du mix « Reverb » (mix 6 = bus mono 12-13 de la matrice, déjà lus comme `MixVol{bus:6,..}`) et le **retour** est l'entrée de mixage 30-31 (« Reverb L/R ») dans chaque mix. Il n'y a donc pas de propriété de départ/retour séparée. `1027` (niveau de sortie des bus, 14 entrées 8.24 linéaire) n'est pas mappé. Plages des params (`state::dsp_limits`) **provisoires**, choisies larges pour ne pas déformer une valeur lue.
 
 ### Non mappés en écriture
 
-Pas de trame : `MixVol/MixPan/MixMute/MixSolo` et les params DSP / réverbe / horloge ci-dessus (lus seulement), `Route`, `Dim`, `SpeakerB`, et tout canal hors plage documentée.
+Pas de trame : `MixVol/MixPan/MixMute/MixSolo` et les params EQ d'entrée / gate / compresseur / réverbe / horloge ci-dessus (lus seulement), le slot 1 de l'EQ de sortie (inutilisé), `Route`, `Dim`, `SpeakerB`, et tout canal hors plage documentée.
 - Mix (1016 fader 8.24 linéaire, 1017 pan 8.24 `0..1` avec 0,5 = centre, 1018 solo, 1019 mute ; 448 entrées) : **index = `bus × 32 + entrée`** (déduit du dump du 2026-11-15 : la diagonale « bus k ← retour USB k » tombe exactement sur `33k + 18`). Bus mono par paires : 0-1 Main 1-2, 2-3 Line 3-4, 4-5 Line 5-6, 6-7 Line 7-8, 8-9 Line 9-10, **10-11 Phones**, 12-13 Reverb. Une entrée mono est portée par le bus gauche du mix ; une paire stéréo par le bus gauche (entrée gauche) et le bus droit (entrée droite). Écriture : même layout que la lecture (`motu::identify::encode_mix`) ; une tranche stéréo de l'UI écrit les deux moitiés (fader, mute, solo), le pan seulement à gauche. **À confirmer sur la carte** : l'écriture elle-même et le sens du pan (0 = gauche supposé).
 - Routage : 5010 est une table de 80 octets de sémantique inconnue, pas une matrice booléenne.
 - EQ : 1003 = bypass **par bande** (index `ch × 4 + bande`, voir ci-dessus) ; pas de bypass global (le `eq_bypass` de cuemix-web ≤ 0.3 a été retiré).
@@ -69,7 +71,7 @@ Pas de trame : `MixVol/MixPan/MixMute/MixSolo` et les params DSP / réverbe / ho
 
 ## Réponses aux questions du mainteneur
 
-- **Q1 (fréquences)** : EQ/HPF en **entier Int32 en Hz brut** (`input_eq_freq` 1004, `output_eq_freq` 1024), pas en 8.24. Gain EQ (1005) et largeur de bande en octaves (1006) sont en 8.24. HPF = un mode de bande (`input_eq_mode` 3 = highpass), pas de propriété dédiée. Source : mk5-linux `properties.rs`. ✅ Décodé (`ValueKind::U32` lu en Int32) depuis le dump du 2026-11-15 (layout `ch × 4 + bande`).
+- **Q1 (fréquences)** : EQ/HPF en **entier Int32 en Hz brut** (`input_eq_freq` 1004, `output_eq_freq` 1024), pas en 8.24. Gain EQ (1005) et Q de la bande (1006, champ `octaves`) sont en 8.24. HPF = un mode de bande (`input_eq_mode` 3 = highpass), pas de propriété dédiée. Source : mk5-linux `properties.rs`. ✅ Décodé (`ValueKind::U32` lu en Int32) depuis le dump du 2026-11-15 (layout `ch × 4 + bande`).
 - **Q2 (dimensions)** : entrées de mixage **32**, bus **14** (= 7 mixes stéréo, `mix_output_stereo` 14), préamps : gain sur **8** entrées (2 micros avec pad/48V + 6 lignes), EQ/compresseur sur 8 canaux, gate sur 2 ; noms : 18 entrées / 22 sorties (routage 18x22, cohérent avec `Topology` mais la table réelle est un patch de 80 octets), `output_trim` 12 sorties, EQ de sortie 3 bandes x 12. Appliqué : `Topology::ULTRALITE_MK5` = 32 entrées mixer, 8 préamplis, 2 entrées micro (décision D11).
 - **Q4 (volumes mix = gain linéaire 8.24 ?)** : **non confirmé, non réfuté**. `mix_fader` est de type Float (8.24) ; les sources ne disent pas si c'est linéaire ou dB (seul indice : `gate_threshold` "0=-inf, 1=0dB", donc plutôt linéaire). Par contre, volumes Main et Phones ne sont **pas** en 8.24 : octets d'atténuation en dB (voir ci-dessus), ce qui contredit l'hypothèse Q4 pour ces deux paramètres.
 
@@ -118,7 +120,7 @@ Pour vérifier une autre carte, cuemix-web transmet la trame brute (`ServerEvent
 
 ## Inconnus à lever sur matériel
 
-Écriture des params DSP / réverbe / horloge (layouts connus, encodeurs écrits mais non actifs) ; sens du pan ; numéros de preset de réverbe ; linéarité de `mix_fader` ; points 78-79 des meters ; chemin WebSocket selon firmware (sans chemin : confirmé sur un appareil, firmware 2.0.8).
+Écriture de l'EQ de sortie sur la carte (activée, à confirmer) et des autres params DSP / réverbe / horloge (layouts connus, encodeurs écrits mais non actifs) ; sens du pan ; numéros de preset de réverbe ; linéarité de `mix_fader` ; points 78-79 des meters ; chemin WebSocket selon firmware (sans chemin : confirmé sur un appareil, firmware 2.0.8).
 
 ## Table des propriétés de CueMix 5 (UltraLite-mk5)
 
