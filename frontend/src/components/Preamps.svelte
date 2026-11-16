@@ -43,9 +43,7 @@
 {#if st}
   <div class="groups">
     {#each groups as g (g.title)}
-      <section class="group" aria-label={g.title}>
-        <h3>{g.title}</h3>
-        <div class="chans">
+      <div class="chans" role="group" aria-label={g.title}>
           {#each g.items as { pa, ch } (ch)}
             {@const mic = ch < nMic}
             <div class="ch" aria-label="Preamp {store.labelName(ch)}" role="group">
@@ -110,18 +108,19 @@
               {/if}
             </div>
           {/each}
-        </div>
-      </section>
+      </div>
     {/each}
     {#if st.topology.mixer_inputs >= 18}
-      <section class="group" aria-label="S/PDIF">
-        <h3>S/PDIF</h3>
+      <div class="ch" role="group" aria-label="S/PDIF">
+        <div class="bar"></div>
+        <span class="nm">S/PDIF</span>
         <div class="dig" title="S/PDIF input level">
           {#each SPDIF_IN as ch (ch)}<Meter index={METER_SLOT.mixerInput(ch)} label="S/PDIF {ch - 7} meter" />{/each}
         </div>
-      </section>
-      <section class="group" aria-label="Optical in">
-        <h3>Optical in</h3>
+      </div>
+      <div class="ch" role="group" aria-label="Optical in">
+        <div class="bar"></div>
+        <span class="nm">Optical in</span>
         <div class="optrow">
           <div class="fmt" role="radiogroup" aria-label="Optical input format">
             <span class="lbl">Format</span>
@@ -141,7 +140,7 @@
             {#each opticalShown as ch (ch)}<Meter index={METER_SLOT.mixerInput(ch)} label="Optical {ch - 9} meter" />{/each}
           </div>
         </div>
-      </section>
+      </div>
     {/if}
   </div>
 {/if}
@@ -151,24 +150,14 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    align-items: flex-start;
+    align-items: stretch;
   }
-  .group {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 6px 8px 8px;
-  }
-  h3 {
-    margin: 0 0 4px;
-    font-size: 13px;
-    color: var(--text-dim);
-    font-weight: 600;
-  }
+  /* Invisible holder: keeps mics and lines together when the row wraps. */
   .chans {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 8px;
+    align-items: stretch;
   }
   .ch {
     position: relative;
@@ -178,8 +167,9 @@
     align-items: center;
     gap: 3px;
     padding: 0 4px 5px;
+    background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius);
     overflow: visible;
   }
   .bar {
@@ -197,15 +187,17 @@
     white-space: nowrap;
   }
   .dig {
+    flex: 1;
     display: flex;
     gap: 3px;
-    height: 96px;
+    min-height: 60px;
     padding: 2px 4px;
   }
   .dig :global(canvas) {
     min-height: 0;
   }
   .optrow {
+    flex: 1;
     display: flex;
     gap: 10px;
     align-items: stretch;
@@ -235,6 +227,9 @@
   .row {
     display: flex;
     gap: 3px;
+  }
+  .btns {
+    margin-top: auto;
   }
   .b {
     min-width: 24px;
