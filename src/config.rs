@@ -21,6 +21,7 @@ pub struct Config {
     pub storage: Storage,
     pub web: Web,
     pub update: Update,
+    pub measure: Measure,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -133,6 +134,46 @@ impl Default for Update {
             request_file: PathBuf::from("/var/lib/cuemix-web/update-request"),
             result_file: PathBuf::from("/var/lib/cuemix-web/update-result"),
         }
+    }
+}
+
+/// Room test: noise played by the user's MPD (see `src/measure`).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Measure {
+    /// MPD protocol address (`host:port`, plain TCP). Empty = feature disabled.
+    pub mpd: String,
+    /// MPD password; keep it in `config.toml` only. Never logged.
+    pub mpd_password: String,
+    /// URL MPD fetches the noise from; empty = this host as seen from MPD.
+    pub noise_url: String,
+    /// Mixer inputs (0-based) that carry the MPD signal; default Line 7-8.
+    pub source_inputs: Vec<u16>,
+    /// The test ends and everything is restored after this many seconds.
+    pub max_seconds: u64,
+}
+
+impl Default for Measure {
+    fn default() -> Self {
+        Self {
+            mpd: String::new(),
+            mpd_password: String::new(),
+            noise_url: String::new(),
+            source_inputs: vec![6, 7],
+            max_seconds: 60,
+        }
+    }
+}
+
+impl std::fmt::Debug for Measure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Measure")
+            .field("mpd", &self.mpd)
+            .field("mpd_password", &"<hidden>")
+            .field("noise_url", &self.noise_url)
+            .field("source_inputs", &self.source_inputs)
+            .field("max_seconds", &self.max_seconds)
+            .finish()
     }
 }
 
@@ -314,6 +355,21 @@ mod tests {
         // The shipped example has no unknown keys.
         let example = Config::parse_with_warnings(include_str!("../config.example.toml"));
         assert_eq!(example.map(|(_, u)| u).ok(), Some(vec![]));
+    }
+
+    #[test]
+    fn measure_defaults_and_hidden_password() {
+        let cfg = Config::from_toml_str(
+            "[measure]
+mpd = \"192.0.2.20:6600\"
+mpd_password = \"s3cret\"",
+        )
+        .unwrap_or_default();
+        assert_eq!(cfg.measure.mpd, "192.0.2.20:6600");
+        assert_eq!(cfg.measure.source_inputs, vec![6, 7]);
+        assert_eq!(cfg.measure.max_seconds, 60);
+        assert!(!format!("{cfg:?}").contains("s3cret"));
+        assert!(Config::default().measure.mpd.is_empty());
     }
 
     #[test]

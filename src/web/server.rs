@@ -5,6 +5,7 @@
 //!   client → server: [`Command`]; server → client: [`ServerEvent`].
 //!   `Snapshot`, `Labels`, `Presets` are always sent first after the upgrade.
 //! - `GET /api/health` returns `{"status":"ok","version":…}`.
+//! - `GET /api/measure/noise.wav` streams the room-test pink noise (`crate::measure`).
 //! - every other path serves the embedded `frontend/dist/` bundle, falling
 //!   back to `index.html` for client-side routes. Only embedded names are
 //!   ever served, so path traversal is impossible.
@@ -80,6 +81,10 @@ pub fn router(engine: EngineHandle, cfg: WebConfig) -> Router {
     Router::new()
         .route("/ws", get(ws_handler))
         .route("/api/health", get(health))
+        .route(
+            "/api/measure/noise.wav",
+            get(crate::measure::noise::handler),
+        )
         .route("/api/update", get(super::update::status))
         .route(
             "/api/update/install",
@@ -368,6 +373,8 @@ async fn session(mut socket: WebSocket, engine: EngineHandle, me: Origin) {
             }
         }
     }
+    // A room test started from this connection ends with it.
+    let _ = engine.client_gone(me).await;
     let close = Message::Close(Some(CloseFrame {
         code: 1000,
         reason: "bye".into(),

@@ -2,7 +2,7 @@
 // edits with a per-parameter 25 ms send throttle.
 import { meterBank } from './meters';
 import { hasMk5Meters, mk5MeterLevels } from './meterMap';
-import type { ChannelLabel, Command, DeviceInfo, EqBand, Param, ServerEvent } from './protocol';
+import type { ChannelLabel, Command, DeviceInfo, EqBand, MeasureInfo, Param, ServerEvent } from './protocol';
 import { DSP_LIMITS } from './protocol';
 import { applyEvent, applyParam, initialClientState, type ClientState } from './reducer';
 import { ParamSender } from './sender';
@@ -72,6 +72,25 @@ class Store {
     } catch {
       /* not remembered, still applied */
     }
+  }
+  /** Room measurement state from the server (`unavailable` until it says otherwise). */
+  measure: MeasureInfo = $state({ state: 'unavailable', source: [] });
+  /** The room test panel is open. */
+  roomOpen = $state(false);
+  /** Main output EQ bands (slot 0) from before the last applied room correction, for Undo. */
+  roomUndo: EqBand[] | null = $state(null);
+  /** The room test can be offered: the server has it configured and we are connected. */
+  get roomTestAvailable(): boolean {
+    return this.measure.state !== 'unavailable';
+  }
+  /** A `measure_stop` could not be sent (socket down): sent on the next connect. */
+  private measureStopPending = false;
+  measureStart(): void {
+    this.measureStopPending = false;
+    this.sendRaw({ cmd: 'measure_start' });
+  }
+  measureStop(): void {
+    this.measureStopPending = !this.sendRaw({ cmd: 'measure_stop' });
   }
   /** Latest raw meter frame (meter probe); not deep-reactive. */
   meterRaw: number[] | null = $state.raw(null);
@@ -198,6 +217,7 @@ class Store {
     ws.onopen = () => {
       this.attempt = 0;
       this.socketOpen = true;
+      if (this.measureStopPending) this.measureStop();
       // Re-read on every (re)connect: the server may have just been updated.
       void this.refreshVersion();
     };
@@ -231,6 +251,10 @@ class Store {
     if (ev.event === 'meters') {
       // Hot path: bypass reactive state entirely, feed the canvas loop.
       meterBank.push(ev.levels);
+      return;
+    }
+    if (ev.event === 'measure') {
+      this.measure = { state: ev.state, source: [...(ev.source ?? [])], message: ev.message, until: ev.until };
       return;
     }
     applyEvent(this.c, ev);

@@ -69,6 +69,7 @@ changements venant du matériel sont appliqués et diffusés, **jamais renvoyés
 | `src/osc/bridge.rs` | UDP `rosc`, pairs (TTL 10 min, max 64), bundles ≤ 8 KiB | ✅ |
 | `src/web/server.rs` | Axum : `/ws`, `/api/health`, SPA embarquée, `X-Forwarded-For` | ✅ |
 | `src/web/update.rs` | `GET /api/update` (lit le statut écrit par le timer root), `POST /api/update/install` (crée seulement le fichier de demande ; en-tête `x-cuemix-update` exigé) | ✅ |
+| `src/measure/` | Test de pièce (D28) : `mod.rs` (tâche pilotée par l'engine : instantané → silence des autres entrées → MPD → attente → restauration exacte, chien de garde), `mpd.rs` (client MPD TCP texte, délais 2 s), `noise.rs` (`GET /api/measure/noise.wav`, bruit rose 90 s en flux) | ✅ |
 | `src/zeroconf.rs` | Annonce mDNS `http://<mdns_hostname>.local:<port>` | ✅ |
 | `tests/` | Mock MOTU + intégration `mock_motu`, `motu_client`, `osc_bridge`, `web_server` | ✅ |
 
@@ -178,9 +179,11 @@ Client → serveur (`Command`, tag `cmd`) :
 {"cmd":"import_preset","name":"from file","text":"{\"schema_version\":2,\"state\":{…}}"}
 {"cmd":"list_presets"}
 {"cmd":"set_label","ch":2,"label":{"name":"Vox","color":"#06B6D4"}}
+{"cmd":"measure_start"}
+{"cmd":"measure_stop"}
 ```
 
-Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`, `labels`, `presets`.
+Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`, `labels`, `presets`, `measure`.
 
 ```json
 {"event":"snapshot","state":{…},"session":{"active_preset":null,"modified":false,"connection":"demo"}}
@@ -190,8 +193,18 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 {"event":"presets","names":["default","live"]}
 {"event":"labels","channels":{"2":{"name":"Vox","color":"#06B6D4"}}}
 {"event":"meters","levels":[0.0,0.12,…]}
+{"event":"measure","state":"playing","source":[6,7],"until":"2026-11-16T20:15:30Z"}
 {"event":"error","message":"…"}
 ```
+
+`measure` : `state` ∈ `unavailable` (pas de `[measure] mpd`, aucune MOTU identifiée ou liaison pas `online`), `idle`,
+`starting`, `quiet` (la musique de l'utilisateur est mise en pause et la pièce reste silencieuse 3,5 s : le téléphone enregistre le bruit de fond ; `until` = fin de cette phase), `playing` (MPD a confirmé la lecture du bruit), `restoring`, `error` (avec `message` ;
+la restauration est déjà faite, `idle` suit). `source` = entrées de mixage portant le signal MPD ;
+`until` (RFC 3339 UTC) = fin de la phase `quiet`, ou heure d'arrêt du chien de garde en `playing`. Séquence : `starting` → `quiet` → `playing` → `restoring` → `idle`. `measure_start`
+hors `idle` est refusé par un `error` au seul client demandeur. Le test s'arrête (comme `measure_stop`) quand le client WebSocket qui l'a démarré se déconnecte ; la déconnexion d'un autre client ne change rien (le chien de garde reste le filet de sécurité). L'`engine` mémorise le dernier état
+(rejoué à chaque connexion) et transmet `measure_start/stop` à la tâche `measure` ; celle-ci écrit
+ses changements de mixage par `Command::Set` d'origine `System` : l'état, la carte et tous les
+clients restent cohérents.
 
 `param` : `mix_vol` (`gain`), `mix_pan` (`value`), `mix_mute`, `mix_solo`, `main_vol` (`db`),
 `preamp_gain` (`db`), `phantom`, `pad`, `phase`, `route`, `dim`, `mono`, `speaker_b`,
@@ -315,6 +328,7 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 | D25 | Meters : trame 6000 brute relayée (`meter_raw`, ≈ 30/s) et décodée **côté client** avec la table du bus de patch du mk5 (`frontend/src/lib/meterMap.ts`), confirmée au *Meter probe* et par la table de CueMix 5 | Le serveur reste agnostique ; d'autres modèles = une autre table |
 | D26 | Onglet *Routing* supprimé ; `route` et la matrice restent dans l'état (inertes) pour la compatibilité des présets | La matrice booléenne ne correspond pas au matériel (5010 = une source par sortie) ; les mixes couvrent l'usage |
 | D27 | Valeur 1006/1026 = **Q** (0,45-10) et non une largeur en octaves ; le champ garde le nom `bw_oct` pour les présets | Table et UI de CueMix 5 |
+| D28 | Bruit de test de pièce fourni par le **MPD de l'utilisateur** (`[measure] mpd`, sortie analogique reliée à Line 7-8) et servi par `GET /api/measure/noise.wav` ; la carte n'a **aucun générateur** (table des propriétés de CueMix 5 vérifiée). Pendant le test : instantané puis silence des autres entrées du Main (bus 0), solos coupés, EQ de sortie Main (slot 0) et EQ d'entrée des sources en bypass, via les `Set` normaux ; restauration exacte des seules valeurs changées (une entrée déjà coupée reste coupée), puis reprise de MPD (morceau, position, pause ; MPD est mis en pause par le serveur pendant la phase `quiet`, un arrêt à ce stade fait simplement `pause 0`) ; chien de garde `max_seconds` (20-80 s) ; écritures « silence d'abord » (mutes/solos qui coupent, puis le reste, puis les démutes). L'analyse (micro du téléphone) se fait dans le navigateur | Pas de nouvelle fonction matériel ni de dépendance ; le bruit passe par la chaîne réelle (entrée → mixage → sortie) ; toute erreur réseau MPD aboutit à une restauration propre puis `error` → `idle`. La liste de restauration est écrite dans `measure-restore.json` (à côté de `labels.json`) avant tout changement et gardée jusqu'à ce que la liaison soit restée `online` 3 s après l'envoi : perte de liaison, débranchement, arrêt ou crash en cours de test → restauration rejouée dès que la MOTU est de nouveau `online` (y compris au redémarrage). Limite : après un crash, MPD n'est pas restauré |
 
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
 

@@ -162,6 +162,9 @@
           </label>
           <span class="for">{eqSlotName(eqOut)}</span>
           {#if eqHint}<span class="sub">{eqHint}</span>{/if}
+          {#if store.roomTestAvailable}
+            <button class="o measure" disabled={off} onclick={() => (store.roomOpen = true)}>{S.measureRoom}</button>
+          {/if}
         </div>
         {#if current}<p class="info">{current.info}</p>{/if}
         <div class="eqbody">
@@ -297,6 +300,12 @@
     border: 1px solid var(--border);
     border-radius: 5px;
     cursor: pointer;
+  }
+  .measure {
+    margin-left: auto;
+  }
+  .o:disabled {
+    opacity: 0.45;
   }
   .o.act {
     color: var(--cyan);

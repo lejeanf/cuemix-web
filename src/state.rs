@@ -838,6 +838,11 @@ pub enum Command {
         ch: u16,
         label: Option<ChannelLabel>,
     },
+    /// Start the room test (`[measure]` in the config): noise from the user's
+    /// MPD, other inputs muted, EQ flat, everything restored afterwards.
+    MeasureStart,
+    /// End the room test early (idempotent).
+    MeasureStop,
 }
 
 /// Everything the core broadcasts.
@@ -866,8 +871,45 @@ pub enum ServerEvent {
     /// meter point), for the meter probe used to map the layout. Rate-limited
     /// by the device client (~15 Hz).
     MeterRaw { raw: Vec<u8> },
+    /// Room-test state (sent on connect and at every change).
+    Measure(MeasureStatus),
     /// Request rejected; delivered only to the requesting client.
     Error { message: String },
+}
+
+/// Where the room test stands (`ServerEvent::Measure`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MeasureState {
+    /// `[measure] mpd` not configured, no device identified, or link not online.
+    #[default]
+    Unavailable,
+    Idle,
+    /// Mixer snapshot taken; muting, flattening, asking MPD to play.
+    Starting,
+    /// The user's music is paused and the room is quiet: the phone records its
+    /// background now (a few seconds, then `Playing`).
+    Quiet,
+    /// The noise plays (MPD confirmed): the phone records now.
+    Playing,
+    /// Undoing everything.
+    Restoring,
+    /// Failed (see `message`); what could be restored has been. `Idle` follows.
+    Error,
+}
+
+/// Payload of `ServerEvent::Measure`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MeasureStatus {
+    pub state: MeasureState,
+    /// Mixer inputs that carry the MPD signal (`[measure] source_inputs`).
+    #[serde(default)]
+    pub source: Vec<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// RFC 3339 UTC time at which the watchdog ends a running test.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
 }
 
 /// Top-bar data: active preset and whether the live state diverges from it.

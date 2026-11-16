@@ -222,7 +222,9 @@ export type Command =
   | { cmd: 'save_preset'; name: string }
   | { cmd: 'import_preset'; name: string; text: string }
   | { cmd: 'list_presets' }
-  | { cmd: 'set_label'; ch: number; label: ChannelLabel | null };
+  | { cmd: 'set_label'; ch: number; label: ChannelLabel | null }
+  | { cmd: 'measure_start' }
+  | { cmd: 'measure_stop' };
 
 /** Server → client. On connect: `snapshot`, then `labels`, then `presets`. */
 export type ServerEvent =
@@ -235,7 +237,20 @@ export type ServerEvent =
   | { event: 'meters'; levels: number[] }
   /** Raw meter frame from the MOTU (prop 6000), for the meter probe. */
   | { event: 'meter_raw'; raw: number[] }
+  | ({ event: 'measure' } & MeasureInfo)
   | { event: 'error'; message: string };
+
+/** Room measurement (noise played by an MPD server, see docs). `unavailable` = not configured. */
+export type MeasureState = 'unavailable' | 'idle' | 'starting' | 'quiet' | 'playing' | 'restoring' | 'error';
+
+export interface MeasureInfo {
+  state: MeasureState;
+  /** 0-based mixer inputs that carry the noise. */
+  source: number[];
+  message?: string;
+  /** RFC 3339: when the server's watchdog ends the test. */
+  until?: string;
+}
 
 // --------------------------------------------------------------- limits ---
 // Mirrors of the Rust constants (src/state.rs). Values are clamped server-side;

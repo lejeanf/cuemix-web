@@ -59,3 +59,20 @@ channel = "stable"
 status_file = "/var/lib/cuemix-web/update-status.json"
 request_file = "/var/lib/cuemix-web/update-request"
 result_file = "/var/lib/cuemix-web/update-result"
+
+[measure]
+# Room test (phone microphone): pink noise is played by your MPD / myMPD server,
+# whose analog output is wired to a MOTU line input. Everything is commented
+# out = feature disabled. Needs HTTPS on the UI for the phone's microphone.
+# MPD protocol address (plain TCP, host:port):
+# mpd = "192.0.2.20:6600"
+# MPD password, only in the git-ignored config.toml:
+# mpd_password = ""
+# URL MPD fetches the noise from. Empty = this server's address as seen from
+# MPD, plus the HTTP port of [network] http_bind:
+# noise_url = "http://192.0.2.10:8080/api/measure/noise.wav"
+# Mixer inputs carrying the MPD signal (0-based: Mic 1, Mic 2, Line 3..8 = 0..7).
+# Default Line 7-8:
+# source_inputs = [6, 7]
+# Safety: the test ends and everything is restored after this many seconds (20-80).
+# max_seconds = 60

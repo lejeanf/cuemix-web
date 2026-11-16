@@ -9,6 +9,7 @@
 //! - [`osc`]     — OSC address table and the UDP bridge.
 //! - [`web`]     — JSON WebSocket contract and the Axum server.
 //! - [`engine`]  — actor owning `MotuState`; command/event bus between all sides.
+//! - [`measure`] — room test: noise from the user's MPD, mixer snapshot/restore.
 //! - [`presets`] — preset and `labels.json` persistence.
 //! - [`zeroconf`] — mDNS announcement of the web UI.
 
@@ -18,6 +19,7 @@
 
 pub mod config;
 pub mod engine;
+pub mod measure;
 pub mod motu;
 pub mod osc;
 pub mod presets;
