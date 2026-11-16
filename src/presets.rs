@@ -88,19 +88,46 @@ impl PresetStore {
 /// - Files written by a *newer* cuemix-web are refused with a clear message
 ///   (e.g. after a rollback) instead of being silently misread.
 pub fn parse_preset(name: &str, text: &str) -> Result<Preset> {
-    let preset: Preset = serde_json::from_str(text)?;
-    if preset.schema_version > PRESET_SCHEMA_VERSION {
+    let mut raw: serde_json::Value = serde_json::from_str(text)?;
+    // Missing = written before versioning (v0, same layout as v1).
+    let version = raw
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if version > u64::from(PRESET_SCHEMA_VERSION) {
         bail!(
-            "preset {name:?} uses format v{} but this cuemix-web reads up to v{PRESET_SCHEMA_VERSION}; \
-             update cuemix-web (cuemix-update) to load it",
-            preset.schema_version
+            "preset {name:?} uses format v{version} but this cuemix-web reads up to v{PRESET_SCHEMA_VERSION}; \
+             update cuemix-web (cuemix-update) to load it"
         );
+    }
+    let old_dsp = version < 2;
+    if old_dsp {
+        drop_v1_dsp(&mut raw);
+    }
+    let mut preset: Preset = serde_json::from_value(raw)?;
+    if old_dsp {
+        // Defaults shaped for the preset's own topology.
+        preset.state.reset_dsp();
     }
     Ok(Preset {
         schema_version: PRESET_SCHEMA_VERSION,
         name: name.to_owned(),
         ..preset
     })
+}
+
+/// v1 → v2: the per-mixer-input DSP (`channels`) and the old reverb block
+/// (with its separate sends) do not match the hardware and cannot be mapped
+/// onto it, so they are dropped. Mixes, preamps, trims, control room,
+/// routing and clock keep their v1 layout.
+fn drop_v1_dsp(raw: &mut serde_json::Value) {
+    if let Some(state) = raw
+        .get_mut("state")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        state.remove("channels");
+        state.remove("reverb");
+    }
 }
 
 /// Load `labels.json`; missing file = no labels.
@@ -213,11 +240,13 @@ mod tests {
 #[cfg(test)]
 mod compat_tests {
     use super::*;
-    use crate::state::{Param, Topology};
+    use crate::state::{Param, Reverb, Topology};
 
-    /// Frozen v1 preset, written by this version. Never edit it: it guards
-    /// that future versions keep reading presets saved today.
+    /// Frozen v1 preset (written by cuemix-web 0.3). Never edit it: it guards
+    /// that later versions keep reading presets saved then.
     const V1_FIXTURE: &str = include_str!("../tests/fixtures/preset-v1.json");
+    /// Frozen v2 preset (hardware-shaped DSP). Never edit it either.
+    const V2_FIXTURE: &str = include_str!("../tests/fixtures/preset-v2.json");
 
     #[test]
     fn frozen_v1_fixture_still_loads() {
@@ -228,7 +257,56 @@ mod compat_tests {
         assert_eq!(p.state.topology, Topology::ULTRALITE_MK5);
         assert!(p.state.control_room.mono);
         assert_eq!(p.state.main.db, -8.0);
+        assert_eq!(p.state.mixes[0].channels[0].gain, 0.5, "mixes migrate");
         assert!(p.state.clone().normalized().is_ok());
+    }
+
+    #[test]
+    fn v1_dsp_and_reverb_are_replaced_by_hardware_defaults() {
+        // The v1 fixture has a non-default EQ band (ch 1, band 2) and the old
+        // reverb block with 32 sends: neither survives the migration.
+        let p = parse_preset("Live set", V1_FIXTURE).unwrap_or_else(|e| panic!("{e}"));
+        let fresh = MotuState::new(p.state.topology);
+        assert_eq!(p.state.input_eq, fresh.input_eq);
+        assert_eq!(p.state.compressors, fresh.compressors);
+        assert_eq!(p.state.gates, fresh.gates);
+        assert_eq!(p.state.output_eq, fresh.output_eq);
+        assert_eq!(p.state.reverb, fresh.reverb);
+        assert_eq!(p.state.clock, fresh.clock, "v1 clock has the v2 layout");
+
+        // Same for an old file whose reverb fields overlap the new names.
+        let text = r#"{"schema_version":1,"name":"r","state":{
+            "reverb":{"enabled":true,"predelay_ms":7.0,"sends":[1.0]},
+            "control_room":{"talkback":true}}}"#;
+        let p = parse_preset("r", text).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(p.state.reverb, Reverb::default());
+        assert!(p.state.control_room.talkback);
+        assert!(p.state.normalized().is_ok());
+    }
+
+    #[test]
+    fn v1_migration_follows_the_preset_topology() {
+        let text = r#"{"schema_version":1,"name":"t","state":{
+            "topology":{"mixes":1,"mixer_inputs":2,"preamps":4,"mic_inputs":1,
+                        "routing_inputs":1,"routing_outputs":1},
+            "mixes":[{"name":"A","channels":[{},{}]}],
+            "preamps":[{},{},{},{}],
+            "routing":{"matrix":[[false]]}}}"#;
+        let p = parse_preset("t", text).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(p.state.input_eq.len(), 4);
+        assert_eq!(p.state.compressors.len(), 4);
+        assert_eq!(p.state.gates.len(), 1);
+        assert!(p.state.normalized().is_ok());
+    }
+
+    #[test]
+    fn frozen_v2_fixture_loads_unchanged() {
+        let p = parse_preset("Live set", V2_FIXTURE).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(p.state.input_eq[1][2].gain_db, 4.0);
+        assert_eq!(p.state.compressors[0].makeup, 2.0);
+        assert!(!p.state.gates[1].bypass);
+        assert_eq!(p.state.reverb.decay, 40.0);
+        assert!(p.state.normalized().is_ok());
     }
 
     #[test]
@@ -272,10 +350,10 @@ mod compat_tests {
     }
 
     /// Regenerate the fixture only when deliberately introducing a new format
-    /// (then add preset-v2.json and keep v1): `cargo test write_v1_fixture -- --ignored`.
+    /// (then add preset-v3.json and keep v1/v2): `cargo test write_v2_fixture -- --ignored`.
     #[test]
     #[ignore]
-    fn write_v1_fixture() {
+    fn write_v2_fixture() {
         let mut s = MotuState::default();
         for p in [
             Param::Mono { on: true },
@@ -285,14 +363,14 @@ mod compat_tests {
                 ch: 0,
                 gain: 0.5,
             },
-            Param::EqBand {
+            Param::InputEqGain {
                 ch: 1,
                 band: 2,
-                enabled: true,
-                freq_hz: 3_000.0,
-                gain_db: 4.0,
-                q: 1.2,
+                db: 4.0,
             },
+            Param::CompMakeup { ch: 0, gain: 2.0 },
+            Param::GateBypass { ch: 1, on: false },
+            Param::ReverbDecay { value: 40.0 },
         ] {
             let _ = s.apply(&p);
         }
@@ -303,7 +381,7 @@ mod compat_tests {
         };
         let json = serde_json::to_string_pretty(&preset).unwrap_or_default();
         std::fs::write(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/preset-v1.json"),
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/preset-v2.json"),
             json + "\n",
         )
         .unwrap_or_else(|e| panic!("{e}"));

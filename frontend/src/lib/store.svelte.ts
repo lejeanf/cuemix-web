@@ -1,16 +1,17 @@
 // Connection store: one WebSocket to `/ws`, reactive client state, optimistic
 // edits with a per-parameter 25 ms send throttle.
 import { meterBank } from './meters';
-import type { ChannelLabel, Command, EqBand, Param, ServerEvent, Compressor, Gate, Hpf } from './protocol';
+import { hasMk5Meters, mk5MeterLevels } from './meterMap';
+import type { ChannelLabel, Command, DeviceInfo, EqBand, Param, ServerEvent } from './protocol';
 import { DSP_LIMITS } from './protocol';
 import { applyEvent, applyParam, initialClientState, type ClientState } from './reducer';
 import { ParamSender } from './sender';
 import { clamp } from './validate';
-import { isHwMapped } from './hwmap';
+import { isHwMapped, isHwReadOnly } from './hwmap';
 import { S } from './strings';
 
 export type Link = 'offline' | 'connecting' | 'online' | 'demo';
-export type Tab = 'mixer' | 'preamps' | 'routing' | 'reverb';
+export type Tab = 'mixer' | 'input' | 'output' | 'reverb' | 'probe';
 
 export const RECONNECT_MIN_MS = 500;
 export const RECONNECT_MAX_MS = 8000;
@@ -32,13 +33,22 @@ export function healthUrl(loc: Pick<Location, 'pathname'>): string {
   return `${base}api/health`;
 }
 
+const TABS: readonly Tab[] = ['mixer', 'input', 'output', 'reverb', 'probe'];
+function tabFromHash(): Tab {
+  const h = typeof location === 'undefined' ? '' : location.hash.slice(1);
+  return (TABS as readonly string[]).includes(h) ? (h as Tab) : 'mixer';
+}
+
 class Store {
   c: ClientState = $state(initialClientState());
   socketOpen = $state(false);
-  /** Running server version (from `/api/health`), shown in the top bar. No
-   *  update check: the box never contacts GitHub (maintainer decision). */
+  /** Running server version (from `/api/health`). The web server never
+   *  contacts GitHub; release checks are a root timer (see UpdateBadge). */
   version: string | null = $state(null);
-  tab: Tab = $state('mixer');
+  /** Current view; `#mixer`, `#input`, `#output`, `#reverb` in the URL open it directly. */
+  tab: Tab = $state(tabFromHash());
+  /** Latest raw meter frame (meter probe); not deep-reactive. */
+  meterRaw: number[] | null = $state.raw(null);
   bus = $state(0);
   dspChannel: number | null = $state(null);
 
@@ -69,14 +79,57 @@ class Store {
     return this.online && !isHwMapped(p);
   }
   hint(p: Param['param']): string | undefined {
-    return this.unmapped(p) ? S.unmapped : undefined;
+    if (!this.unmapped(p)) return undefined;
+    return this.online && this.device && isHwReadOnly(p) ? S.readOnly : S.unmapped;
+  }
+
+  /** What the connected MOTU reported about itself, or null. */
+  get device(): DeviceInfo | null {
+    return this.c.session.device ?? null;
+  }
+
+  /** Strip name: user label, else the device's (pair) name, else `In N`. */
+  stripName(ch: number, stereo = false): string {
+    const own = this.label(ch)?.name;
+    if (own) return own;
+    const d = this.device;
+    return (stereo && d?.stereo_names[ch]) || d?.input_names[ch] || `In ${ch + 1}`;
+  }
+
+  /** Mixer strips: stereo pairs (left channel flagged by the device) share one strip. */
+  get strips(): { ch: number; pair?: number }[] {
+    const n = this.c.state?.topology.mixer_inputs ?? 0;
+    const stereo = this.device?.stereo_inputs ?? [];
+    const out: { ch: number; pair?: number }[] = [];
+    for (let ch = 0; ch < n; ch++) {
+      if (stereo[ch] && ch + 1 < n) {
+        out.push({ ch, pair: ch + 1 });
+        ch++;
+      } else out.push({ ch });
+    }
+    return out;
+  }
+
+  /** Mix indices in display order (device order if it gives one). */
+  get mixOrder(): number[] {
+    const n = this.c.state?.mixes.length ?? 0;
+    const order = (this.device?.mix_order ?? []).filter((i) => i < n);
+    if (order.length !== n || new Set(order).size !== n) return Array.from({ length: n }, (_, i) => i);
+    return order;
+  }
+
+  /** Mix tab name: user-set name, else the device's name, else `Mix N`. */
+  mixName(i: number): string {
+    const own = this.c.state?.mixes[i]?.name ?? '';
+    if (own && own !== `Mix ${i + 1}`) return own;
+    return this.device?.mix_names[i] || own || `Mix ${i + 1}`;
   }
 
   label(ch: number): ChannelLabel | undefined {
     return this.c.labels.channels[String(ch)];
   }
   labelName(ch: number): string {
-    return this.label(ch)?.name ?? `In ${ch + 1}`;
+    return this.label(ch)?.name ?? (this.device?.input_names[ch] || `In ${ch + 1}`);
   }
 
   // ----------------------------------------------------------- lifecycle ---
@@ -140,6 +193,11 @@ class Store {
   }
 
   private handle(ev: ServerEvent): void {
+    if (ev.event === 'meter_raw') {
+      this.meterRaw = ev.raw;
+      if (hasMk5Meters(this.c.session.device?.model, ev.raw.length)) meterBank.push(mk5MeterLevels(ev.raw));
+      return;
+    }
     if (ev.event === 'meters') {
       // Hot path: bypass reactive state entirely, feed the canvas loop.
       meterBank.push(ev.levels);
@@ -189,6 +247,11 @@ class Store {
   loadPreset(name: string): void {
     this.sendRaw({ cmd: 'load_preset', name });
   }
+  /** Sends a preset file's JSON (any supported version) to be stored as `name` and recalled. */
+  importPreset(name: string, text: string): void {
+    this.sendRaw({ cmd: 'import_preset', name, text });
+  }
+
   savePreset(name: string): void {
     this.sendRaw({ cmd: 'save_preset', name });
   }
@@ -201,79 +264,55 @@ class Store {
     this.sendRaw({ cmd: 'set_label', ch, label });
   }
 
-  // ---------------------------------------------------- DSP block helpers ---
+  // ------------------------------------------------------------- DSP ---
 
-  setEqBand(ch: number, band: number, patch: Partial<EqBand>, final = false): void {
-    const cur = this.c.state?.channels[ch]?.eq.bands[band];
-    if (!cur) return;
-    const n = { ...cur, ...patch };
-    this.set(
-      {
-        param: 'eq_band',
-        ch,
-        band,
-        enabled: n.enabled,
-        freq_hz: clamp(n.freq_hz, DSP_LIMITS.FREQ_HZ),
-        gain_db: clamp(n.gain_db, DSP_LIMITS.EQ_GAIN_DB),
-        q: clamp(n.q, DSP_LIMITS.EQ_Q),
-      },
-      final,
-    );
+  /** Strips 0..n-1 with an input EQ / compressor (the analog inputs). */
+  hasDsp(ch: number): boolean {
+    return ch >= 0 && ch < (this.c.state?.input_eq.length ?? 0);
   }
-  setHpf(ch: number, patch: Partial<Hpf>, final = false): void {
-    const cur = this.c.state?.channels[ch]?.eq.hpf;
-    if (!cur) return;
-    const n = { ...cur, ...patch };
-    this.set({ param: 'hpf', ch, enabled: n.enabled, freq_hz: clamp(n.freq_hz, DSP_LIMITS.FREQ_HZ) }, final);
+  /** Inputs with a gate (the mic inputs). */
+  hasGate(ch: number): boolean {
+    return ch >= 0 && ch < (this.c.state?.gates.length ?? 0);
   }
-  setComp(ch: number, patch: Partial<Compressor>, final = false): void {
-    const cur = this.c.state?.channels[ch]?.comp;
-    if (!cur) return;
-    const n = { ...cur, ...patch };
-    this.set(
-      {
-        param: 'comp',
-        ch,
-        enabled: n.enabled,
-        threshold_db: clamp(n.threshold_db, DSP_LIMITS.COMP_THRESHOLD_DB),
-        ratio: clamp(n.ratio, DSP_LIMITS.COMP_RATIO),
-        attack_ms: clamp(n.attack_ms, DSP_LIMITS.ATTACK_MS),
-        release_ms: clamp(n.release_ms, DSP_LIMITS.RELEASE_MS),
-        gain_db: clamp(n.gain_db, DSP_LIMITS.COMP_GAIN_DB),
-      },
-      final,
-    );
+
+  /** The Reverb mix (its faders are the reverb sends): by device name, else the last mix. */
+  get reverbMix(): number | null {
+    const n = this.c.state?.mixes.length ?? 0;
+    if (n === 0) return null;
+    const i = this.device?.mix_names.indexOf('Reverb') ?? -1;
+    return i >= 0 && i < n ? i : n - 1;
   }
-  setGate(ch: number, patch: Partial<Gate>, final = false): void {
-    const cur = this.c.state?.channels[ch]?.gate;
-    if (!cur) return;
-    const n = { ...cur, ...patch };
-    this.set(
-      {
-        param: 'gate',
-        ch,
-        enabled: n.enabled,
-        threshold_db: clamp(n.threshold_db, DSP_LIMITS.GATE_THRESHOLD_DB),
-        attack_ms: clamp(n.attack_ms, DSP_LIMITS.ATTACK_MS),
-        release_ms: clamp(n.release_ms, DSP_LIMITS.RELEASE_MS),
-      },
-      final,
-    );
+  /** Mixer input carrying the reverb return (left of its pair): by device name, else the last pair. */
+  get reverbReturn(): number | null {
+    const n = this.c.state?.topology.mixer_inputs ?? 0;
+    const i = this.device?.stereo_names.indexOf('Reverb') ?? -1;
+    if (i >= 0 && i < n) return i;
+    return n >= 2 ? n - 2 : null;
   }
-  setReverb(patch: Partial<{ enabled: boolean; return_gain: number; time_s: number; predelay_ms: number }>, final = false): void {
-    const r = this.c.state?.reverb;
-    if (!r) return;
-    const n = { enabled: r.enabled, return_gain: r.return_gain, time_s: r.time_s, predelay_ms: r.predelay_ms, ...patch };
-    this.set(
-      {
-        param: 'reverb',
-        enabled: n.enabled,
-        return_gain: n.return_gain,
-        time_s: clamp(n.time_s, DSP_LIMITS.REVERB_TIME_S),
-        predelay_ms: clamp(n.predelay_ms, DSP_LIMITS.REVERB_PREDELAY_MS),
-      },
-      final,
-    );
+
+  /** Set fields of an input or output EQ band (one param per field, clamped like the server). */
+  setEq(
+    kind: 'input' | 'output',
+    ch: number,
+    band: number,
+    patch: Partial<Pick<EqBand, 'mode' | 'bypass' | 'freq_hz' | 'gain_db' | 'bw_oct'>>,
+    final = false,
+  ): void {
+    const L = DSP_LIMITS;
+    const send = (p: Param) => this.set(p, final);
+    if (kind === 'input') {
+      if (patch.mode !== undefined) send({ param: 'input_eq_mode', ch, band, mode: patch.mode });
+      if (patch.bypass !== undefined) send({ param: 'input_eq_bypass', ch, band, on: patch.bypass });
+      if (patch.freq_hz !== undefined) send({ param: 'input_eq_freq', ch, band, hz: Math.round(clamp(patch.freq_hz, L.FREQ_HZ)) });
+      if (patch.gain_db !== undefined) send({ param: 'input_eq_gain', ch, band, db: clamp(patch.gain_db, L.EQ_GAIN_DB) });
+      if (patch.bw_oct !== undefined) send({ param: 'input_eq_bw', ch, band, octaves: clamp(patch.bw_oct, L.EQ_BW_OCT) });
+    } else {
+      if (patch.mode !== undefined) send({ param: 'output_eq_mode', ch, band, mode: patch.mode });
+      if (patch.bypass !== undefined) send({ param: 'output_eq_bypass', ch, band, on: patch.bypass });
+      if (patch.freq_hz !== undefined) send({ param: 'output_eq_freq', ch, band, hz: Math.round(clamp(patch.freq_hz, L.FREQ_HZ)) });
+      if (patch.gain_db !== undefined) send({ param: 'output_eq_gain', ch, band, db: clamp(patch.gain_db, L.EQ_GAIN_DB) });
+      if (patch.bw_oct !== undefined) send({ param: 'output_eq_bw', ch, band, octaves: clamp(patch.bw_oct, L.EQ_BW_OCT) });
+    }
   }
 }
 

@@ -3,6 +3,7 @@
 pub mod client;
 pub mod discovery;
 pub mod fader;
+pub mod identify;
 pub mod props;
 pub mod protocol;
 pub mod throttle;

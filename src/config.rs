@@ -20,6 +20,7 @@ pub struct Config {
     pub engine: Engine,
     pub storage: Storage,
     pub web: Web,
+    pub update: Update,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,6 +103,35 @@ impl Default for Storage {
         Self {
             presets_dir: PathBuf::from("/var/lib/cuemix-web/presets"),
             labels_file: PathBuf::from("/var/lib/cuemix-web/labels.json"),
+        }
+    }
+}
+
+/// Updates from GitHub releases (see `deploy/cuemix-update.sh`). The web
+/// server never downloads or installs anything itself: a root systemd timer
+/// writes `status_file`, and the UI's Install button only creates
+/// `request_file`, which a root systemd path unit turns into `cuemix-update`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Update {
+    /// `stable` (published releases) or `prerelease` (newest release,
+    /// alphas included). Read by `cuemix-update`.
+    pub channel: String,
+    /// Written by `cuemix-update --check --status-file` (daily timer).
+    pub status_file: PathBuf,
+    /// Created by the UI to ask for an install (content ignored).
+    pub request_file: PathBuf,
+    /// Exit status of the last requested install.
+    pub result_file: PathBuf,
+}
+
+impl Default for Update {
+    fn default() -> Self {
+        Self {
+            channel: "stable".into(),
+            status_file: PathBuf::from("/var/lib/cuemix-web/update-status.json"),
+            request_file: PathBuf::from("/var/lib/cuemix-web/update-request"),
+            result_file: PathBuf::from("/var/lib/cuemix-web/update-result"),
         }
     }
 }

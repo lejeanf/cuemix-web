@@ -19,11 +19,18 @@
 //!   their index layout (mix matrix, routing, per-channel EQ bypass) or the
 //!   hardware has no such parameter (dim, speaker B): `encode` returns no
 //!   frame and `decode` returns `None` for them.
-//! - `Int16`/`Array` properties of the device cannot be carried by
-//!   [`ValueKind`] and are therefore absent from [`ENTRIES`].
+//! - `Array` properties of the device cannot be carried by [`ValueKind`] and
+//!   are therefore absent from [`ENTRIES`] (`Int16` ones are listed since
+//!   [`ValueKind::I16`] exists).
+//! - DSP / reverb / clock (input EQ 8 x 4 bands, output EQ 12 x 3 bands,
+//!   compressor 8, gate 2, reverb, sample rate, clock source) are **decoded**
+//!   from the device (layouts read from a connect dump, 2026-11-15). Their
+//!   encoders exist ([`encode_unverified`], unit-tested) but are **not active**:
+//!   [`encode`] returns no frame for them, so nothing is written until each one
+//!   is checked on the card.
 
 use super::protocol::{Frame, ProtocolError, Value, ValueKind};
-use crate::state::Param;
+use crate::state::{dsp_limits, ClockSource, OpticalMode, Param, SampleRate};
 
 /// One row of the property table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +73,42 @@ const P_INPUT_PAD: u16 = 5003;
 const P_INPUT_48V: u16 = 5004;
 const P_MAIN_TRIM: u16 = 5011;
 const P_MONO: u16 = 5018;
+const P_OPTICAL_MODE: u16 = 5006;
 const P_TALKBACK_ENABLE: u16 = 5027;
+const P_SAMPLE_RATE: u16 = 10;
+const P_CLOCK_SOURCE: u16 = 11;
+/// Input EQ: mode, bypass, freq, gain, bw (`1002..=1006`), index = ch * 4 + band.
+const P_IN_EQ_MODE: u16 = 1002;
+const P_IN_EQ_BW: u16 = 1006;
+const P_GATE_BYPASS: u16 = 1007;
+const P_GATE_THRESHOLD: u16 = 1008;
+const P_GATE_ATTACK: u16 = 1009;
+const P_GATE_RELEASE: u16 = 1010;
+const P_COMP_BYPASS: u16 = 1011;
+const P_COMP_THRESHOLD: u16 = 1012;
+const P_COMP_ATTACK: u16 = 1013;
+const P_COMP_RELEASE: u16 = 1014;
+const P_COMP_RATIO: u16 = 1015;
+const P_COMP_MAKEUP: u16 = 1021;
+/// Output EQ: mode, bypass, freq, gain, bw (`1022..=1026`), index = out * 3 + band.
+const P_OUT_EQ_MODE: u16 = 1022;
+const P_OUT_EQ_BW: u16 = 1026;
+const P_REVERB_DECAY: u16 = 1030;
+const P_REVERB_DAMPING: u16 = 1031;
+const P_REVERB_PREDELAY: u16 = 1032;
+const P_REVERB_WIDTH: u16 = 1033;
+const P_REVERB_PRESET: u16 = 1034;
+
+/// Input EQ bands per channel (channels = [`N_INPUTS`]).
+const N_IN_EQ_BANDS: u16 = 4;
+/// Outputs with an EQ.
+const N_OUT_EQ: u16 = 12;
+/// Output EQ bands per output.
+const N_OUT_EQ_BANDS: u16 = 3;
+/// Inputs with a compressor.
+const N_COMPS: u16 = 8;
+/// Inputs with a gate (the mic inputs).
+const N_GATES: u16 = 2;
 
 /// Number of analogue/line inputs with a gain and polarity control.
 const N_INPUTS: u16 = 8;
@@ -74,6 +116,23 @@ const N_INPUTS: u16 = 8;
 const N_MICS: u16 = 2;
 /// Output trim indices of the headphone pair (left, right).
 const PHONES_L: u16 = 10;
+/// Analog line outputs with a trim, before the phones pair (indices 0..=9).
+const N_LINE_OUTPUTS: u16 = 10;
+/// Prop 5000 index of each analog output in UI order (Main 1, Main 2,
+/// Line 3 … Line 10): the device indexes its DACs in hardware order, where
+/// Line 5-10 come first (CueMix 5 `LocalOutputs`).
+const OUTPUT_TRIM_INDEX: [u16; N_LINE_OUTPUTS as usize] = [6, 7, 8, 9, 0, 1, 2, 3, 4, 5];
+
+fn output_trim_index(ch: u16) -> Option<u16> {
+    OUTPUT_TRIM_INDEX.get(usize::from(ch)).copied()
+}
+
+fn output_from_trim_index(index: u16) -> Option<u16> {
+    OUTPUT_TRIM_INDEX
+        .iter()
+        .position(|&i| i == index)
+        .and_then(|p| u16::try_from(p).ok())
+}
 const PHONES_R: u16 = 11;
 /// Mic input gain ceiling in dB (line inputs stop at 20 dB).
 const GAIN_MAX_DB: f64 = 74.0;
@@ -82,7 +141,7 @@ const LINE_GAIN_MAX_DB: f64 = 20.0;
 /// Output trim attenuation range: `0..=100` = `0..-100` dB.
 const TRIM_MAX: u8 = 100;
 
-use ValueKind::{Fixed as F, Str32 as S, U32 as L, U8 as B};
+use ValueKind::{Fixed as F, Str32 as S, I16 as W, U32 as L, U8 as B};
 
 /// Property table. Only kinds representable by [`ValueKind`] are listed.
 pub const ENTRIES: &[PropEntry] = &[
@@ -178,23 +237,27 @@ pub const ENTRIES: &[PropEntry] = &[
     entry(
         1002,
         B,
-        "input_eq_mode: 32 entries (4 bands x 8 ch, order undocumented)",
+        "input_eq_mode: 32 = 8 ch x 4 bands, index = ch*4+band (dump); 0 bell, 2 shelf?, 3 high-pass",
         SRC_MK5,
     ),
-    entry(1003, B, "input_eq_bypass: 32 entries", SRC_MK5),
+    entry(1003, B, "input_eq_bypass: 32, index = ch*4+band", SRC_MK5),
     entry(
         1004,
         L,
-        "input_eq_freq: plain integer Hz (Int32, not 8.24)",
+        "input_eq_freq: plain integer Hz (Int32, not 8.24), index = ch*4+band",
         SRC_MK5,
     ),
-    entry(1005, F, "input_eq_gain: dB (8.24)", SRC_MK5),
-    entry(1006, F, "input_eq_bw: octaves (8.24)", SRC_MK5),
-    entry(1007, B, "gate_bypass: 2 mic channels", SRC_MK5),
-    entry(1008, F, "gate_threshold (8.24)", SRC_MK5),
-    entry(1011, B, "comp_bypass: 8 channels", SRC_MK5),
-    entry(1012, F, "comp_threshold (8.24)", SRC_MK5),
-    entry(1015, F, "comp_ratio (8.24)", SRC_MK5),
+    entry(1005, F, "input_eq_gain: dB (8.24), index = ch*4+band", SRC_MK5),
+    entry(1006, F, "input_eq_bw: octaves (8.24), index = ch*4+band", SRC_MK5),
+    entry(1007, B, "gate_bypass: 2 mic channels, 1 = bypassed", SRC_MK5),
+    entry(1008, F, "gate_threshold: dB (8.24; dump -46)", SRC_MK5),
+    entry(P_GATE_ATTACK, W, "gate_attack: ms (Int16)", SRC_MK5),
+    entry(P_GATE_RELEASE, W, "gate_release: ms (Int16)", SRC_MK5),
+    entry(1011, B, "comp_bypass: 8 channels, 1 = bypassed", SRC_MK5),
+    entry(1012, F, "comp_threshold: dB (8.24)", SRC_MK5),
+    entry(P_COMP_ATTACK, W, "comp_attack: ms (Int16)", SRC_MK5),
+    entry(P_COMP_RELEASE, W, "comp_release: ms (Int16)", SRC_MK5),
+    entry(1015, F, "comp_ratio: n in n:1 (8.24)", SRC_MK5),
     entry(
         1016,
         F,
@@ -219,12 +282,17 @@ pub const ENTRIES: &[PropEntry] = &[
         "mix_mute: 448 entries, index layout undocumented",
         SRC_MK5,
     ),
-    entry(1021, F, "comp_makeup (8.24)", SRC_MK5),
-    entry(1022, B, "output_eq_mode: 36 entries", SRC_MK5),
-    entry(1023, B, "output_eq_bypass: 36 entries", SRC_MK5),
-    entry(1024, L, "output_eq_freq: plain integer Hz", SRC_MK5),
-    entry(1025, F, "output_eq_gain: dB (8.24)", SRC_MK5),
-    entry(1026, F, "output_eq_bw: octaves (8.24)", SRC_MK5),
+    entry(1021, F, "comp_makeup: linear gain (8.24, 1.0 = 0 dB)", SRC_MK5),
+    entry(
+        1022,
+        B,
+        "output_eq_mode: 36 = 12 out x 3 bands, index = out*3+band (dump)",
+        SRC_MK5,
+    ),
+    entry(1023, B, "output_eq_bypass: 36, index = out*3+band", SRC_MK5),
+    entry(1024, L, "output_eq_freq: plain integer Hz, index = out*3+band", SRC_MK5),
+    entry(1025, F, "output_eq_gain: dB (8.24), index = out*3+band", SRC_MK5),
+    entry(1026, F, "output_eq_bw: octaves (8.24), index = out*3+band", SRC_MK5),
     entry(
         1028,
         B,
@@ -311,11 +379,27 @@ pub fn encode(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
                 })
                 .collect()
         }
+        // Same property as the phones trim (5000), analog outputs in hardware order.
+        Param::OutputTrim { ch, db } => match output_trim_index(ch) {
+            Some(index) => vec![Frame {
+                prop_id: P_OUTPUT_TRIM,
+                index,
+                value: Value::U8(db_to_trim(db)?),
+            }],
+            None => Vec::new(),
+        },
         Param::Mono { on } => vec![bool_frame(P_MONO, 0, on)],
         Param::Talkback { on } => vec![bool_frame(P_TALKBACK_ENABLE, 0, on)],
-        // Unmapped: index layout undocumented (MixVol/MixPan/MixMute/MixSolo,
-        // Route, EqBypass) or no hardware counterpart (Dim, SpeakerB), or
-        // channel out of the documented range.
+        // Index 0 = optical input, 1 = output (CueMix 5 `kOpticalMode`).
+        Param::OpticalMode { output, mode } => vec![Frame {
+            prop_id: P_OPTICAL_MODE,
+            index: u16::from(output),
+            value: Value::U8(mode.code()),
+        }],
+        // Unmapped: write not verified (MixVol/MixPan/MixMute/MixSolo, and the
+        // DSP / reverb / clock params whose encoders exist but are NOT ACTIVE,
+        // see `encode_unverified`), semantics unknown (Route), no hardware
+        // counterpart (Dim, SpeakerB), or channel out of the documented range.
         _ => Vec::new(),
     };
     Ok(frames)
@@ -324,11 +408,280 @@ pub fn encode(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
 /// Does `param` have a hardware mapping? Unmapped params never reach the
 /// device queue (audit #2).
 pub fn is_mapped(param: &Param) -> bool {
-    encode(param).is_ok_and(|f| !f.is_empty())
+    // Mix params need the device layout (`motu::identify::encode_mix`): they
+    // are mapped once a device is identified; without one the client drops them.
+    matches!(
+        param,
+        Param::MixVol { .. } | Param::MixPan { .. } | Param::MixMute { .. } | Param::MixSolo { .. }
+    ) || encode(param).is_ok_and(|f| !f.is_empty())
+}
+
+// ---------------------------------------------------------------------------
+// DSP / reverb / clock: decoded from the device, encoders NOT ACTIVE yet.
+// ---------------------------------------------------------------------------
+
+/// `(ch, band)` of a per-band EQ index `ch * bands + band`, if in range.
+fn eq_slot(index: u16, channels: u16, bands: u16) -> Option<(u16, u8)> {
+    let (ch, band) = (index / bands, index % bands);
+    (ch < channels).then_some(())?;
+    Some((ch, u8::try_from(band).ok()?))
+}
+
+/// Per-band EQ index, if `(ch, band)` is in range.
+fn eq_index(ch: u16, band: u8, channels: u16, bands: u16) -> Option<u16> {
+    let band = u16::from(band);
+    (ch < channels && band < bands).then(|| ch * bands + band)
+}
+
+/// Int32 payload carried as `Value::U32` (same 4 bytes, signed reading).
+fn int32(v: u32) -> i32 {
+    i32::from_be_bytes(v.to_be_bytes())
+}
+
+/// Decode an EQ frame (`base` = mode prop of the input or output EQ).
+fn decode_eq(frame: &Frame, output: bool) -> Option<Param> {
+    use Param as P;
+    let (base, channels, bands) = if output {
+        (P_OUT_EQ_MODE, N_OUT_EQ, N_OUT_EQ_BANDS)
+    } else {
+        (P_IN_EQ_MODE, N_INPUTS, N_IN_EQ_BANDS)
+    };
+    let (ch, band) = eq_slot(frame.index, channels, bands)?;
+    let p = match (frame.prop_id - base, &frame.value, output) {
+        (0, Value::U8(mode), false) => P::InputEqMode {
+            ch,
+            band,
+            mode: *mode,
+        },
+        (1, Value::U8(b), false) => P::InputEqBypass {
+            ch,
+            band,
+            on: *b != 0,
+        },
+        (2, Value::U32(hz), false) => P::InputEqFreq {
+            ch,
+            band,
+            hz: f64::from(int32(*hz)),
+        },
+        (3, Value::Fixed(db), false) => P::InputEqGain { ch, band, db: *db },
+        (4, Value::Fixed(o), false) => P::InputEqBw {
+            ch,
+            band,
+            octaves: *o,
+        },
+        (0, Value::U8(mode), true) => P::OutputEqMode {
+            ch,
+            band,
+            mode: *mode,
+        },
+        (1, Value::U8(b), true) => P::OutputEqBypass {
+            ch,
+            band,
+            on: *b != 0,
+        },
+        (2, Value::U32(hz), true) => P::OutputEqFreq {
+            ch,
+            band,
+            hz: f64::from(int32(*hz)),
+        },
+        (3, Value::Fixed(db), true) => P::OutputEqGain { ch, band, db: *db },
+        (4, Value::Fixed(o), true) => P::OutputEqBw {
+            ch,
+            band,
+            octaves: *o,
+        },
+        _ => return None,
+    };
+    Some(p)
+}
+
+/// Hardware frame → DSP / reverb / clock param (`None` = not one of them).
+fn decode_dsp(frame: &Frame) -> Option<Param> {
+    use Param as P;
+    let ch = frame.index;
+    let gate = ch < N_GATES;
+    let comp = ch < N_COMPS;
+    let one = ch == 0;
+    Some(match (frame.prop_id, &frame.value) {
+        (P_IN_EQ_MODE..=P_IN_EQ_BW, _) => return decode_eq(frame, false),
+        (P_OUT_EQ_MODE..=P_OUT_EQ_BW, _) => return decode_eq(frame, true),
+        (P_GATE_BYPASS, Value::U8(b)) if gate => P::GateBypass { ch, on: *b != 0 },
+        (P_GATE_THRESHOLD, Value::Fixed(db)) if gate => P::GateThreshold { ch, db: *db },
+        (P_GATE_ATTACK, Value::I16(ms)) if gate => P::GateAttack {
+            ch,
+            ms: f64::from(*ms),
+        },
+        (P_GATE_RELEASE, Value::I16(ms)) if gate => P::GateRelease {
+            ch,
+            ms: f64::from(*ms),
+        },
+        (P_COMP_BYPASS, Value::U8(b)) if comp => P::CompBypass { ch, on: *b != 0 },
+        (P_COMP_THRESHOLD, Value::Fixed(db)) if comp => P::CompThreshold { ch, db: *db },
+        (P_COMP_ATTACK, Value::I16(ms)) if comp => P::CompAttack {
+            ch,
+            ms: f64::from(*ms),
+        },
+        (P_COMP_RELEASE, Value::I16(ms)) if comp => P::CompRelease {
+            ch,
+            ms: f64::from(*ms),
+        },
+        (P_COMP_RATIO, Value::Fixed(r)) if comp => P::CompRatio { ch, ratio: *r },
+        (P_COMP_MAKEUP, Value::Fixed(g)) if comp => P::CompMakeup { ch, gain: *g },
+        (P_REVERB_DECAY, Value::U8(v)) if one => P::ReverbDecay {
+            value: f64::from(*v),
+        },
+        (P_REVERB_DAMPING, Value::U8(v)) if one => P::ReverbDamping {
+            value: f64::from(*v),
+        },
+        (P_REVERB_PREDELAY, Value::U8(v)) if one => P::ReverbPredelay { ms: f64::from(*v) },
+        (P_REVERB_WIDTH, Value::U8(v)) if one => P::ReverbWidth {
+            value: f64::from(*v),
+        },
+        (P_REVERB_PRESET, Value::U8(v)) if one => P::ReverbPreset { preset: *v },
+        (P_SAMPLE_RATE, Value::U32(hz)) if one => P::SampleRate {
+            rate: SampleRate::from_hz(*hz)?,
+        },
+        (P_CLOCK_SOURCE, Value::U8(c)) if one => P::ClockSource {
+            source: ClockSource::from_code(*c)?,
+        },
+        _ => return None,
+    })
+}
+
+/// Clamp into `(min, max)` and round to a whole number (finite input only).
+fn whole_in(v: f64, (min, max): (f64, f64)) -> Result<f64, ProtocolError> {
+    Ok(require_finite(v)?.round().clamp(min, max))
+}
+
+fn frame(prop_id: u16, index: u16, value: Value) -> Vec<Frame> {
+    vec![Frame {
+        prop_id,
+        index,
+        value,
+    }]
+}
+
+/// EQ frame for `field` (0 mode .. 4 bw) of the input or output EQ.
+fn encode_eq(output: bool, ch: u16, band: u8, field: u16, value: Value) -> Vec<Frame> {
+    let (base, channels, bands) = if output {
+        (P_OUT_EQ_MODE, N_OUT_EQ, N_OUT_EQ_BANDS)
+    } else {
+        (P_IN_EQ_MODE, N_INPUTS, N_IN_EQ_BANDS)
+    };
+    match eq_index(ch, band, channels, bands) {
+        Some(index) => frame(base + field, index, value),
+        None => Vec::new(),
+    }
+}
+
+/// Whole Hz for the Int32 frequency props.
+fn freq_value(hz: f64) -> Result<Value, ProtocolError> {
+    let hz = whole_in(hz, dsp_limits::FREQ_HZ)?;
+    // Integer in 20..=20000: the cast is exact.
+    Ok(Value::U32(hz as u32))
+}
+
+/// Whole ms for the Int16 time props.
+fn ms_value(ms: f64, limits: (f64, f64)) -> Result<Value, ProtocolError> {
+    // Integer within the limits (≤ 10000 < i16::MAX): the cast is exact.
+    Ok(Value::I16(whole_in(ms, limits)? as i16))
+}
+
+/// Whole `0..=100` for the reverb U8 props.
+fn percent_value(v: f64, limits: (f64, f64)) -> Result<Value, ProtocolError> {
+    // Integer in 0..=100: the cast is exact.
+    Ok(Value::U8(whole_in(v, limits)? as u8))
+}
+
+fn fixed_value(v: f64, limits: (f64, f64)) -> Result<Value, ProtocolError> {
+    Ok(Value::Fixed(require_finite(v)?.clamp(limits.0, limits.1)))
+}
+
+/// Frames for the DSP / reverb / clock params.
+///
+/// **NOT ACTIVE YET.** The layouts were read from a connect dump, but no write
+/// has been checked on the hardware, so [`encode`] does not call this: these
+/// params stay unmapped ([`is_mapped`] is `false`) and nothing is sent. Each
+/// feature is enabled on its own after a test on the card, by routing its
+/// variants from [`encode`] to here. Empty for any other param or index.
+pub fn encode_unverified(param: &Param) -> Result<Vec<Frame>, ProtocolError> {
+    use dsp_limits as L;
+    use Param as P;
+    let b = |on: bool| Value::U8(u8::from(on));
+    let frames = match *param {
+        P::InputEqMode { ch, band, mode } => encode_eq(false, ch, band, 0, Value::U8(mode)),
+        P::InputEqBypass { ch, band, on } => encode_eq(false, ch, band, 1, b(on)),
+        P::InputEqFreq { ch, band, hz } => encode_eq(false, ch, band, 2, freq_value(hz)?),
+        P::InputEqGain { ch, band, db } => {
+            encode_eq(false, ch, band, 3, fixed_value(db, L::EQ_GAIN_DB)?)
+        }
+        P::InputEqBw { ch, band, octaves } => {
+            encode_eq(false, ch, band, 4, fixed_value(octaves, L::EQ_BW_OCT)?)
+        }
+        P::OutputEqMode { ch, band, mode } => encode_eq(true, ch, band, 0, Value::U8(mode)),
+        P::OutputEqBypass { ch, band, on } => encode_eq(true, ch, band, 1, b(on)),
+        P::OutputEqFreq { ch, band, hz } => encode_eq(true, ch, band, 2, freq_value(hz)?),
+        P::OutputEqGain { ch, band, db } => {
+            encode_eq(true, ch, band, 3, fixed_value(db, L::EQ_GAIN_DB)?)
+        }
+        P::OutputEqBw { ch, band, octaves } => {
+            encode_eq(true, ch, band, 4, fixed_value(octaves, L::EQ_BW_OCT)?)
+        }
+        P::GateBypass { ch, on } if ch < N_GATES => frame(P_GATE_BYPASS, ch, b(on)),
+        P::GateThreshold { ch, db } if ch < N_GATES => {
+            frame(P_GATE_THRESHOLD, ch, fixed_value(db, L::THRESHOLD_DB)?)
+        }
+        P::GateAttack { ch, ms } if ch < N_GATES => {
+            frame(P_GATE_ATTACK, ch, ms_value(ms, L::ATTACK_MS)?)
+        }
+        P::GateRelease { ch, ms } if ch < N_GATES => {
+            frame(P_GATE_RELEASE, ch, ms_value(ms, L::RELEASE_MS)?)
+        }
+        P::CompBypass { ch, on } if ch < N_COMPS => frame(P_COMP_BYPASS, ch, b(on)),
+        P::CompThreshold { ch, db } if ch < N_COMPS => {
+            frame(P_COMP_THRESHOLD, ch, fixed_value(db, L::THRESHOLD_DB)?)
+        }
+        P::CompAttack { ch, ms } if ch < N_COMPS => {
+            frame(P_COMP_ATTACK, ch, ms_value(ms, L::ATTACK_MS)?)
+        }
+        P::CompRelease { ch, ms } if ch < N_COMPS => {
+            frame(P_COMP_RELEASE, ch, ms_value(ms, L::RELEASE_MS)?)
+        }
+        P::CompRatio { ch, ratio } if ch < N_COMPS => {
+            frame(P_COMP_RATIO, ch, fixed_value(ratio, L::COMP_RATIO)?)
+        }
+        P::CompMakeup { ch, gain } if ch < N_COMPS => {
+            frame(P_COMP_MAKEUP, ch, fixed_value(gain, L::COMP_MAKEUP)?)
+        }
+        P::ReverbDecay { value } => {
+            frame(P_REVERB_DECAY, 0, percent_value(value, L::REVERB_PERCENT)?)
+        }
+        P::ReverbDamping { value } => frame(
+            P_REVERB_DAMPING,
+            0,
+            percent_value(value, L::REVERB_PERCENT)?,
+        ),
+        P::ReverbPredelay { ms } => frame(
+            P_REVERB_PREDELAY,
+            0,
+            percent_value(ms, L::REVERB_PREDELAY_MS)?,
+        ),
+        P::ReverbWidth { value } => {
+            frame(P_REVERB_WIDTH, 0, percent_value(value, L::REVERB_PERCENT)?)
+        }
+        P::ReverbPreset { preset } => frame(P_REVERB_PRESET, 0, Value::U8(preset)),
+        P::SampleRate { rate } => frame(P_SAMPLE_RATE, 0, Value::U32(rate.hz())),
+        P::ClockSource { source } => frame(P_CLOCK_SOURCE, 0, Value::U8(source.code())),
+        _ => Vec::new(),
+    };
+    Ok(frames)
 }
 
 /// Hardware frame → param. `None` = unmapped property.
 pub fn decode(frame: &Frame) -> Option<Param> {
+    if let Some(p) = decode_dsp(frame) {
+        return Some(p);
+    }
     let Value::U8(byte) = frame.value else {
         return None;
     };
@@ -350,8 +703,16 @@ pub fn decode(frame: &Frame) -> Option<Param> {
         P_OUTPUT_TRIM if ch == PHONES_L => Some(Param::PhonesVol {
             db: trim_to_db(byte),
         }),
+        P_OUTPUT_TRIM => output_from_trim_index(ch).map(|out| Param::OutputTrim {
+            ch: out,
+            db: trim_to_db(byte),
+        }),
         P_MONO if ch == 0 => Some(Param::Mono { on }),
         P_TALKBACK_ENABLE if ch == 0 => Some(Param::Talkback { on }),
+        P_OPTICAL_MODE if ch < 2 => OpticalMode::from_code(byte).map(|mode| Param::OpticalMode {
+            output: ch == 1,
+            mode,
+        }),
         _ => None,
     }
 }
@@ -360,6 +721,38 @@ pub fn decode(frame: &Frame) -> Option<Param> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn optical_mode_round_trips_on_prop_5006() {
+        for output in [false, true] {
+            for mode in [OpticalMode::Adat, OpticalMode::Toslink] {
+                let p = Param::OpticalMode { output, mode };
+                let f = encode(&p).unwrap();
+                assert_eq!((f[0].prop_id, f[0].index), (5006, u16::from(output)));
+                assert_eq!(decode(&f[0]), Some(p));
+            }
+        }
+    }
+
+    #[test]
+    fn output_trims_use_the_hardware_dac_order() {
+        // Main 1 is DAC 6 on the device, Line 5 is DAC 0 (CueMix 5 LocalOutputs).
+        let main1 = encode(&Param::OutputTrim { ch: 0, db: -3.0 }).unwrap();
+        assert_eq!((main1[0].prop_id, main1[0].index), (P_OUTPUT_TRIM, 6));
+        let line5 = encode(&Param::OutputTrim { ch: 4, db: 0.0 }).unwrap();
+        assert_eq!(line5[0].index, 0);
+        assert_eq!(
+            decode(&Frame {
+                prop_id: P_OUTPUT_TRIM,
+                index: 9,
+                value: Value::U8(6)
+            }),
+            Some(Param::OutputTrim { ch: 3, db: -6.0 })
+        );
+        assert!(encode(&Param::OutputTrim { ch: 10, db: 0.0 })
+            .unwrap()
+            .is_empty());
+    }
 
     fn mapped_params() -> Vec<Param> {
         let mut v = Vec::new();
@@ -387,6 +780,11 @@ mod tests {
         for on in [false, true] {
             v.push(Param::Mono { on });
             v.push(Param::Talkback { on });
+        }
+        for ch in 0..N_LINE_OUTPUTS {
+            for db in [0.0, -12.0, -100.0] {
+                v.push(Param::OutputTrim { ch, db });
+            }
         }
         v
     }
@@ -448,7 +846,6 @@ mod tests {
                 ch: 0,
                 on: true,
             },
-            Param::EqBypass { ch: 0, on: true },
             Param::Route {
                 input: 0,
                 output: 0,
@@ -503,7 +900,14 @@ mod tests {
             }
         }
         assert_eq!(kind_of(1004), Some(ValueKind::U32));
+        assert_eq!(kind_of(1009), Some(ValueKind::I16));
         assert_eq!(kind_of(9999), None);
+        // The DSP encoders only emit table ids, with the table's payload kind.
+        for p in dsp_params() {
+            for f in encode_unverified(&p).unwrap() {
+                assert_eq!(kind_of(f.prop_id), Some(f.value.kind()), "{p:?}");
+            }
+        }
     }
 
     #[test]
@@ -548,7 +952,12 @@ mod tests {
                 let _ = encode(&Param::Phase { ch, on });
                 let _ = encode(&Param::Pad { ch, on });
                 let _ = encode(&Param::Phantom { ch, on });
-                let _ = encode(&Param::EqBypass { ch, on });
+                let _ = encode_unverified(&Param::GateBypass { ch, on });
+                let _ = encode_unverified(&Param::InputEqBypass {
+                    ch,
+                    band: u8::MAX,
+                    on,
+                });
                 let _ = encode(&Param::MixMute {
                     bus: u8::MAX,
                     ch,
@@ -567,5 +976,233 @@ mod tests {
                 gain: 1.0,
             });
         }
+    }
+
+    /// One sample of every DSP / reverb / clock param, at each index edge,
+    /// with values already in the state's normalised form.
+    fn dsp_params() -> Vec<Param> {
+        let mut v = Vec::new();
+        for (ch, band) in [(0u16, 0u8), (3, 2), (7, 3)] {
+            v.extend([
+                Param::InputEqMode { ch, band, mode: 3 },
+                Param::InputEqMode { ch, band, mode: 9 },
+                Param::InputEqBypass { ch, band, on: true },
+                Param::InputEqFreq {
+                    ch,
+                    band,
+                    hz: 3_500.0,
+                },
+                Param::InputEqGain {
+                    ch,
+                    band,
+                    db: -12.7,
+                },
+                Param::InputEqBw {
+                    ch,
+                    band,
+                    octaves: 1.0,
+                },
+            ]);
+        }
+        for (ch, band) in [(0u16, 0u8), (5, 1), (11, 2)] {
+            v.extend([
+                Param::OutputEqMode { ch, band, mode: 0 },
+                Param::OutputEqBypass {
+                    ch,
+                    band,
+                    on: false,
+                },
+                Param::OutputEqFreq { ch, band, hz: 45.0 },
+                Param::OutputEqGain { ch, band, db: 2.0 },
+                Param::OutputEqBw {
+                    ch,
+                    band,
+                    octaves: 0.5,
+                },
+            ]);
+        }
+        for ch in 0..N_GATES {
+            v.extend([
+                Param::GateBypass { ch, on: true },
+                Param::GateThreshold { ch, db: -46.0 },
+                Param::GateAttack { ch, ms: 10.0 },
+                Param::GateRelease { ch, ms: 1_000.0 },
+            ]);
+        }
+        for ch in [0, 4, N_COMPS - 1] {
+            v.extend([
+                Param::CompBypass { ch, on: true },
+                Param::CompThreshold { ch, db: -10.0 },
+                Param::CompAttack { ch, ms: 10.0 },
+                Param::CompRelease { ch, ms: 1_000.0 },
+                Param::CompRatio { ch, ratio: 2.0 },
+                Param::CompMakeup { ch, gain: 9.638 },
+            ]);
+        }
+        v.extend([
+            Param::ReverbDecay { value: 86.0 },
+            Param::ReverbDamping { value: 90.0 },
+            Param::ReverbPredelay { ms: 50.0 },
+            Param::ReverbWidth { value: 50.0 },
+            Param::ReverbPreset { preset: 1 },
+            Param::ClockSource {
+                source: ClockSource::Spdif,
+            },
+            Param::ClockSource {
+                source: ClockSource::Optical,
+            },
+            Param::ClockSource {
+                source: ClockSource::Internal,
+            },
+        ]);
+        v.extend(SampleRate::ALL.map(|rate| Param::SampleRate { rate }));
+        v
+    }
+
+    /// Equal, numbers within 8.24 resolution.
+    fn close(a: &Param, b: &Param) -> bool {
+        let (ja, jb) = (
+            serde_json::to_value(a).unwrap(),
+            serde_json::to_value(b).unwrap(),
+        );
+        let (Some(oa), Some(ob)) = (ja.as_object(), jb.as_object()) else {
+            return false;
+        };
+        oa.len() == ob.len()
+            && oa
+                .iter()
+                .all(|(k, va)| match (va.as_f64(), ob[k].as_f64()) {
+                    (Some(x), Some(y)) => (x - y).abs() <= 1.0 / 16_777_216.0,
+                    _ => *va == ob[k],
+                })
+    }
+
+    #[test]
+    fn dsp_encoders_round_trip_but_are_not_active() {
+        for p in dsp_params() {
+            // Not wired: nothing reaches the device.
+            assert_eq!(encode(&p), Ok(Vec::new()), "{p:?} must stay inactive");
+            assert!(!is_mapped(&p), "{p:?}");
+            let frames = encode_unverified(&p).unwrap();
+            assert_eq!(frames.len(), 1, "{p:?}");
+            let bytes = frames[0].encode().unwrap();
+            let back = Frame::decode(&bytes, |id| kind_of(id).unwrap_or(ValueKind::U8)).unwrap();
+            let got = decode(&back).unwrap_or_else(|| panic!("no decode for {p:?}"));
+            assert!(close(&got, &p), "{p:?} -> {got:?}");
+            // The write layout carries the same payload.
+            let w = frames[0].encode_write().unwrap();
+            let back = Frame::decode_write(&w, |id| kind_of(id).unwrap_or(ValueKind::U8)).unwrap();
+            assert_eq!(back.encode_write().unwrap(), w);
+        }
+    }
+
+    #[test]
+    fn dsp_index_layouts_match_the_dump() {
+        let f = |prop_id, index, value| Frame {
+            prop_id,
+            index,
+            value,
+        };
+        // Input EQ index = ch * 4 + band: 13 = ch 3, band 1.
+        assert_eq!(
+            decode(&f(1004, 13, Value::U32(350))),
+            Some(Param::InputEqFreq {
+                ch: 3,
+                band: 1,
+                hz: 350.0
+            })
+        );
+        assert_eq!(decode(&f(1004, 32, Value::U32(350))), None, "9th channel");
+        // Output EQ index = out * 3 + band: 35 = out 11, band 2.
+        assert_eq!(
+            decode(&f(1025, 35, Value::Fixed(2.0))),
+            Some(Param::OutputEqGain {
+                ch: 11,
+                band: 2,
+                db: 2.0
+            })
+        );
+        assert_eq!(decode(&f(1025, 36, Value::Fixed(2.0))), None);
+        let out = encode_unverified(&Param::OutputEqMode {
+            ch: 11,
+            band: 2,
+            mode: 0,
+        })
+        .unwrap();
+        assert_eq!(out[0].index, 35);
+        assert_eq!(
+            encode_unverified(&Param::InputEqMode {
+                ch: 1,
+                band: 4,
+                mode: 0
+            }),
+            Ok(Vec::new()),
+            "band out of range"
+        );
+        // Gate only on the 2 mic inputs, compressor on 8.
+        assert_eq!(decode(&f(1007, 2, Value::U8(1))), None);
+        assert_eq!(
+            decode(&f(1007, 1, Value::U8(1))),
+            Some(Param::GateBypass { ch: 1, on: true })
+        );
+        assert_eq!(decode(&f(1011, 8, Value::U8(1))), None);
+        assert_eq!(
+            decode(&f(1013, 7, Value::I16(10))),
+            Some(Param::CompAttack { ch: 7, ms: 10.0 })
+        );
+        // Wrong payload kinds are ignored.
+        assert_eq!(decode(&f(1013, 0, Value::U8(10))), None);
+        assert_eq!(decode(&f(1004, 0, Value::Fixed(1.0))), None);
+        // Clock: unknown rates / sources are not guessed.
+        assert_eq!(
+            decode(&f(10, 0, Value::U32(48_000))),
+            Some(Param::SampleRate {
+                rate: SampleRate::Hz48000
+            })
+        );
+        assert_eq!(decode(&f(10, 0, Value::U32(32_000))), None);
+        assert_eq!(decode(&f(11, 0, Value::U8(1))), None);
+        assert_eq!(
+            decode(&f(11, 0, Value::U8(3))),
+            Some(Param::ClockSource {
+                source: ClockSource::Internal
+            })
+        );
+        // Reverb has a single index.
+        assert_eq!(decode(&f(1030, 1, Value::U8(86))), None);
+        // A negative Int32 frequency decodes as is (the state clamps it).
+        assert_eq!(
+            decode(&f(1004, 0, Value::U32(u32::MAX))),
+            Some(Param::InputEqFreq {
+                ch: 0,
+                band: 0,
+                hz: -1.0
+            })
+        );
+    }
+
+    #[test]
+    fn dsp_encoders_clamp_and_reject_non_finite() {
+        let one = |p: Param| encode_unverified(&p).unwrap()[0].value.clone();
+        assert_eq!(
+            one(Param::InputEqFreq {
+                ch: 0,
+                band: 0,
+                hz: 99_999.0
+            }),
+            Value::U32(20_000)
+        );
+        assert_eq!(
+            one(Param::CompRelease { ch: 0, ms: 1e9 }),
+            Value::I16(10_000)
+        );
+        assert_eq!(one(Param::ReverbWidth { value: -5.0 }), Value::U8(0));
+        assert!(matches!(
+            encode_unverified(&Param::GateThreshold {
+                ch: 0,
+                db: f64::NAN
+            }),
+            Err(ProtocolError::NonFinite(_))
+        ));
     }
 }

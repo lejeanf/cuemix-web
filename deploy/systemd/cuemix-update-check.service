@@ -1,0 +1,11 @@
+[Unit]
+Description=cuemix-web: check GitHub for a newer release (no install)
+Documentation=https://github.com/lejeanf/cuemix-web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Writes the result for the web UI; exit 10 = an update is available.
+ExecStart=/usr/local/sbin/cuemix-update --check --status-file /var/lib/cuemix-web/update-status.json
+SuccessExitStatus=10

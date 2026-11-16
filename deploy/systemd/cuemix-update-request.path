@@ -1,0 +1,11 @@
+[Unit]
+Description=cuemix-web: watch for an update requested from the web UI
+
+[Path]
+# Created (empty) by the unprivileged web service when the user presses
+# Install; its content is never read.
+PathExists=/var/lib/cuemix-web/update-request
+Unit=cuemix-update-request.service
+
+[Install]
+WantedBy=multi-user.target

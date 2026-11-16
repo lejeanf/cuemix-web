@@ -5,28 +5,35 @@
   import TopBar from './components/TopBar.svelte';
   import Mixer from './components/Mixer.svelte';
   import Preamps from './components/Preamps.svelte';
-  import Routing from './components/Routing.svelte';
+  import Output from './components/Output.svelte';
   import Reverb from './components/Reverb.svelte';
   import ControlRoom from './components/ControlRoom.svelte';
   import DspPanel from './components/DspPanel.svelte';
+  import Probe from './components/Probe.svelte';
 
   onMount(() => {
     store.start();
     return () => store.stop();
   });
 
-  const tabs: Tab[] = ['mixer', 'preamps', 'routing', 'reverb'];
+  /** The meter probe is a diagnostic view: shown with `?probe` or `#probe` in the URL. */
+  const probe = /probe/.test(location.search + location.hash);
+  const tabs: Tab[] = ['mixer', 'input', 'output', 'reverb', ...(probe ? (['probe'] as Tab[]) : [])];
 </script>
 
 <div class="app">
-  <TopBar />
-  <div class="tabs" role="tablist" aria-label="Views">
-    {#each tabs as t (t)}
-      <button role="tab" aria-selected={store.tab === t} class:sel={store.tab === t} onclick={() => (store.tab = t)}>
-        {S.tabs[t]}
-      </button>
-    {/each}
-  </div>
+  <TopBar>
+    <div class="tabs" role="tablist" aria-label="Views">
+      {#each tabs as t (t)}
+        <button role="tab" aria-selected={store.tab === t} class:sel={store.tab === t} onclick={() => {
+            store.tab = t;
+            history.replaceState(null, '', `#${t}`);
+          }}>
+          {S.tabs[t]}
+        </button>
+      {/each}
+    </div>
+  </TopBar>
   {#if !store.socketOpen}
     <div class="offline" role="alert">{S.offlineBanner}</div>
   {/if}
@@ -34,10 +41,12 @@
   <main class="view">
     {#if store.tab === 'mixer'}
       <Mixer />
-    {:else if store.tab === 'preamps'}
+    {:else if store.tab === 'input'}
       <Preamps />
-    {:else if store.tab === 'routing'}
-      <Routing />
+    {:else if store.tab === 'output'}
+      <Output />
+    {:else if store.tab === 'probe'}
+      <Probe />
     {:else}
       <Reverb />
     {/if}
@@ -60,17 +69,13 @@
     height: 100%;
   }
   .tabs {
-    flex: none;
     display: flex;
-    gap: 4px;
-    padding: 6px 14px 0;
-    background: var(--bg-alt);
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
+    gap: 2px;
   }
   .tabs button {
-    min-height: 40px;
-    padding: 0 18px;
+    height: 100%;
+    padding: 0 12px;
+    white-space: nowrap;
     background: none;
     border: 0;
     border-bottom: 3px solid transparent;
@@ -92,12 +97,12 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 12px 14px;
+    padding: 8px 10px;
   }
   .toasts {
     position: fixed;
     right: 12px;
-    bottom: 76px;
+    bottom: 44px;
     z-index: 60;
     display: flex;
     flex-direction: column;

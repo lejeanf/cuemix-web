@@ -7,8 +7,12 @@
 # service and waits for its health endpoint. If the restart or the health check
 # fails, the previous binary is restored automatically.
 #
-# Updates are manual only: no timer, no web trigger. /etc/cuemix-web and
-# /var/lib/cuemix-web are never modified.
+# Updates are never automatic: a daily timer only *checks* (--check
+# --status-file), and an install runs when a person asks for it, from a shell
+# or from the web UI's Install button (which only creates a request file that
+# the root unit cuemix-update-request.path turns into a run of this script).
+# The configuration is never modified; in /var/lib/cuemix-web only the status
+# and result files below are written.
 #
 # Usage: sudo cuemix-update [--check | --rollback] [--pre | --version vX.Y.Z[-pre]]
 #                           [--force] [--dry-run] [--help]
@@ -43,6 +47,8 @@ PRE=0
 FORCE=0
 PIN_SET=0
 PIN=""
+STATUS_FILE=""
+CHANNEL=""
 TAG=""
 VERSION=""
 TARGET=""
@@ -112,6 +118,10 @@ Options:
   --check                 Print installed and available versions, change nothing.
                           Exit 0 when up to date, 10 when an update is available.
   --pre                   Consider pre-releases too (newest release overall).
+                          Default: [update] channel in config.toml
+                          ("stable", or "prerelease" which implies --pre).
+  --status-file PATH      With --check: also write the result as JSON to PATH
+                          (read by the web UI).
   --version vX.Y.Z[-pre]  Install this exact release tag.
   --force                 Reinstall even when that version is already installed.
   --rollback              Restore the previous binary (cuemix-web.prev).
@@ -152,6 +162,11 @@ parse_args() {
         shift
         ;;
       --version=*) PIN="${1#--version=}"; PIN_SET=1 ;;
+      --status-file)
+        [[ $# -ge 2 ]] || fail "${EXIT_USAGE}" "--status-file requires a path"
+        STATUS_FILE="$2"
+        shift
+        ;;
       *) log_err "unknown option: $1"; usage >&2; exit "${EXIT_USAGE}" ;;
     esac
     shift
@@ -167,6 +182,9 @@ validate_args() {
   fi
   if [[ "${CHECK}" -eq 1 && "${FORCE}" -eq 1 ]]; then
     fail "${EXIT_USAGE}" "--force has no effect with --check"
+  fi
+  if [[ -n "${STATUS_FILE}" && "${CHECK}" -eq 0 ]]; then
+    fail "${EXIT_USAGE}" "--status-file only works with --check"
   fi
   if [[ "${PIN_SET}" -eq 1 ]]; then
     [[ "${PIN}" == v* ]] || PIN="v${PIN}"
@@ -230,6 +248,48 @@ http_port() {
   else
     printf '%s' "${DEFAULT_PORT}"
   fi
+}
+
+# config_channel : print [update] channel from the config ("stable" by default).
+config_channel() {
+  local line="" ch=""
+  if [[ -r "${CONF_FILE}" ]]; then
+    line="$(sed -n '/^[[:space:]]*\[update\][[:space:]]*$/,/^[[:space:]]*\[/ s/^[[:space:]]*channel[[:space:]]*=//p' "${CONF_FILE}" | head -n 1 || true)"
+    ch="${line%%#*}"
+    ch="${ch//[\" ]/}"
+  fi
+  case "${ch}" in
+    prerelease|pre|alpha|beta) printf 'prerelease' ;;
+    *) printf 'stable' ;;
+  esac
+}
+
+# apply_channel : the config's channel decides --pre unless the command line did.
+apply_channel() {
+  CHANNEL="$(config_channel)"
+  if [[ "${PRE}" -eq 0 && "${PIN_SET}" -eq 0 && "${CHANNEL}" == "prerelease" ]]; then
+    PRE=1
+  fi
+  if [[ "${PRE}" -eq 1 ]]; then
+    CHANNEL="prerelease"
+  fi
+}
+
+# write_status INSTALLED AVAILABLE : JSON for the web UI, written atomically,
+# world-readable. Every value is a validated version or a fixed word.
+write_status() {
+  local installed="$1" available="$2" update="false" tmp=""
+  [[ -n "${STATUS_FILE}" ]] || return 0
+  [[ "${installed}" != "${available}" ]] && update="true"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    dry "would write ${STATUS_FILE}"
+    return 0
+  fi
+  tmp="${STATUS_FILE}.tmp"
+  printf '{"installed":"%s","latest":"%s","tag":"%s","channel":"%s","update_available":%s,"checked_at":"%s","release_url":"%s/%s"}\n' \
+    "${installed}" "${VERSION}" "${TAG}" "${CHANNEL}" "${update}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${RELEASE_PAGE}" "${TAG}" >"${tmp}"
+  chmod 0644 "${tmp}"
+  mv -f -- "${tmp}" "${STATUS_FILE}"
 }
 
 # ---------------------------------------------------------------------------
@@ -399,7 +459,8 @@ do_check() {
   local current="" hint="sudo cuemix-update"
   current="$(installed_version)"
   resolve_target
-  log_info "installed: ${current}   available: ${VERSION} (${TAG})"
+  log_info "installed: ${current}   available: ${VERSION} (${TAG}, channel ${CHANNEL})"
+  write_status "${current}" "${VERSION}"
   if [[ "${current}" == "${VERSION}" ]]; then
     log_info "up to date"
     exit 0
@@ -483,6 +544,7 @@ main() {
   require_root "$@"
   require_commands
   acquire_lock
+  apply_channel
 
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     log_warn "dry run: no changes will be made"

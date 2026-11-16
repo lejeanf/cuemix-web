@@ -1,8 +1,7 @@
 // Meter rendering: one requestAnimationFrame loop for all canvases.
 //
-// PROVISIONAL mapping: `meters.levels[i]` (linear 0..1 peak) is shown on
-// mixer input i. The real MOTU meter layout (which indices are inputs,
-// playbacks, outputs) is not known yet.
+// The bank holds linear peaks (0..1) per meter slot (see ./meterMap:
+// mixer inputs, outputs, preamp inputs), fed from the MOTU's raw meter frame.
 
 export const PEAK_HOLD_MS = 1500;
 export const DECAY_PER_S = 1.2; // position units per second

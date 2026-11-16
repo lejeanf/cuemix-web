@@ -45,55 +45,50 @@ export interface Preamp {
   phase: boolean;
 }
 
+/** One EQ band as the MOTU stores it (input EQ props 1002-1006, output 1022-1026). */
 export interface EqBand {
-  enabled: boolean;
+  /** Filter type, raw byte (see EQ_MODE); unknown values are kept. */
+  mode: number;
+  /** true = bypassed. */
+  bypass: boolean;
+  /** Whole Hz. */
   freq_hz: number;
   gain_db: number;
-  q: number;
-}
-
-export interface Hpf {
-  enabled: boolean;
-  freq_hz: number;
-}
-
-export interface Equalizer {
-  /** Global bypass of the 4 bands (cuemix-web improvement). */
-  bypass: boolean;
-  hpf: Hpf;
-  bands: [EqBand, EqBand, EqBand, EqBand];
+  /** Q of a bell band (named `bw_oct` for preset compatibility; shelves and HPF ignore it). */
+  bw_oct: number;
 }
 
 export interface Compressor {
-  enabled: boolean;
+  /** true = bypassed. */
+  bypass: boolean;
   threshold_db: number;
-  ratio: number;
+  /** Whole ms. */
   attack_ms: number;
+  /** Whole ms. */
   release_ms: number;
-  gain_db: number;
+  ratio: number;
+  /** Make-up gain, linear (1.0 = 0 dB). */
+  makeup: number;
 }
 
 export interface Gate {
-  enabled: boolean;
+  /** true = bypassed. */
+  bypass: boolean;
   threshold_db: number;
   attack_ms: number;
   release_ms: number;
 }
 
-export interface ChannelDsp {
-  eq: Equalizer;
-  comp: Compressor;
-  gate: Gate;
-}
-
+/** Reverb processor. Sends = faders of the Reverb mix; return = a mixer input in every mix. */
 export interface Reverb {
-  enabled: boolean;
-  /** Linear gain. */
-  return_gain: number;
-  time_s: number;
+  /** Whole 0..100. */
+  decay: number;
+  damping: number;
+  /** Whole ms 0..100. */
   predelay_ms: number;
-  /** Per mixer input, linear gain. */
-  sends: number[];
+  width: number;
+  /** Raw preset number. */
+  preset: number;
 }
 
 export interface ControlRoom {
@@ -111,17 +106,46 @@ export interface MotuState {
   mixes: Mix[];
   main: { /** Whole dB, -100..0. */ db: number };
   preamps: Preamp[];
-  channels: ChannelDsp[];
+  /** input_eq[ch][band]: analog inputs (topology.preamps) x INPUT_EQ_BANDS. */
+  input_eq: EqBand[][];
+  /** One per analog input. */
+  compressors: Compressor[];
+  /** One per mic input. */
+  gates: Gate[];
+  /** output_eq[out][band]: OUTPUT_EQ_OUTPUTS x OUTPUT_EQ_BANDS. */
+  output_eq: EqBand[][];
   reverb: Reverb;
   routing: { /** matrix[input][output] */ matrix: boolean[][] };
   control_room: ControlRoom;
-  clock: { sample_rate: SampleRate; source: ClockSource };
+  /** Analog line output trims, whole dB -100..0 (index 0 = output 1). */
+  output_trims: number[];
+  clock: { sample_rate: SampleRate; source: ClockSource; optical_in?: OpticalMode; optical_out?: OpticalMode };
 }
 
 export interface SessionInfo {
   active_preset: string | null;
   modified: boolean;
   connection: ConnectionStatus;
+  /** What the connected MOTU reported about itself (null in demo mode). */
+  device?: DeviceInfo | null;
+}
+
+/** Identity and layout read from the MOTU's state dump on connect. */
+export interface DeviceInfo {
+  model: string;
+  firmware: string;
+  topology: Topology;
+  /** Per mixer input; empty string = no name known. */
+  input_names: string[];
+  /** Name when the input is the left channel of a stereo pair; empty = use input_names. */
+  stereo_names: string[];
+  /** Per stereo mix; empty string = no name known. */
+  mix_names: string[];
+  /** Display order of the mixes (empty = index order). */
+  mix_order: number[];
+  /** Per mixer input: true on the left channel of a stereo pair. */
+  stereo_inputs: boolean[];
+  stereo_buses: boolean[];
 }
 
 export interface ChannelLabel {
@@ -148,20 +172,44 @@ export type Param =
   | { param: 'phantom'; ch: number; on: boolean }
   | { param: 'pad'; ch: number; on: boolean }
   | { param: 'phase'; ch: number; on: boolean }
-  | { param: 'eq_bypass'; ch: number; on: boolean }
   | { param: 'route'; input: number; output: number; on: boolean }
   | { param: 'dim'; on: boolean }
   | { param: 'mono'; on: boolean }
   | { param: 'speaker_b'; on: boolean }
   | { param: 'talkback'; on: boolean }
   | { param: 'phones_vol'; db: number }
-  | ({ param: 'eq_band'; ch: number; band: number } & EqBand)
-  | ({ param: 'hpf'; ch: number } & Hpf)
-  | ({ param: 'comp'; ch: number } & Compressor)
-  | ({ param: 'gate'; ch: number } & Gate)
-  | { param: 'reverb'; enabled: boolean; return_gain: number; time_s: number; predelay_ms: number }
-  | { param: 'reverb_send'; ch: number; gain: number }
-  | { param: 'clock'; sample_rate: SampleRate; source: ClockSource };
+  | { param: 'output_trim'; ch: number; db: number }
+  | { param: 'input_eq_mode'; ch: number; band: number; mode: number }
+  | { param: 'input_eq_bypass'; ch: number; band: number; on: boolean }
+  | { param: 'input_eq_freq'; ch: number; band: number; hz: number }
+  | { param: 'input_eq_gain'; ch: number; band: number; db: number }
+  | { param: 'input_eq_bw'; ch: number; band: number; octaves: number }
+  | { param: 'output_eq_mode'; ch: number; band: number; mode: number }
+  | { param: 'output_eq_bypass'; ch: number; band: number; on: boolean }
+  | { param: 'output_eq_freq'; ch: number; band: number; hz: number }
+  | { param: 'output_eq_gain'; ch: number; band: number; db: number }
+  | { param: 'output_eq_bw'; ch: number; band: number; octaves: number }
+  | { param: 'gate_bypass'; ch: number; on: boolean }
+  | { param: 'gate_threshold'; ch: number; db: number }
+  | { param: 'gate_attack'; ch: number; ms: number }
+  | { param: 'gate_release'; ch: number; ms: number }
+  | { param: 'comp_bypass'; ch: number; on: boolean }
+  | { param: 'comp_threshold'; ch: number; db: number }
+  | { param: 'comp_attack'; ch: number; ms: number }
+  | { param: 'comp_release'; ch: number; ms: number }
+  | { param: 'comp_ratio'; ch: number; ratio: number }
+  | { param: 'comp_makeup'; ch: number; gain: number }
+  | { param: 'reverb_decay'; value: number }
+  | { param: 'reverb_damping'; value: number }
+  | { param: 'reverb_predelay'; ms: number }
+  | { param: 'reverb_width'; value: number }
+  | { param: 'reverb_preset'; preset: number }
+  | { param: 'sample_rate'; rate: SampleRate }
+  | { param: 'clock_source'; source: ClockSource }
+  | { param: 'optical_mode'; output: boolean; mode: OpticalMode };
+
+/** Optical port format: ADAT (8 channels) or TOSLINK (stereo). */
+export type OpticalMode = 'adat' | 'toslink';
 
 export type ParamName = Param['param'];
 
@@ -172,6 +220,7 @@ export type Command =
   | ({ cmd: 'set' } & Param)
   | { cmd: 'load_preset'; name: string }
   | { cmd: 'save_preset'; name: string }
+  | { cmd: 'import_preset'; name: string; text: string }
   | { cmd: 'list_presets' }
   | { cmd: 'set_label'; ch: number; label: ChannelLabel | null };
 
@@ -184,6 +233,8 @@ export type ServerEvent =
   | { event: 'presets'; names: string[] }
   | ({ event: 'labels' } & Labels)
   | { event: 'meters'; levels: number[] }
+  /** Raw meter frame from the MOTU (prop 6000), for the meter probe. */
+  | { event: 'meter_raw'; raw: number[] }
   | { event: 'error'; message: string };
 
 // --------------------------------------------------------------- limits ---
@@ -197,19 +248,52 @@ export const LINE_GAIN_MAX_DB = 20;
 export const LABEL_NAME_MAX = 64;
 export const PRESET_NAME_RE = /^[A-Za-z0-9 _.-]{1,64}$/;
 
+/** Provisional ranges (src/state.rs dsp_limits), wide so MOTU values are never distorted. */
 export const DSP_LIMITS = {
   FREQ_HZ: [20, 20_000],
+  /** CueMix 5 ranges: gain ±20 dB, Q 0.45-10 (the Q lives in `bw_oct`). */
   EQ_GAIN_DB: [-20, 20],
-  EQ_Q: [0.1, 10],
-  COMP_THRESHOLD_DB: [-60, 0],
-  COMP_RATIO: [1, 20],
-  COMP_GAIN_DB: [0, 24],
-  GATE_THRESHOLD_DB: [-80, 0],
-  ATTACK_MS: [0.1, 200],
-  RELEASE_MS: [10, 2_000],
-  REVERB_TIME_S: [0.1, 10],
-  REVERB_PREDELAY_MS: [0, 200],
+  EQ_BW_OCT: [0.45, 10],
+  THRESHOLD_DB: [-100, 0],
+  COMP_RATIO: [1, 100],
+  /** Linear make-up gain. */
+  COMP_MAKEUP: [0, 16],
+  ATTACK_MS: [0, 1_000],
+  RELEASE_MS: [0, 10_000],
+  REVERB_PERCENT: [0, 100],
+  REVERB_PREDELAY_MS: [0, 100],
 } as const satisfies Record<string, readonly [number, number]>;
+
+export const INPUT_EQ_BANDS = 4;
+export const OUTPUT_EQ_OUTPUTS = 12;
+export const OUTPUT_EQ_BANDS = 3;
+
+/** EQ band filter types (props 1002 / 1022), as CueMix 5 defines them. */
+export const EQ_MODE = { BELL: 0, LOW_SHELF: 1, HIGH_SHELF: 2, HIGH_PASS: 3 } as const;
+
+/** Filter types each band offers, as in CueMix 5: the first band can be a low
+ *  shelf or a high-pass, the last a high shelf, the others are bells. */
+export function eqModesForBand(band: number, bands: number): number[] {
+  if (band === 0) return [EQ_MODE.BELL, EQ_MODE.LOW_SHELF, EQ_MODE.HIGH_PASS];
+  if (band === bands - 1) return [EQ_MODE.BELL, EQ_MODE.HIGH_SHELF];
+  return [EQ_MODE.BELL];
+}
+
+/** Short name of an EQ mode byte; unknown values are shown as their number. */
+export function eqModeName(mode: number): string {
+  switch (mode) {
+    case EQ_MODE.BELL:
+      return 'Bell';
+    case EQ_MODE.LOW_SHELF:
+      return 'Low shelf';
+    case EQ_MODE.HIGH_SHELF:
+      return 'High shelf';
+    case EQ_MODE.HIGH_PASS:
+      return 'HPF';
+    default:
+      return `Type ${mode}`;
+  }
+}
 
 export const SAMPLE_RATES: readonly SampleRate[] = ['44100', '48000', '88200', '96000', '176400', '192000'];
 export const CLOCK_SOURCES: readonly ClockSource[] = ['internal', 'spdif', 'optical'];

@@ -15,7 +15,7 @@ use rosc::{OscMessage, OscType};
 use thiserror::Error;
 
 use crate::motu::fader;
-use crate::state::{Command, Param, TRIM_MIN_DB};
+use crate::state::{ClockSource, Command, OpticalMode, Param, SampleRate, TRIM_MIN_DB};
 
 #[derive(Debug, Error, PartialEq)]
 pub enum OscError {
@@ -65,6 +65,101 @@ fn arg_bool(addr: &str, args: &[OscType]) -> Result<bool, OscError> {
         OscType::Bool(b) => Ok(*b),
         _ => Err(OscError::ArgType(addr.to_owned())),
     }
+}
+
+/// Whole number `0..=255` (int, or a float that rounds into the range).
+fn arg_u8(addr: &str, args: &[OscType]) -> Result<u8, OscError> {
+    let v = arg_f64(addr, args)?.round();
+    if (0.0..=255.0).contains(&v) {
+        // Integer in 0..=255: the cast is exact.
+        Ok(v as u8)
+    } else {
+        Err(OscError::ArgType(addr.to_owned()))
+    }
+}
+
+/// OSC name of a clock source (same as the JSON one).
+fn clock_source_name(s: ClockSource) -> &'static str {
+    match s {
+        ClockSource::Internal => "internal",
+        ClockSource::Spdif => "spdif",
+        ClockSource::Optical => "optical",
+    }
+}
+
+fn clock_source(name: &str) -> Option<ClockSource> {
+    [
+        ClockSource::Internal,
+        ClockSource::Spdif,
+        ClockSource::Optical,
+    ]
+    .into_iter()
+    .find(|s| clock_source_name(*s).eq_ignore_ascii_case(name))
+}
+
+/// `/eq/{ch}/band/{b}/{leaf}` and `/output/{n}/eq/band/{b}/{leaf}`.
+fn eq_param(
+    output: bool,
+    ch: u16,
+    band: u8,
+    leaf: &str,
+    addr: &str,
+    args: &[OscType],
+) -> Result<Param, OscError> {
+    use Param as P;
+    Ok(match (leaf, output) {
+        ("mode", false) => P::InputEqMode {
+            ch,
+            band,
+            mode: arg_u8(addr, args)?,
+        },
+        ("bypass", false) => P::InputEqBypass {
+            ch,
+            band,
+            on: arg_bool(addr, args)?,
+        },
+        ("freq", false) => P::InputEqFreq {
+            ch,
+            band,
+            hz: arg_f64(addr, args)?,
+        },
+        ("gain", false) => P::InputEqGain {
+            ch,
+            band,
+            db: arg_f64(addr, args)?,
+        },
+        ("bw", false) => P::InputEqBw {
+            ch,
+            band,
+            octaves: arg_f64(addr, args)?,
+        },
+        ("mode", true) => P::OutputEqMode {
+            ch,
+            band,
+            mode: arg_u8(addr, args)?,
+        },
+        ("bypass", true) => P::OutputEqBypass {
+            ch,
+            band,
+            on: arg_bool(addr, args)?,
+        },
+        ("freq", true) => P::OutputEqFreq {
+            ch,
+            band,
+            hz: arg_f64(addr, args)?,
+        },
+        ("gain", true) => P::OutputEqGain {
+            ch,
+            band,
+            db: arg_f64(addr, args)?,
+        },
+        ("bw", true) => P::OutputEqBw {
+            ch,
+            band,
+            octaves: arg_f64(addr, args)?,
+        },
+        _ => return Err(OscError::UnknownAddress(addr.to_owned())),
+    })
 }
 
 /// Address of the explicit "send me the full state" request (no arguments).
@@ -134,9 +229,113 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
                 _ => return Err(unknown()),
             }
         }
-        ["eq", ch, "bypass"] => Param::EqBypass {
-            ch: index_u16(ch, addr)?,
-            on: arg_bool(addr, args)?,
+        ["eq", ch, "band", band, leaf] => eq_param(
+            false,
+            index_u16(ch, addr)?,
+            index_u8(band, addr)?,
+            leaf,
+            addr,
+            args,
+        )?,
+        ["output", ch, "eq", "band", band, leaf] => eq_param(
+            true,
+            index_u16(ch, addr)?,
+            index_u8(band, addr)?,
+            leaf,
+            addr,
+            args,
+        )?,
+        ["gate", ch, leaf] => {
+            let ch = index_u16(ch, addr)?;
+            match *leaf {
+                "bypass" => Param::GateBypass {
+                    ch,
+                    on: arg_bool(addr, args)?,
+                },
+                "threshold" => Param::GateThreshold {
+                    ch,
+                    db: arg_f64(addr, args)?,
+                },
+                "attack" => Param::GateAttack {
+                    ch,
+                    ms: arg_f64(addr, args)?,
+                },
+                "release" => Param::GateRelease {
+                    ch,
+                    ms: arg_f64(addr, args)?,
+                },
+                _ => return Err(unknown()),
+            }
+        }
+        ["comp", ch, leaf] => {
+            let ch = index_u16(ch, addr)?;
+            match *leaf {
+                "bypass" => Param::CompBypass {
+                    ch,
+                    on: arg_bool(addr, args)?,
+                },
+                "threshold" => Param::CompThreshold {
+                    ch,
+                    db: arg_f64(addr, args)?,
+                },
+                "attack" => Param::CompAttack {
+                    ch,
+                    ms: arg_f64(addr, args)?,
+                },
+                "release" => Param::CompRelease {
+                    ch,
+                    ms: arg_f64(addr, args)?,
+                },
+                "ratio" => Param::CompRatio {
+                    ch,
+                    ratio: arg_f64(addr, args)?,
+                },
+                "makeup" => Param::CompMakeup {
+                    ch,
+                    gain: arg_f64(addr, args)?,
+                },
+                _ => return Err(unknown()),
+            }
+        }
+        ["reverb", "decay"] => Param::ReverbDecay {
+            value: arg_f64(addr, args)?,
+        },
+        ["reverb", "damping"] => Param::ReverbDamping {
+            value: arg_f64(addr, args)?,
+        },
+        ["reverb", "predelay"] => Param::ReverbPredelay {
+            ms: arg_f64(addr, args)?,
+        },
+        ["reverb", "width"] => Param::ReverbWidth {
+            value: arg_f64(addr, args)?,
+        },
+        ["reverb", "preset"] => Param::ReverbPreset {
+            preset: arg_u8(addr, args)?,
+        },
+        ["clock", "rate"] => {
+            let hz = arg_f64(addr, args)?;
+            let rate = SampleRate::ALL
+                .into_iter()
+                .find(|r| f64::from(r.hz()) == hz)
+                .ok_or_else(|| OscError::ArgType(addr.to_owned()))?;
+            Param::SampleRate { rate }
+        }
+        ["clock", "source"] => match single(addr, args)? {
+            OscType::String(s) => Param::ClockSource {
+                source: clock_source(s).ok_or_else(|| OscError::ArgType(addr.to_owned()))?,
+            },
+            _ => return Err(OscError::ArgType(addr.to_owned())),
+        },
+        ["optical", port @ ("in" | "out"), "mode"] => match single(addr, args)? {
+            OscType::String(s) => Param::OpticalMode {
+                output: *port == "out",
+                mode: match s.as_str() {
+                    "adat" => OpticalMode::Adat,
+                    "toslink" | "tos" => OpticalMode::Toslink,
+                    _ => return Err(OscError::ArgType(addr.to_owned())),
+                },
+            },
+            _ => return Err(OscError::ArgType(addr.to_owned())),
         },
         ["routing", "in", input, "out", output] => Param::Route {
             input: index_u16(input, addr)?,
@@ -158,6 +357,10 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
         ["controlroom", "phones", "vol"] => Param::PhonesVol {
             db: fader::trim_pos_to_db(arg_f64(addr, args)?, TRIM_MIN_DB),
         },
+        ["output", ch, "trim"] => Param::OutputTrim {
+            ch: index_u16(ch, addr)?,
+            db: fader::trim_pos_to_db(arg_f64(addr, args)?, TRIM_MIN_DB),
+        },
         ["preset", "load"] => match single(addr, args)? {
             OscType::String(name) => return Ok(Command::LoadPreset { name: name.clone() }),
             _ => return Err(OscError::ArgType(addr.to_owned())),
@@ -168,13 +371,62 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
 }
 
 /// Encode an effective [`Param`] as OSC feedback (1-based addresses).
-/// `None` for params without an OSC address (DSP blocks, reverb, clock).
+/// Every [`Param`] has an address today; `None` is kept for future ones.
 pub fn feedback(param: &Param) -> Option<OscMessage> {
+    use Param as P;
     let n = |i: u16| u32::from(i) + 1;
+    let nb = |i: u8| u32::from(i) + 1;
     let b = |on: bool| OscType::Int(i32::from(on));
+    let i = |v: u8| OscType::Int(i32::from(v));
     // OSC floats are 32-bit; precision loss is expected and harmless here.
     let f = |v: f64| OscType::Float(v as f32);
+    let ieq = |ch: u16, band: u8, leaf: &str| format!("/eq/{}/band/{}/{leaf}", n(ch), nb(band));
+    let oeq =
+        |ch: u16, band: u8, leaf: &str| format!("/output/{}/eq/band/{}/{leaf}", n(ch), nb(band));
     let (addr, arg) = match *param {
+        P::InputEqMode { ch, band, mode } => (ieq(ch, band, "mode"), i(mode)),
+        P::InputEqBypass { ch, band, on } => (ieq(ch, band, "bypass"), b(on)),
+        P::InputEqFreq { ch, band, hz } => (ieq(ch, band, "freq"), f(hz)),
+        P::InputEqGain { ch, band, db } => (ieq(ch, band, "gain"), f(db)),
+        P::InputEqBw { ch, band, octaves } => (ieq(ch, band, "bw"), f(octaves)),
+        P::OutputEqMode { ch, band, mode } => (oeq(ch, band, "mode"), i(mode)),
+        P::OutputEqBypass { ch, band, on } => (oeq(ch, band, "bypass"), b(on)),
+        P::OutputEqFreq { ch, band, hz } => (oeq(ch, band, "freq"), f(hz)),
+        P::OutputEqGain { ch, band, db } => (oeq(ch, band, "gain"), f(db)),
+        P::OutputEqBw { ch, band, octaves } => (oeq(ch, band, "bw"), f(octaves)),
+        P::GateBypass { ch, on } => (format!("/gate/{}/bypass", n(ch)), b(on)),
+        P::GateThreshold { ch, db } => (format!("/gate/{}/threshold", n(ch)), f(db)),
+        P::GateAttack { ch, ms } => (format!("/gate/{}/attack", n(ch)), f(ms)),
+        P::GateRelease { ch, ms } => (format!("/gate/{}/release", n(ch)), f(ms)),
+        P::CompBypass { ch, on } => (format!("/comp/{}/bypass", n(ch)), b(on)),
+        P::CompThreshold { ch, db } => (format!("/comp/{}/threshold", n(ch)), f(db)),
+        P::CompAttack { ch, ms } => (format!("/comp/{}/attack", n(ch)), f(ms)),
+        P::CompRelease { ch, ms } => (format!("/comp/{}/release", n(ch)), f(ms)),
+        P::CompRatio { ch, ratio } => (format!("/comp/{}/ratio", n(ch)), f(ratio)),
+        P::CompMakeup { ch, gain } => (format!("/comp/{}/makeup", n(ch)), f(gain)),
+        P::ReverbDecay { value } => ("/reverb/decay".to_owned(), f(value)),
+        P::ReverbDamping { value } => ("/reverb/damping".to_owned(), f(value)),
+        P::ReverbPredelay { ms } => ("/reverb/predelay".to_owned(), f(ms)),
+        P::ReverbWidth { value } => ("/reverb/width".to_owned(), f(value)),
+        P::ReverbPreset { preset } => ("/reverb/preset".to_owned(), i(preset)),
+        P::SampleRate { rate } => (
+            "/clock/rate".to_owned(),
+            OscType::Int(i32::try_from(rate.hz()).unwrap_or(i32::MAX)),
+        ),
+        P::ClockSource { source } => (
+            "/clock/source".to_owned(),
+            OscType::String(clock_source_name(source).to_owned()),
+        ),
+        P::OpticalMode { output, mode } => (
+            format!("/optical/{}/mode", if output { "out" } else { "in" }),
+            OscType::String(
+                match mode {
+                    OpticalMode::Adat => "adat",
+                    OpticalMode::Toslink => "toslink",
+                }
+                .to_owned(),
+            ),
+        ),
         Param::MixVol { bus, ch, gain } => (
             format!("/mix/{}/ch/{}/vol", n(bus.into()), n(ch)),
             f(fader::gain_to_pos(gain)),
@@ -193,7 +445,6 @@ pub fn feedback(param: &Param) -> Option<OscMessage> {
         Param::Phantom { ch, on } => (format!("/preamp/{}/48v", n(ch)), b(on)),
         Param::Pad { ch, on } => (format!("/preamp/{}/pad", n(ch)), b(on)),
         Param::Phase { ch, on } => (format!("/preamp/{}/phase", n(ch)), b(on)),
-        Param::EqBypass { ch, on } => (format!("/eq/{}/bypass", n(ch)), b(on)),
         Param::Route { input, output, on } => {
             (format!("/routing/in/{}/out/{}", n(input), n(output)), b(on))
         }
@@ -205,13 +456,10 @@ pub fn feedback(param: &Param) -> Option<OscMessage> {
             "/controlroom/phones/vol".to_owned(),
             f(fader::trim_db_to_pos(db)),
         ),
-        Param::EqBand { .. }
-        | Param::Hpf { .. }
-        | Param::Comp { .. }
-        | Param::Gate { .. }
-        | Param::Reverb { .. }
-        | Param::ReverbSend { .. }
-        | Param::Clock { .. } => return None,
+        Param::OutputTrim { ch, db } => (
+            format!("/output/{}/trim", n(ch)),
+            f(fader::trim_db_to_pos(db)),
+        ),
     };
     Some(OscMessage {
         addr,
@@ -286,8 +534,12 @@ mod tests {
                 Param::Phase { ch: 0, on: false },
             ),
             (
-                msg("/eq/4/bypass", OscType::Int(1)),
-                Param::EqBypass { ch: 3, on: true },
+                msg("/eq/4/band/2/bypass", OscType::Int(1)),
+                Param::InputEqBypass {
+                    ch: 3,
+                    band: 1,
+                    on: true,
+                },
             ),
             (
                 msg("/routing/in/1/out/2", OscType::Int(1)),
@@ -434,18 +686,134 @@ mod tests {
 }
 
 #[cfg(test)]
-mod dsp_feedback_tests {
+mod dsp_osc_tests {
     use super::*;
+    use crate::state::MotuState;
+
+    fn msg(addr: &str, arg: OscType) -> OscMessage {
+        OscMessage {
+            addr: addr.to_owned(),
+            args: vec![arg],
+        }
+    }
 
     #[test]
-    fn dsp_params_have_no_osc_address() {
-        assert!(feedback(&Param::Reverb {
-            enabled: true,
-            return_gain: 1.0,
-            time_s: 2.0,
-            predelay_ms: 10.0,
-        })
-        .is_none());
-        assert!(feedback(&Param::Dim { on: true }).is_some());
+    fn dsp_addresses_parse() {
+        let cases = [
+            (
+                msg("/eq/1/band/4/freq", OscType::Float(7000.0)),
+                Param::InputEqFreq {
+                    ch: 0,
+                    band: 3,
+                    hz: 7000.0,
+                },
+            ),
+            (
+                msg("/eq/8/band/1/mode", OscType::Int(3)),
+                Param::InputEqMode {
+                    ch: 7,
+                    band: 0,
+                    mode: 3,
+                },
+            ),
+            (
+                msg("/output/12/eq/band/3/gain", OscType::Float(-2.0)),
+                Param::OutputEqGain {
+                    ch: 11,
+                    band: 2,
+                    db: -2.0,
+                },
+            ),
+            (
+                msg("/output/1/eq/band/1/bw", OscType::Float(0.5)),
+                Param::OutputEqBw {
+                    ch: 0,
+                    band: 0,
+                    octaves: 0.5,
+                },
+            ),
+            (
+                msg("/gate/2/threshold", OscType::Float(-46.0)),
+                Param::GateThreshold { ch: 1, db: -46.0 },
+            ),
+            (
+                msg("/comp/3/makeup", OscType::Float(2.0)),
+                Param::CompMakeup { ch: 2, gain: 2.0 },
+            ),
+            (
+                msg("/comp/1/ratio", OscType::Int(4)),
+                Param::CompRatio { ch: 0, ratio: 4.0 },
+            ),
+            (
+                msg("/reverb/decay", OscType::Int(86)),
+                Param::ReverbDecay { value: 86.0 },
+            ),
+            (
+                msg("/reverb/preset", OscType::Float(2.0)),
+                Param::ReverbPreset { preset: 2 },
+            ),
+            (
+                msg("/clock/rate", OscType::Int(96_000)),
+                Param::SampleRate {
+                    rate: SampleRate::Hz96000,
+                },
+            ),
+            (
+                msg("/clock/source", OscType::String("Optical".into())),
+                Param::ClockSource {
+                    source: ClockSource::Optical,
+                },
+            ),
+        ];
+        for (m, p) in cases {
+            assert_eq!(parse(&m), Ok(Command::Set(p)), "{}", m.addr);
+        }
+        for bad in [
+            msg("/clock/rate", OscType::Int(32_000)),
+            msg("/clock/source", OscType::String("adat".into())),
+            msg("/clock/source", OscType::Int(3)),
+            msg("/reverb/preset", OscType::Int(256)),
+            msg("/eq/1/band/1/mode", OscType::Int(-1)),
+        ] {
+            assert!(matches!(parse(&bad), Err(OscError::ArgType(_))), "{bad:?}");
+        }
+        assert!(matches!(
+            parse(&msg("/eq/1/band/1/q", OscType::Float(1.0))),
+            Err(OscError::UnknownAddress(_))
+        ));
+        assert!(matches!(
+            parse(&msg("/eq/1/band/0/freq", OscType::Float(1.0))),
+            Err(OscError::BadIndex(..))
+        ));
+        assert!(matches!(
+            parse(&msg("/eq/1/bypass", OscType::Int(1))),
+            Err(OscError::UnknownAddress(_))
+        ));
+    }
+
+    #[test]
+    fn every_param_has_feedback_that_parses_back() {
+        // All params of the default state, whole-number values: exact in f32.
+        for p in MotuState::default().all_params() {
+            let Some(m) = feedback(&p) else {
+                panic!("no OSC address for {p:?}")
+            };
+            let Ok(Command::Set(back)) = parse(&m) else {
+                panic!("{} does not parse", m.addr)
+            };
+            assert_eq!(
+                crate::motu::throttle::key_of(&back),
+                crate::motu::throttle::key_of(&p)
+            );
+            if !matches!(
+                p,
+                Param::MixVol { .. }
+                    | Param::MainVol { .. }
+                    | Param::PhonesVol { .. }
+                    | Param::OutputTrim { .. }
+            ) {
+                assert_eq!(back, p, "{}", m.addr);
+            }
+        }
     }
 }

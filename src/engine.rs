@@ -33,7 +33,9 @@ use tokio::task::JoinHandle;
 use crate::motu::client::ConnectionStatus;
 use crate::motu::props;
 use crate::presets::{self, PresetStore};
-use crate::state::{Command, Labels, MotuState, Param, Preset, ServerEvent, SessionInfo, Topology};
+use crate::state::{
+    Command, DeviceInfo, Labels, MotuState, Param, Preset, ServerEvent, SessionInfo, Topology,
+};
 
 /// Capacity of the client → engine request queue.
 const REQUEST_QUEUE: usize = 1024;
@@ -87,9 +89,14 @@ pub enum DeviceEvent {
     /// applied on top of the live state; fields the device did not report
     /// (unmapped ones) keep their value.
     Synced(Vec<Param>),
+    /// What the device reported about itself, sent just before `Synced`.
+    /// A different topology rebuilds the state to the device's dimensions.
+    Identified(DeviceInfo),
     /// Changes made on the hardware side.
     Changed(Vec<Param>),
     Meters(Vec<f32>),
+    /// Raw meter frame payload (see [`ServerEvent::MeterRaw`]).
+    MeterRaw(Vec<u8>),
     Status(ConnectionStatus),
 }
 
@@ -324,6 +331,82 @@ impl Engine {
         }
     }
 
+    /// Recalls a preset: validates it, sends what differs to the device and
+    /// makes it active.
+    fn recall(&mut self, origin: Origin, preset: Preset) {
+        let name = preset.name.clone();
+        if preset.state.topology != self.state.topology {
+            self.reply_error(
+                origin,
+                format!("preset {name:?} was saved for a different topology"),
+            );
+            return;
+        }
+        // Untrusted file: validate shape and clamp every value.
+        let mut next = match preset.state.clone().normalized() {
+            Ok(s) => s,
+            Err(e) => {
+                self.reply_error(origin, format!("preset {name:?} rejected: {e}"));
+                return;
+            }
+        };
+        // Trims and +48V are never recalled (maintainer ruling).
+        next.keep_excluded_from(&self.state);
+        // With an identified device the live state mirrors the
+        // hardware (read back on connect): send only what differs.
+        // Otherwise (demo, not yet synced) send every mapped param.
+        let params = if self.session.device.is_some() {
+            self.state.diff(&next)
+        } else {
+            next.all_params()
+        };
+        for p in params {
+            if !p.excluded_from_recall() {
+                self.forward(p);
+            }
+        }
+        self.state = next;
+        self.session.active_preset = Some(preset.name.clone());
+        self.active = Some(preset);
+        self.session.modified = false;
+        self.emit(origin, Target::All, self.snapshot());
+    }
+
+    /// Imports a preset file sent by a client (same format as the files in
+    /// the presets directory): checks it, stores it under `name`, recalls it.
+    async fn import(&mut self, origin: Origin, name: &str, text: &str) {
+        let preset = match presets::parse_preset(name, text) {
+            Ok(p) => p,
+            Err(e) => return self.reply_error(origin, format!("cannot import {name:?}: {e:#}")),
+        };
+        if preset.state.topology != self.state.topology {
+            return self.reply_error(
+                origin,
+                format!("preset {name:?} was saved for a different topology"),
+            );
+        }
+        let state = match preset.state.normalized() {
+            Ok(s) => s,
+            Err(e) => return self.reply_error(origin, format!("preset {name:?} rejected: {e}")),
+        };
+        match self.store.save(name, &state).await {
+            Ok(saved) => {
+                if let Err(i) = self.preset_names.binary_search(&saved.name) {
+                    self.preset_names.insert(i, saved.name.clone());
+                }
+                self.emit(
+                    origin,
+                    Target::All,
+                    ServerEvent::Presets {
+                        names: self.preset_names.clone(),
+                    },
+                );
+                self.recall(origin, saved);
+            }
+            Err(e) => self.reply_error(origin, format!("{e:#}")),
+        }
+    }
+
     async fn on_command(&mut self, origin: Origin, command: Command) {
         match command {
             Command::Set(param) => match self.state.apply(&param) {
@@ -342,38 +425,10 @@ impl Engine {
                 Err(e) => self.reply_error(origin, e.to_string()),
             },
             Command::LoadPreset { name } => match self.store.load(&name).await {
-                Ok(preset) if preset.state.topology != self.state.topology => {
-                    self.reply_error(
-                        origin,
-                        format!("preset {name:?} was saved for a different topology"),
-                    );
-                }
-                Ok(preset) => {
-                    // Untrusted file: validate shape and clamp every value.
-                    let mut next = match preset.state.clone().normalized() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            self.reply_error(origin, format!("preset {name:?} rejected: {e}"));
-                            return;
-                        }
-                    };
-                    // Trims and +48V are never recalled (maintainer ruling).
-                    next.keep_excluded_from(&self.state);
-                    // The hardware state may be unknown (unmapped / not yet
-                    // synced): send every mapped param, not a diff.
-                    for p in next.all_params() {
-                        if !p.excluded_from_recall() {
-                            self.forward(p);
-                        }
-                    }
-                    self.state = next;
-                    self.session.active_preset = Some(preset.name.clone());
-                    self.active = Some(preset);
-                    self.session.modified = false;
-                    self.emit(origin, Target::All, self.snapshot());
-                }
+                Ok(preset) => self.recall(origin, preset),
                 Err(e) => self.reply_error(origin, format!("{e:#}")),
             },
+            Command::ImportPreset { name, text } => self.import(origin, &name, &text).await,
             Command::SavePreset { name } => match self.store.save(&name, &self.state).await {
                 Ok(preset) => {
                     self.session.active_preset = Some(preset.name.clone());
@@ -439,6 +494,24 @@ impl Engine {
     fn on_device(&mut self, event: DeviceEvent) {
         let origin = Origin::Hardware;
         match event {
+            DeviceEvent::Identified(info) => {
+                if info.topology != self.state.topology {
+                    tracing::info!(
+                        from = ?self.state.topology,
+                        to = ?info.topology,
+                        "device topology differs, state rebuilt"
+                    );
+                    self.state = MotuState::new(info.topology);
+                }
+                if self.session.device.as_ref() != Some(&info) {
+                    self.session.device = Some(info);
+                    self.emit(
+                        origin,
+                        Target::All,
+                        ServerEvent::Session(self.session.clone()),
+                    );
+                }
+            }
             DeviceEvent::Synced(params) => {
                 for p in &params {
                     if let Err(e) = self.state.apply(p) {
@@ -471,10 +544,22 @@ impl Engine {
             DeviceEvent::Meters(levels) => {
                 self.emit(origin, Target::All, ServerEvent::Meters { levels })
             }
+            DeviceEvent::MeterRaw(raw) => {
+                self.emit(origin, Target::All, ServerEvent::MeterRaw { raw })
+            }
             DeviceEvent::Status(connection) => {
                 if self.session.connection != connection {
                     self.session.connection = connection;
                     self.emit(origin, Target::All, ServerEvent::Status { connection });
+                    // Demo mode: no device behind the state any more.
+                    if connection == ConnectionStatus::Demo && self.session.device.take().is_some()
+                    {
+                        self.emit(
+                            origin,
+                            Target::All,
+                            ServerEvent::Session(self.session.clone()),
+                        );
+                    }
                 }
             }
         }
@@ -543,7 +628,20 @@ mod tests {
                 }]
             }
         );
-        // Mix faders have no hardware mapping yet: never queued (audit #2).
+        // Mix faders are mapped (the client encodes them with the device layout).
+        assert_eq!(
+            link.commands.try_recv().ok(),
+            Some(Param::MixVol {
+                bus: 0,
+                ch: 0,
+                gain: crate::state::MIX_GAIN_MAX
+            })
+        );
+        // Params without a hardware counterpart are never queued (audit #2).
+        h.command(o, Command::Set(Param::Dim { on: true }))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await;
         assert!(link.commands.try_recv().is_err());
         h.command(o, Command::Set(Param::MainVol { db: -6.4 }))
             .await
@@ -554,6 +652,58 @@ mod tests {
             Some(Param::MainVol { db: -6.0 }),
             "mapped params are forwarded with their effective value"
         );
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn import_stores_and_recalls_a_preset_file() {
+        let (h, _link, dir) = setup("import").await;
+        let mut rx = h.subscribe();
+        let o = Origin::Web(3);
+        // Build a file the way the UI exports it: live state with Mono on.
+        let mut state = MotuState::new(Topology::default());
+        state.control_room.mono = true;
+        let text =
+            serde_json::json!({ "schema_version": 2, "name": "x", "state": state }).to_string();
+        h.command(
+            o,
+            Command::ImportPreset {
+                name: "imported".into(),
+                text,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            next(&mut rx).await.event,
+            ServerEvent::Presets {
+                names: vec!["imported".into()]
+            }
+        );
+        let ServerEvent::Snapshot { state, session } = next(&mut rx).await.event else {
+            panic!("snapshot")
+        };
+        assert!(state.control_room.mono);
+        assert_eq!(session.active_preset.as_deref(), Some("imported"));
+        assert!(
+            tokio::fs::metadata(dir.join("presets").join("imported.json"))
+                .await
+                .is_ok()
+        );
+
+        // Garbage is refused, to the sender only, and nothing is stored.
+        h.command(
+            o,
+            Command::ImportPreset {
+                name: "bad".into(),
+                text: "{ nope".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let env = next(&mut rx).await;
+        assert!(matches!(env.event, ServerEvent::Error { .. }));
+        assert!(env.is_for(o) && !env.is_for(Origin::Web(4)));
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
@@ -644,7 +794,105 @@ mod tests {
         assert!(sent.contains(&Param::Mono { on: false }));
         assert!(sent.iter().all(|p| !p.excluded_from_recall()));
         assert!(sent.iter().all(props::is_mapped));
-        assert!(sent.len() < 64, "only mapped params: {}", sent.len());
+        // No device identified (demo): the whole mapped state is sent.
+        assert!(sent.iter().any(|p| matches!(p, Param::MixVol { .. })));
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn recall_with_an_identified_device_sends_only_the_difference() {
+        let (h, mut link, dir) = setup("recall-diff").await;
+        let mut rx = h.subscribe();
+        let o = Origin::System;
+        link.events
+            .send(DeviceEvent::Identified(DeviceInfo {
+                topology: Topology::ULTRALITE_MK5,
+                ..DeviceInfo::default()
+            }))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await; // session with the device
+        h.command(
+            o,
+            Command::SavePreset {
+                name: "base".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let _ = next(&mut rx).await; // session
+        let _ = next(&mut rx).await; // presets
+        h.command(o, Command::Set(Param::Mono { on: true }))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await; // changed
+        let _ = next(&mut rx).await; // session (modified)
+        while link.commands.try_recv().is_ok() {}
+        h.command(
+            o,
+            Command::LoadPreset {
+                name: "base".into(),
+            },
+        )
+        .await
+        .unwrap();
+        loop {
+            if matches!(next(&mut rx).await.event, ServerEvent::Snapshot { .. }) {
+                break;
+            }
+        }
+        let mut sent = Vec::new();
+        while let Ok(p) = link.commands.try_recv() {
+            sent.push(p);
+        }
+        assert_eq!(sent, vec![Param::Mono { on: false }]);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn identified_device_reshapes_state_and_reaches_the_session() {
+        let (h, link, dir) = setup("ident").await;
+        let mut rx = h.subscribe();
+        let topology = Topology {
+            mixes: 2,
+            mixer_inputs: 4,
+            ..Topology::ULTRALITE_MK5
+        };
+        let info = DeviceInfo {
+            model: "TEST".into(),
+            topology,
+            ..DeviceInfo::default()
+        };
+        link.events
+            .send(DeviceEvent::Identified(info.clone()))
+            .await
+            .unwrap();
+        let ServerEvent::Session(session) = next(&mut rx).await.event else {
+            panic!("session")
+        };
+        assert_eq!(session.device, Some(info));
+        link.events.send(DeviceEvent::Synced(vec![])).await.unwrap();
+        let ServerEvent::Snapshot { state, .. } = next(&mut rx).await.event else {
+            panic!("snapshot")
+        };
+        assert_eq!(state.topology, topology);
+        assert_eq!(state.mixes.len(), 2);
+        assert_eq!(state.mixes[0].channels.len(), 4);
+        // Back to demo: the device identity is dropped.
+        link.events
+            .send(DeviceEvent::Status(ConnectionStatus::Online))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await;
+        link.events
+            .send(DeviceEvent::Status(ConnectionStatus::Demo))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await;
+        let ServerEvent::Session(session) = next(&mut rx).await.event else {
+            panic!("session")
+        };
+        assert_eq!(session.device, None);
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 

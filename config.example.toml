@@ -47,3 +47,15 @@ trust_forwarded_headers = false
 # Extra origins allowed to open the /ws WebSocket (same-origin is always allowed).
 # Example behind a proxy: ["https://mixer.example.com"]
 allowed_origins = []
+
+[update]
+# Release channel followed by cuemix-update and the web UI's update notice:
+#   "stable"     = published releases (vX.Y.Z)
+#   "prerelease" = the newest release, alphas/betas included (vX.Y.Z-alpha.N)
+# Nothing is installed automatically: a daily timer only checks, and an
+# install runs when someone presses Install in the UI or runs cuemix-update.
+channel = "stable"
+# Files shared with the root update units (deploy/systemd); defaults shown.
+status_file = "/var/lib/cuemix-web/update-status.json"
+request_file = "/var/lib/cuemix-web/update-request"
+result_file = "/var/lib/cuemix-web/update-result"

@@ -1,0 +1,13 @@
+[Unit]
+Description=cuemix-web: install the update requested from the web UI
+Documentation=https://github.com/lejeanf/cuemix-web
+
+[Service]
+Type=oneshot
+# Remove the request first so the path unit does not fire again.
+ExecStartPre=/bin/rm -f /var/lib/cuemix-web/update-request
+# Installs the newest release of the configured channel (sha256 check,
+# health check, automatic rollback), then records its exit code for the UI
+# and refreshes the status.
+ExecStart=/bin/sh -c '/usr/local/sbin/cuemix-update; echo "$? $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" > /var/lib/cuemix-web/update-result; chmod 0644 /var/lib/cuemix-web/update-result'
+ExecStartPost=-/usr/local/sbin/cuemix-update --check --status-file /var/lib/cuemix-web/update-status.json

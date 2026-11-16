@@ -1,7 +1,7 @@
 // Client reducer: applies server events (and optimistic local edits) to the
 // client state. It mutates `s` in place (so Svelte's deep $state proxy keeps
 // fine-grained reactivity) and returns it.
-import type { Labels, MotuState, Param, ServerEvent, SessionInfo } from './protocol';
+import type { EqBand, Labels, MotuState, Param, ServerEvent, SessionInfo } from './protocol';
 
 export interface Toast {
   id: number;
@@ -47,6 +47,11 @@ function at<T>(arr: readonly T[] | undefined, i: unknown): T | undefined {
  */
 function setAt<T>(arr: T[], i: unknown, v: T): void {
   if (typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < arr.length) arr.splice(i, 1, v);
+}
+
+/** EQ band `band` of row `ch` of `rows` (input or output EQ), index-guarded. */
+function eqBand(rows: EqBand[][] | undefined, ch: unknown, band: unknown): EqBand | undefined {
+  return at(at(rows, ch), band);
 }
 
 /** Apply one parameter to the state (used for `changed` and optimistic edits). Out-of-range indices are ignored. */
@@ -95,59 +100,100 @@ export function applyParam(st: MotuState, p: Param): void {
       if (a) a.phase = p.on;
       break;
     }
-    case 'eq_bypass': {
-      const c = at(st.channels, p.ch);
-      if (c) c.eq.bypass = p.on;
+    case 'input_eq_mode':
+    case 'output_eq_mode': {
+      const b = eqBand(p.param === 'input_eq_mode' ? st.input_eq : st.output_eq, p.ch, p.band);
+      if (b) b.mode = p.mode;
       break;
     }
-    case 'eq_band': {
-      const b = at(at(st.channels, p.ch)?.eq.bands, p.band);
-      if (b) {
-        b.enabled = p.enabled;
-        b.freq_hz = p.freq_hz;
-        b.gain_db = p.gain_db;
-        b.q = p.q;
-      }
+    case 'input_eq_bypass':
+    case 'output_eq_bypass': {
+      const b = eqBand(p.param === 'input_eq_bypass' ? st.input_eq : st.output_eq, p.ch, p.band);
+      if (b) b.bypass = p.on;
       break;
     }
-    case 'hpf': {
-      const h = at(st.channels, p.ch)?.eq.hpf;
-      if (h) {
-        h.enabled = p.enabled;
-        h.freq_hz = p.freq_hz;
-      }
+    case 'input_eq_freq':
+    case 'output_eq_freq': {
+      const b = eqBand(p.param === 'input_eq_freq' ? st.input_eq : st.output_eq, p.ch, p.band);
+      if (b) b.freq_hz = p.hz;
       break;
     }
-    case 'comp': {
-      const c = at(st.channels, p.ch)?.comp;
-      if (c) {
-        c.enabled = p.enabled;
-        c.threshold_db = p.threshold_db;
-        c.ratio = p.ratio;
-        c.attack_ms = p.attack_ms;
-        c.release_ms = p.release_ms;
-        c.gain_db = p.gain_db;
-      }
+    case 'input_eq_gain':
+    case 'output_eq_gain': {
+      const b = eqBand(p.param === 'input_eq_gain' ? st.input_eq : st.output_eq, p.ch, p.band);
+      if (b) b.gain_db = p.db;
       break;
     }
-    case 'gate': {
-      const g = at(st.channels, p.ch)?.gate;
-      if (g) {
-        g.enabled = p.enabled;
-        g.threshold_db = p.threshold_db;
-        g.attack_ms = p.attack_ms;
-        g.release_ms = p.release_ms;
-      }
+    case 'input_eq_bw':
+    case 'output_eq_bw': {
+      const b = eqBand(p.param === 'input_eq_bw' ? st.input_eq : st.output_eq, p.ch, p.band);
+      if (b) b.bw_oct = p.octaves;
       break;
     }
-    case 'reverb':
-      st.reverb.enabled = p.enabled;
-      st.reverb.return_gain = p.return_gain;
-      st.reverb.time_s = p.time_s;
-      st.reverb.predelay_ms = p.predelay_ms;
+    case 'gate_bypass': {
+      const g = at(st.gates, p.ch);
+      if (g) g.bypass = p.on;
       break;
-    case 'reverb_send':
-      setAt(st.reverb.sends, p.ch, p.gain);
+    }
+    case 'gate_threshold': {
+      const g = at(st.gates, p.ch);
+      if (g) g.threshold_db = p.db;
+      break;
+    }
+    case 'gate_attack': {
+      const g = at(st.gates, p.ch);
+      if (g) g.attack_ms = p.ms;
+      break;
+    }
+    case 'gate_release': {
+      const g = at(st.gates, p.ch);
+      if (g) g.release_ms = p.ms;
+      break;
+    }
+    case 'comp_bypass': {
+      const c = at(st.compressors, p.ch);
+      if (c) c.bypass = p.on;
+      break;
+    }
+    case 'comp_threshold': {
+      const c = at(st.compressors, p.ch);
+      if (c) c.threshold_db = p.db;
+      break;
+    }
+    case 'comp_attack': {
+      const c = at(st.compressors, p.ch);
+      if (c) c.attack_ms = p.ms;
+      break;
+    }
+    case 'comp_release': {
+      const c = at(st.compressors, p.ch);
+      if (c) c.release_ms = p.ms;
+      break;
+    }
+    case 'comp_ratio': {
+      const c = at(st.compressors, p.ch);
+      if (c) c.ratio = p.ratio;
+      break;
+    }
+    case 'comp_makeup': {
+      const c = at(st.compressors, p.ch);
+      if (c) c.makeup = p.gain;
+      break;
+    }
+    case 'reverb_decay':
+      st.reverb.decay = p.value;
+      break;
+    case 'reverb_damping':
+      st.reverb.damping = p.value;
+      break;
+    case 'reverb_predelay':
+      st.reverb.predelay_ms = p.ms;
+      break;
+    case 'reverb_width':
+      st.reverb.width = p.value;
+      break;
+    case 'reverb_preset':
+      st.reverb.preset = p.preset;
       break;
     case 'route': {
       const row = at(st.routing.matrix, p.input);
@@ -169,9 +215,18 @@ export function applyParam(st: MotuState, p: Param): void {
     case 'phones_vol':
       st.control_room.phones_db = p.db;
       break;
-    case 'clock':
-      st.clock.sample_rate = p.sample_rate;
+    case 'output_trim':
+      if (st.output_trims) setAt(st.output_trims, p.ch, p.db);
+      break;
+    case 'sample_rate':
+      st.clock.sample_rate = p.rate;
+      break;
+    case 'clock_source':
       st.clock.source = p.source;
+      break;
+    case 'optical_mode':
+      if (p.output) st.clock.optical_out = p.mode;
+      else st.clock.optical_in = p.mode;
       break;
   }
 }
@@ -193,6 +248,7 @@ export function applyEvent(s: ClientState, ev: ServerEvent): ClientState {
         active_preset: ev.active_preset,
         modified: ev.modified,
         connection: ev.connection,
+        device: ev.device ?? null,
       };
       break;
     case 'presets':
@@ -200,6 +256,8 @@ export function applyEvent(s: ClientState, ev: ServerEvent): ClientState {
       break;
     case 'labels':
       s.labels = { channels: { ...ev.channels } };
+      break;
+    case 'meter_raw':
       break;
     case 'meters':
       s.meters = ev.levels;

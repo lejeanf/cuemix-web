@@ -2,13 +2,18 @@
   import { store } from '../lib/store.svelte';
   import { S } from '../lib/strings';
   import { DSP_LIMITS } from '../lib/protocol';
+  import { formatDb, gainToDb } from '../lib/fader';
   import EqCurve from './EqCurve.svelte';
+  import EqBands from './EqBands.svelte';
   import Knob from './Knob.svelte';
-  import NumField from './NumField.svelte';
 
+  // DSP exists only on the analog inputs (input EQ + compressor) and the mic
+  // inputs (gate); the strip only offers the drawer on those.
   const ch = $derived(store.dspChannel);
-  const dsp = $derived(ch !== null ? store.state?.channels[ch] : undefined);
+  const comp = $derived(ch !== null ? store.state?.compressors[ch] : undefined);
+  const gate = $derived(ch !== null && store.hasGate(ch) ? store.state?.gates[ch] : undefined);
   const off = $derived(!store.ready);
+  const hint = $derived(store.hint('input_eq_freq'));
   let band = $state(0);
   const L = DSP_LIMITS;
 
@@ -16,70 +21,27 @@
   function key(e: KeyboardEvent) {
     if (e.key === 'Escape') close();
   }
-  const ms = (v: number) => `${v < 10 ? v.toFixed(1) : Math.round(v)} ms`;
+  const ms = (v: number) => `${Math.round(v)} ms`;
+  const db = (v: number) => `${v.toFixed(1)} dB`;
+  /** Make-up gain is linear on the MOTU; shown in dB. */
+  const makeupText = (g: number) => `${formatDb(gainToDb(g))} dB`;
 </script>
 
 <svelte:window onkeydown={key} />
 
-{#if ch !== null && dsp}
+{#if ch !== null && store.hasDsp(ch) && comp}
   <button class="backdrop" aria-label={S.close} onclick={close} tabindex="-1"></button>
   <div class="drawer" role="dialog" aria-label="{S.dsp} {store.labelName(ch)}">
     <header>
       <h2>{store.labelName(ch)} — {S.dsp}</h2>
       <button class="x" onclick={close} aria-label={S.close}>✕</button>
     </header>
+    {#if hint}<p class="hint">{hint}</p>{/if}
 
     <section>
-      <div class="sh">
-        <h3>{S.eq}</h3>
-        <button
-          class="b"
-          class:on={!dsp.eq.bypass}
-          aria-pressed={!dsp.eq.bypass}
-          disabled={off}
-          onclick={() => store.set({ param: 'eq_bypass', ch, on: !dsp.eq.bypass }, true)}
-          >{dsp.eq.bypass ? `${S.eqBypass}: on` : `${S.eq} active`}</button
-        >
-      </div>
-      <EqCurve {ch} bind:selected={band} />
-      <div class="hpf">
-        <button
-          class="b"
-          class:on={dsp.eq.hpf.enabled}
-          aria-pressed={dsp.eq.hpf.enabled}
-          disabled={off}
-          onclick={() => store.setHpf(ch, { enabled: !dsp.eq.hpf.enabled }, true)}>{S.hpf}</button
-        >
-        <NumField
-          label="{S.hpf} frequency"
-          value={dsp.eq.hpf.freq_hz}
-          min={L.FREQ_HZ[0]}
-          max={L.FREQ_HZ[1]}
-          unit="Hz"
-          disabled={off}
-          onchange={(v) => store.setHpf(ch, { freq_hz: v }, true)}
-        />
-      </div>
-      <div class="bands">
-        {#each dsp.eq.bands as b, i (i)}
-          <div class="band" class:sel={band === i}>
-            <button
-              class="b"
-              class:on={b.enabled}
-              aria-pressed={b.enabled}
-              aria-label="Band {i + 1} enable"
-              disabled={off}
-              onclick={() => {
-                band = i;
-                store.setEqBand(ch, i, { enabled: !b.enabled }, true);
-              }}>{i + 1}</button
-            >
-            <NumField label="Band {i + 1} frequency" value={b.freq_hz} min={L.FREQ_HZ[0]} max={L.FREQ_HZ[1]} step={1} unit="Hz" disabled={off} onchange={(v) => store.setEqBand(ch, i, { freq_hz: v }, true)} />
-            <NumField label="Band {i + 1} gain" value={b.gain_db} min={L.EQ_GAIN_DB[0]} max={L.EQ_GAIN_DB[1]} step={0.1} unit="dB" disabled={off} onchange={(v) => store.setEqBand(ch, i, { gain_db: v }, true)} />
-            <NumField label="Band {i + 1} Q" value={b.q} min={L.EQ_Q[0]} max={L.EQ_Q[1]} step={0.05} disabled={off} onchange={(v) => store.setEqBand(ch, i, { q: v }, true)} />
-          </div>
-        {/each}
-      </div>
+      <h3>{S.eq}</h3>
+      <EqCurve kind="input" {ch} bind:selected={band} height={180} />
+      <EqBands kind="input" {ch} bind:selected={band} />
     </section>
 
     <section>
@@ -87,40 +49,42 @@
         <h3>{S.compressor}</h3>
         <button
           class="b"
-          class:on={dsp.comp.enabled}
-          aria-pressed={dsp.comp.enabled}
-          aria-label="{S.compressor} enable"
+          class:on={!comp.bypass}
+          aria-pressed={!comp.bypass}
+          aria-label="{S.compressor} {comp.bypass ? 'bypassed' : 'active'}"
           disabled={off}
-          onclick={() => store.setComp(ch, { enabled: !dsp.comp.enabled }, true)}>{dsp.comp.enabled ? 'On' : 'Off'}</button
+          onclick={() => store.set({ param: 'comp_bypass', ch, on: !comp.bypass }, true)}>{comp.bypass ? S.bypass : 'On'}</button
         >
       </div>
       <div class="knobs">
-        <Knob label="Threshold" value={dsp.comp.threshold_db} min={L.COMP_THRESHOLD_DB[0]} max={L.COMP_THRESHOLD_DB[1]} reset={0} step={0.5} format={(v) => `${v.toFixed(1)} dB`} disabled={off} onchange={(v, f) => store.setComp(ch, { threshold_db: v }, f)} />
-        <Knob label="Ratio" value={dsp.comp.ratio} min={L.COMP_RATIO[0]} max={L.COMP_RATIO[1]} reset={2} step={0.1} format={(v) => `${v.toFixed(1)}:1`} disabled={off} onchange={(v, f) => store.setComp(ch, { ratio: v }, f)} />
-        <Knob label="Attack" value={dsp.comp.attack_ms} min={L.ATTACK_MS[0]} max={L.ATTACK_MS[1]} reset={10} log format={ms} disabled={off} onchange={(v, f) => store.setComp(ch, { attack_ms: v }, f)} />
-        <Knob label="Release" value={dsp.comp.release_ms} min={L.RELEASE_MS[0]} max={L.RELEASE_MS[1]} reset={100} log format={ms} disabled={off} onchange={(v, f) => store.setComp(ch, { release_ms: v }, f)} />
-        <Knob label="Makeup" value={dsp.comp.gain_db} min={L.COMP_GAIN_DB[0]} max={L.COMP_GAIN_DB[1]} reset={0} step={0.5} format={(v) => `${v.toFixed(1)} dB`} disabled={off} onchange={(v, f) => store.setComp(ch, { gain_db: v }, f)} />
+        <Knob label="Threshold" value={comp.threshold_db} min={-60} max={0} reset={-10} step={0.5} size={36} format={db} disabled={off} onchange={(v, f) => store.set({ param: 'comp_threshold', ch, db: v }, f)} />
+        <Knob label="Ratio" value={comp.ratio} min={L.COMP_RATIO[0]} max={20} reset={2} step={0.1} log size={36} format={(v) => `${v.toFixed(1)}:1`} disabled={off} onchange={(v, f) => store.set({ param: 'comp_ratio', ch, ratio: v }, f)} />
+        <Knob label="Attack" value={Math.max(comp.attack_ms, 1)} min={1} max={L.ATTACK_MS[1]} reset={10} step={1} log size={36} format={ms} disabled={off} onchange={(v, f) => store.set({ param: 'comp_attack', ch, ms: Math.round(v) }, f)} />
+        <Knob label="Release" value={Math.max(comp.release_ms, 1)} min={1} max={L.RELEASE_MS[1]} reset={1000} step={1} log size={36} format={ms} disabled={off} onchange={(v, f) => store.set({ param: 'comp_release', ch, ms: Math.round(v) }, f)} />
+        <Knob label="Makeup" value={comp.makeup} min={1} max={L.COMP_MAKEUP[1]} reset={1} log size={36} format={makeupText} disabled={off} onchange={(v, f) => store.set({ param: 'comp_makeup', ch, gain: v }, f)} />
       </div>
     </section>
 
-    <section>
-      <div class="sh">
-        <h3>{S.gate}</h3>
-        <button
-          class="b"
-          class:on={dsp.gate.enabled}
-          aria-pressed={dsp.gate.enabled}
-          aria-label="{S.gate} enable"
-          disabled={off}
-          onclick={() => store.setGate(ch, { enabled: !dsp.gate.enabled }, true)}>{dsp.gate.enabled ? 'On' : 'Off'}</button
-        >
-      </div>
-      <div class="knobs">
-        <Knob label="Threshold" value={dsp.gate.threshold_db} min={L.GATE_THRESHOLD_DB[0]} max={L.GATE_THRESHOLD_DB[1]} reset={-60} step={0.5} format={(v) => `${v.toFixed(1)} dB`} disabled={off} onchange={(v, f) => store.setGate(ch, { threshold_db: v }, f)} />
-        <Knob label="Attack" value={dsp.gate.attack_ms} min={L.ATTACK_MS[0]} max={L.ATTACK_MS[1]} reset={1} log format={ms} disabled={off} onchange={(v, f) => store.setGate(ch, { attack_ms: v }, f)} />
-        <Knob label="Release" value={dsp.gate.release_ms} min={L.RELEASE_MS[0]} max={L.RELEASE_MS[1]} reset={100} log format={ms} disabled={off} onchange={(v, f) => store.setGate(ch, { release_ms: v }, f)} />
-      </div>
-    </section>
+    {#if gate}
+      <section>
+        <div class="sh">
+          <h3>{S.gate}</h3>
+          <button
+            class="b"
+            class:on={!gate.bypass}
+            aria-pressed={!gate.bypass}
+            aria-label="{S.gate} {gate.bypass ? 'bypassed' : 'active'}"
+            disabled={off}
+            onclick={() => store.set({ param: 'gate_bypass', ch, on: !gate.bypass }, true)}>{gate.bypass ? S.bypass : 'On'}</button
+          >
+        </div>
+        <div class="knobs">
+          <Knob label="Threshold" value={gate.threshold_db} min={-80} max={0} reset={-46} step={0.5} size={36} format={db} disabled={off} onchange={(v, f) => store.set({ param: 'gate_threshold', ch, db: v }, f)} />
+          <Knob label="Attack" value={Math.max(gate.attack_ms, 1)} min={1} max={L.ATTACK_MS[1]} reset={10} step={1} log size={36} format={ms} disabled={off} onchange={(v, f) => store.set({ param: 'gate_attack', ch, ms: Math.round(v) }, f)} />
+          <Knob label="Release" value={Math.max(gate.release_ms, 1)} min={1} max={L.RELEASE_MS[1]} reset={1000} step={1} log size={36} format={ms} disabled={off} onchange={(v, f) => store.set({ param: 'gate_release', ch, ms: Math.round(v) }, f)} />
+        </div>
+      </section>
+    {/if}
   </div>
 {/if}
 
@@ -138,15 +102,15 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: min(680px, 100vw);
+    width: min(620px, 100vw);
     z-index: 41;
     overflow-y: auto;
     background: var(--bg-alt);
     border-left: 1px solid var(--border);
-    padding: 12px 16px 24px;
+    padding: 10px 14px 20px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
     animation: slide 0.18s ease-out;
   }
   @keyframes slide {
@@ -167,15 +131,20 @@
   }
   h2 {
     margin: 0;
-    font-size: 16px;
+    font-size: 15px;
   }
   h3 {
     margin: 0;
-    font-size: 14px;
+    font-size: 13px;
+  }
+  .hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-dim);
   }
   .x {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: 36px;
+    min-height: 36px;
     background: none;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -185,48 +154,26 @@
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 12px;
+    padding: 8px 10px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-  }
-  .sh,
-  .hpf {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .sh {
-    justify-content: space-between;
-  }
-  .bands {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 8px;
   }
-  .band {
+  .sh {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-  }
-  .band.sel {
-    border-color: var(--cyan);
-  }
-  .band :global(input) {
-    width: 64px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
   }
   .knobs {
     display: flex;
     flex-wrap: wrap;
-    gap: 18px;
+    gap: 12px;
   }
   .b {
     min-width: 44px;
-    min-height: 36px;
-    padding: 0 12px;
+    min-height: 30px;
+    padding: 0 10px;
     background: var(--bg-alt);
     border: 1px solid var(--border);
     border-radius: 6px;

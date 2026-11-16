@@ -8,6 +8,7 @@
 //! | `Fixed`   | 4     | signed `8.24` fixed point, BE (`i32 / 2^24`)  |
 //! | `U32`     | 4     | `u32` BE (booleans/enums)                     |
 //! | `U8`      | 1     | `u8` (booleans/enums)                         |
+//! | `I16`     | 2     | `i16` BE ("Int16": DSP attack/release in ms)  |
 //! | `Str32`   | 32    | UTF-8, NUL-terminated / NUL-padded            |
 //!
 //! The concrete `prop_id` table is **not yet confirmed against hardware**
@@ -73,6 +74,8 @@ pub enum ValueKind {
     Fixed,
     U32,
     U8,
+    /// 2-byte signed big-endian integer ("Int16" in the device tables).
+    I16,
     Str32,
 }
 
@@ -82,6 +85,7 @@ impl ValueKind {
         match self {
             ValueKind::Fixed | ValueKind::U32 => 4,
             ValueKind::U8 => 1,
+            ValueKind::I16 => 2,
             ValueKind::Str32 => STR32_LEN,
         }
     }
@@ -93,6 +97,7 @@ pub enum Value {
     Fixed(f64),
     U32(u32),
     U8(u8),
+    I16(i16),
     Str32(String),
 }
 
@@ -102,6 +107,7 @@ impl Value {
             Value::Fixed(_) => ValueKind::Fixed,
             Value::U32(_) => ValueKind::U32,
             Value::U8(_) => ValueKind::U8,
+            Value::I16(_) => ValueKind::I16,
             Value::Str32(_) => ValueKind::Str32,
         }
     }
@@ -112,6 +118,7 @@ impl Value {
             Value::Fixed(v) => out.extend_from_slice(&to_fixed_8_24(*v)?.to_be_bytes()),
             Value::U32(v) => out.extend_from_slice(&v.to_be_bytes()),
             Value::U8(v) => out.push(*v),
+            Value::I16(v) => out.extend_from_slice(&v.to_be_bytes()),
             Value::Str32(s) => {
                 let bytes = s.as_bytes();
                 if bytes.len() >= STR32_LEN {
@@ -145,6 +152,10 @@ impl Value {
                 [b] => Ok(Value::U8(*b)),
                 _ => Err(payload_err()),
             },
+            ValueKind::I16 => {
+                let arr: [u8; 2] = bytes.try_into().map_err(|_| payload_err())?;
+                Ok(Value::I16(i16::from_be_bytes(arr)))
+            }
             ValueKind::Str32 => {
                 if bytes.len() != STR32_LEN {
                     return Err(payload_err());
@@ -298,6 +309,7 @@ mod tests {
             1 => ValueKind::Fixed,
             2 => ValueKind::U32,
             3 => ValueKind::U8,
+            5 => ValueKind::I16,
             _ => ValueKind::Str32,
         };
         let frames = [
@@ -320,6 +332,11 @@ mod tests {
                 prop_id: 4,
                 index: 2,
                 value: Value::Str32("Mic 1".into()),
+            },
+            Frame {
+                prop_id: 5,
+                index: 1,
+                value: Value::I16(-1000),
             },
         ];
         for f in frames {
@@ -410,10 +427,44 @@ mod tests {
                 ValueKind::Fixed,
                 ValueKind::U32,
                 ValueKind::U8,
+                ValueKind::I16,
                 ValueKind::Str32,
             ] {
                 let _ = Frame::decode(&buf, |_| kind);
             }
+        }
+    }
+
+    #[test]
+    fn int16_is_two_big_endian_bytes() {
+        let f = Frame {
+            prop_id: 1009,
+            index: 1,
+            value: Value::I16(1000),
+        };
+        assert_eq!(f.encode(), Ok(vec![0x03, 0xF1, 0x00, 0x01, 0x03, 0xE8]));
+        assert_eq!(
+            f.encode_write(),
+            Ok(vec![0x03, 0xF1, 0x00, 0x01, 0x00, 0x02, 0x03, 0xE8])
+        );
+        let neg = Value::decode(ValueKind::I16, &[0xFF, 0xF6]);
+        assert_eq!(neg, Ok(Value::I16(-10)));
+        assert!(matches!(
+            Value::decode(ValueKind::I16, &[0x01]),
+            Err(ProtocolError::PayloadLength { .. })
+        ));
+        assert!(matches!(
+            Frame::decode(&[0x03, 0xF1, 0, 0, 0, 0, 0], |_| ValueKind::I16),
+            Err(ProtocolError::PayloadLength { .. })
+        ));
+        for v in [i16::MIN, -1, 0, 10, i16::MAX] {
+            let f = Frame {
+                prop_id: 1013,
+                index: 7,
+                value: Value::I16(v),
+            };
+            let bytes = f.encode().unwrap_or_default();
+            assert_eq!(Frame::decode(&bytes, |_| ValueKind::I16), Ok(f));
         }
     }
 

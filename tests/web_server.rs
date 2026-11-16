@@ -50,6 +50,7 @@ async fn harness(tag: &str) -> Result<Harness, Box<dyn std::error::Error>> {
         WebConfig {
             trust_forwarded_headers: true,
             allowed_origins: vec!["http://mixer.example.com:8443".to_owned()],
+            update: Default::default(),
         },
         shutdown,
     ));

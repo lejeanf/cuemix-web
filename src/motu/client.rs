@@ -29,12 +29,13 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 use super::discovery;
+use super::identify;
 use super::protocol::{Frame, ProtocolError, ValueKind, HEADER_LEN};
 pub use super::throttle::MIN_FRAME_SPACING;
 use super::throttle::{Pacer, Throttle};
 use crate::config::Config;
 use crate::engine::{DeviceEvent, DeviceLink, Shutdown};
-use crate::state::{Param, Topology};
+use crate::state::{DeviceInfo, Param, Topology};
 
 /// Link state reported to every client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -55,6 +56,8 @@ pub const DEFAULT_SYNC_WINDOW: Duration = Duration::from_millis(500);
 pub const SYNC_MAX: Duration = Duration::from_secs(5);
 /// Meter stream property (motu-mk5-linux `METERS_ID`; format still unknown).
 pub const METERS_PROP_ID: u16 = 6000;
+/// Minimum spacing between two raw meter frames forwarded to the engine.
+const METER_RAW_INTERVAL: Duration = Duration::from_millis(33);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(10);
@@ -67,6 +70,24 @@ pub trait PropCodec: Send + Sync + 'static {
     fn encode(&self, param: &Param) -> Result<Vec<Frame>, ProtocolError>;
     /// Hardware frame to param, `None` if unmapped.
     fn decode(&self, frame: &Frame) -> Option<Param>;
+    /// Identify the device from the raw frames of its initial dump (layout
+    /// needed to decode the mix matrix). `None` = unknown, defaults stay.
+    fn identify(&self, _frames: &[Vec<u8>]) -> Option<DeviceInfo> {
+        None
+    }
+    /// Like [`PropCodec::encode`], with the identified device layout (needed
+    /// for the mix matrix).
+    fn encode_with(
+        &self,
+        param: &Param,
+        _device: Option<&DeviceInfo>,
+    ) -> Result<Vec<Frame>, ProtocolError> {
+        self.encode(param)
+    }
+    /// Like [`PropCodec::decode`], with the identified device layout.
+    fn decode_with(&self, frame: &Frame, _device: Option<&DeviceInfo>) -> Option<Param> {
+        self.decode(frame)
+    }
 }
 
 /// Codec backed by [`super::props`].
@@ -82,6 +103,37 @@ impl PropCodec for DefaultCodec {
     }
     fn decode(&self, frame: &Frame) -> Option<Param> {
         super::props::decode(frame)
+    }
+    fn identify(&self, frames: &[Vec<u8>]) -> Option<DeviceInfo> {
+        super::identify::identify(frames)
+    }
+    fn encode_with(
+        &self,
+        param: &Param,
+        device: Option<&DeviceInfo>,
+    ) -> Result<Vec<Frame>, ProtocolError> {
+        match (param, device) {
+            (
+                Param::MixVol { .. }
+                | Param::MixPan { .. }
+                | Param::MixMute { .. }
+                | Param::MixSolo { .. },
+                Some(d),
+            ) => Ok(identify::encode_mix(param, d).into_iter().collect()),
+            _ => super::props::encode(param),
+        }
+    }
+    fn decode_with(&self, frame: &Frame, device: Option<&DeviceInfo>) -> Option<Param> {
+        match (frame.prop_id, device) {
+            (
+                identify::P_MIX_FADER
+                | identify::P_MIX_PAN
+                | identify::P_MIX_SOLO
+                | identify::P_MIX_MUTE,
+                Some(d),
+            ) => identify::decode_mix(frame, d),
+            _ => super::props::decode(frame),
+        }
     }
 }
 
@@ -251,7 +303,18 @@ enum SessionEnd {
 }
 
 /// Decode one raw binary message (never panics; unknown/malformed gives `None`).
-fn decode_bytes<C: PropCodec>(codec: &C, bytes: &[u8]) -> Option<Param> {
+/// Payload of a meter frame (`[6000][index][bytes…]`), if `bytes` is one.
+fn meter_payload(bytes: &[u8]) -> Option<&[u8]> {
+    (bytes.get(..2) == Some(&METERS_PROP_ID.to_be_bytes()[..]))
+        .then(|| bytes.get(HEADER_LEN..))
+        .flatten()
+}
+
+fn decode_bytes<C: PropCodec>(
+    codec: &C,
+    bytes: &[u8],
+    device: Option<&DeviceInfo>,
+) -> Option<Param> {
     let Some(head) = bytes.get(..HEADER_LEN) else {
         tracing::debug!(len = bytes.len(), "frame shorter than header, skipped");
         return None;
@@ -263,7 +326,7 @@ fn decode_bytes<C: PropCodec>(codec: &C, bytes: &[u8]) -> Option<Param> {
     };
     match Frame::decode(bytes, |_| kind) {
         Ok(frame) => {
-            let param = codec.decode(&frame);
+            let param = codec.decode_with(&frame, device);
             if param.is_none() {
                 tracing::debug!(prop_id, index = frame.index, "unmapped property, skipped");
             }
@@ -277,8 +340,12 @@ fn decode_bytes<C: PropCodec>(codec: &C, bytes: &[u8]) -> Option<Param> {
 }
 
 /// Wire bytes of every frame of `param` (unencodable parts are logged and dropped).
-fn encode_frames<C: PropCodec>(codec: &C, param: &Param) -> Vec<Vec<u8>> {
-    let frames = match codec.encode(param) {
+fn encode_frames<C: PropCodec>(
+    codec: &C,
+    param: &Param,
+    device: Option<&DeviceInfo>,
+) -> Vec<Vec<u8>> {
+    let frames = match codec.encode_with(param, device) {
         Ok(f) => f,
         Err(e) => {
             tracing::warn!(?param, error = %e, "cannot encode parameter, dropped");
@@ -322,7 +389,7 @@ async fn session_inner<C: PropCodec>(
     // The device pushes its whole state unprompted on connect, then streams
     // meters forever (docs/MOTU-PROTOCOL.md): the sync ends after
     // `sync_window` without any non-meter frame, capped at SYNC_MAX.
-    let mut synced: Vec<Param> = Vec::new();
+    let mut dump: Vec<Vec<u8>> = Vec::new();
     let hard_deadline = Instant::now() + SYNC_MAX;
     let mut quiet_deadline = Instant::now() + cfg.sync_window;
     loop {
@@ -340,9 +407,7 @@ async fn session_inner<C: PropCodec>(
                     let is_meter = bytes.get(..2) == Some(&METERS_PROP_ID.to_be_bytes()[..]);
                     if !is_meter {
                         quiet_deadline = Instant::now() + cfg.sync_window;
-                    }
-                    if let Some(param) = decode_bytes(codec, &bytes) {
-                        synced.push(param);
+                        dump.push(bytes.to_vec());
                     }
                 }
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return SessionEnd::Lost,
@@ -355,6 +420,29 @@ async fn session_inner<C: PropCodec>(
             "initial MOTU state dump did not settle within {SYNC_MAX:?}; using what was received"
         );
     }
+    // Identify first: decoding the mix matrix needs the device layout.
+    let device = codec.identify(&dump);
+    if let Some(info) = &device {
+        tracing::info!(
+            model = %info.model,
+            firmware = %info.firmware,
+            mixes = info.topology.mixes,
+            mixer_inputs = info.topology.mixer_inputs,
+            "MOTU identified"
+        );
+        if link
+            .events
+            .send(DeviceEvent::Identified(info.clone()))
+            .await
+            .is_err()
+        {
+            return SessionEnd::Stop;
+        }
+    }
+    let synced: Vec<Param> = dump
+        .iter()
+        .filter_map(|bytes| decode_bytes(codec, bytes, device.as_ref()))
+        .collect();
     if link.events.send(DeviceEvent::Synced(synced)).await.is_err()
         || !status.set(ConnectionStatus::Online).await
     {
@@ -364,6 +452,7 @@ async fn session_inner<C: PropCodec>(
     // --- steady state ------------------------------------------------------
     let mut throttle = Throttle::new(cfg.throttle_interval);
     let mut pacer = Pacer::new();
+    let mut last_meter: Option<Instant> = None;
     loop {
         let throttle_deadline = throttle.next_deadline();
         let pacer_deadline = pacer.next_deadline(Instant::now());
@@ -387,7 +476,7 @@ async fn session_inner<C: PropCodec>(
                 }
             }
             () = pacer_due => {
-                if let Some(bytes) = pacer.pop_due(Instant::now(), |p| encode_frames(codec, p)) {
+                if let Some(bytes) = pacer.pop_due(Instant::now(), |p| encode_frames(codec, p, device.as_ref())) {
                     let res = ws.send(Message::Binary(bytes.into())).await;
                     pacer.sent(Instant::now());
                     if let Err(e) = res {
@@ -406,7 +495,16 @@ async fn session_inner<C: PropCodec>(
             },
             msg = ws.next() => match msg {
                 Some(Ok(Message::Binary(bytes))) => {
-                    if let Some(param) = decode_bytes(codec, &bytes) {
+                    if let Some(raw) = meter_payload(&bytes) {
+                        let now = Instant::now();
+                        if last_meter.is_none_or(|t| now.duration_since(t) >= METER_RAW_INTERVAL) {
+                            last_meter = Some(now);
+                            // Meters are disposable: drop rather than wait when the engine is busy.
+                            let _ = link.events.try_send(DeviceEvent::MeterRaw(raw.to_vec()));
+                        }
+                        continue;
+                    }
+                    if let Some(param) = decode_bytes(codec, &bytes, device.as_ref()) {
                         if link.events.send(DeviceEvent::Changed(vec![param])).await.is_err() {
                             return SessionEnd::Stop;
                         }
@@ -416,5 +514,19 @@ async fn session_inner<C: PropCodec>(
                 Some(Ok(_)) => {}
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod meter_tests {
+    use super::meter_payload;
+
+    #[test]
+    fn meter_payload_is_the_bytes_after_the_header() {
+        let mut frame = vec![0x17, 0x70, 0, 0];
+        frame.extend([0xff, 0x0d, 0x00]);
+        assert_eq!(meter_payload(&frame), Some(&[0xff, 0x0d, 0x00][..]));
+        assert_eq!(meter_payload(&[0x03, 0xe8, 0, 0, 1]), None);
+        assert_eq!(meter_payload(&[0x17]), None);
     }
 }

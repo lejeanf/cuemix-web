@@ -69,11 +69,23 @@ pub struct MotuState {
     pub mixes: Vec<Mix>,
     pub main: MainOut,
     pub preamps: Vec<Preamp>,
-    /// Per mixer-input DSP (EQ, compressor, gate), indexed like mix channels.
-    pub channels: Vec<ChannelDsp>,
+    /// Input EQ, `input_eq[ch][band]`: one row per analog input (`topology.preamps`,
+    /// 8 on the mk5), [`INPUT_EQ_BANDS`] bands each.
+    pub input_eq: Vec<Vec<EqBand>>,
+    /// Compressor per analog input (`topology.preamps` entries).
+    pub compressors: Vec<Compressor>,
+    /// Gate per mic input (`topology.mic_inputs` entries).
+    pub gates: Vec<Gate>,
+    /// Output EQ, `output_eq[out][band]`: [`OUTPUT_EQ_OUTPUTS`] x [`OUTPUT_EQ_BANDS`].
+    pub output_eq: Vec<Vec<EqBand>>,
+    /// Reverb processor. Its sends are the faders of the "Reverb" mix and its
+    /// return is a mixer input (30-31 on the mk5): both live in `mixes`.
     pub reverb: Reverb,
     pub routing: Routing,
     pub control_room: ControlRoom,
+    /// Analog line output trims in whole dB (`OUTPUT_TRIMS` entries, 0 dB =
+    /// no attenuation). Calibration, not recalled by presets.
+    pub output_trims: Vec<f64>,
     pub clock: Clock,
 }
 
@@ -124,114 +136,161 @@ pub struct Preamp {
     pub phase: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ChannelDsp {
-    pub eq: Equalizer,
-    pub comp: Compressor,
-    pub gate: Gate,
+/// EQ band filter type, the raw byte of props `1002` / `1022`. Kept as a
+/// number so values the dump has not explained yet survive a round trip.
+pub mod eq_mode {
+    /// Peak / bell (most bands in the dump).
+    pub const BELL: u8 = 0;
+    /// Low shelf.
+    pub const LOW_SHELF: u8 = 1;
+    /// High shelf.
+    pub const HIGH_SHELF: u8 = 2;
+    /// High-pass (band 0 of every input in the dump).
+    pub const HIGH_PASS: u8 = 3;
 }
 
-/// 4-band parametric EQ + HPF. Physical units here; their wire encoding is
-/// open question Q1 (frequencies do not fit in `8.24`).
+/// One EQ band, as the hardware stores it (props `1002..=1006` for the
+/// inputs, `1022..=1026` for the outputs).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct Equalizer {
-    /// Global bypass of the 4 bands (cuemix-web improvement over CueMix 5).
+pub struct EqBand {
+    /// Filter type, see [`eq_mode`]; unknown values are kept as is.
+    pub mode: u8,
+    /// Band bypass (`true` = bypassed).
     pub bypass: bool,
-    pub hpf: Hpf,
-    pub bands: [EqBand; 4],
+    /// Whole Hz (hardware: Int32).
+    pub freq_hz: f64,
+    /// dB (hardware: 8.24).
+    pub gain_db: f64,
+    /// Q of a bell band (hardware: 8.24, CueMix 5 range 0.45-10; ignored by
+    /// shelves and the high-pass). Named `bw_oct` for preset compatibility:
+    /// it was first read as a bandwidth in octaves.
+    pub bw_oct: f64,
 }
 
-impl Default for Equalizer {
+impl Default for EqBand {
     fn default() -> Self {
-        let band = |freq_hz| EqBand {
-            enabled: false,
-            freq_hz,
-            gain_db: 0.0,
-            q: 0.7,
-        };
         Self {
+            mode: eq_mode::BELL,
             bypass: false,
-            hpf: Hpf {
-                enabled: false,
-                freq_hz: 80.0,
-            },
-            bands: [band(100.0), band(500.0), band(2_000.0), band(8_000.0)],
+            freq_hz: 1_000.0,
+            gain_db: 0.0,
+            bw_oct: 1.0,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Hpf {
-    pub enabled: bool,
-    pub freq_hz: f64,
+impl EqBand {
+    fn at(mode: u8, freq_hz: f64) -> Self {
+        Self {
+            mode,
+            freq_hz,
+            ..Self::default()
+        }
+    }
+
+    /// Input EQ defaults (values of the 2026-11-15 dump): HPF, then three bells.
+    fn input_defaults() -> Vec<EqBand> {
+        vec![
+            Self::at(eq_mode::HIGH_PASS, 45.0),
+            Self::at(eq_mode::BELL, 350.0),
+            Self::at(eq_mode::BELL, 3_500.0),
+            Self::at(eq_mode::BELL, 7_000.0),
+        ]
+    }
+
+    /// Output EQ defaults (three bells; the dump's output values are not
+    /// recorded, so these are neutral placeholders).
+    fn output_defaults() -> Vec<EqBand> {
+        vec![
+            Self::at(eq_mode::BELL, 100.0),
+            Self::at(eq_mode::BELL, 1_000.0),
+            Self::at(eq_mode::BELL, 10_000.0),
+        ]
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct EqBand {
-    pub enabled: bool,
-    pub freq_hz: f64,
-    pub gain_db: f64,
-    pub q: f64,
-}
-
+/// Compressor of one analog input (props `1011..=1015`, `1021`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Compressor {
-    pub enabled: bool,
+    /// `true` = bypassed (hardware `1` = bypassed).
+    pub bypass: bool,
     pub threshold_db: f64,
-    pub ratio: f64,
+    /// Whole ms (hardware: Int16).
     pub attack_ms: f64,
+    /// Whole ms (hardware: Int16).
     pub release_ms: f64,
-    pub gain_db: f64,
+    /// `n` in `n:1`.
+    pub ratio: f64,
+    /// Make-up gain, **linear** (`1.0` = 0 dB), hardware 8.24.
+    pub makeup: f64,
 }
 
 impl Default for Compressor {
     fn default() -> Self {
         Self {
-            enabled: false,
-            threshold_db: -20.0,
-            ratio: 4.0,
+            bypass: true,
+            threshold_db: -10.0,
             attack_ms: 10.0,
-            release_ms: 100.0,
-            gain_db: 0.0,
+            release_ms: 1_000.0,
+            ratio: 2.0,
+            makeup: 1.0,
         }
     }
 }
 
+/// Gate of one mic input (props `1007..=1010`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Gate {
-    pub enabled: bool,
+    /// `true` = bypassed (hardware `1` = bypassed).
+    pub bypass: bool,
     pub threshold_db: f64,
+    /// Whole ms (hardware: Int16).
     pub attack_ms: f64,
+    /// Whole ms (hardware: Int16).
     pub release_ms: f64,
 }
 
 impl Default for Gate {
     fn default() -> Self {
         Self {
-            enabled: false,
-            threshold_db: -50.0,
-            attack_ms: 1.0,
-            release_ms: 100.0,
+            bypass: true,
+            threshold_db: -46.0,
+            attack_ms: 10.0,
+            release_ms: 1_000.0,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Reverb processor (props `1030..=1034`, all U8). Sends and return are mix
+/// faders (Reverb mix, reverb-return input), not part of this block.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Reverb {
-    pub enabled: bool,
-    /// Return level, linear gain `0.0..=MIX_GAIN_MAX` (native unit, D8).
-    pub return_gain: f64,
-    pub time_s: f64,
+    /// Whole `0..=100`.
+    pub decay: f64,
+    /// Whole `0..=100`.
+    pub damping: f64,
+    /// Whole ms `0..=100`.
     pub predelay_ms: f64,
-    /// Per mixer-input send level, linear gain `0.0..=MIX_GAIN_MAX`.
-    pub sends: Vec<f64>,
+    /// Whole `0..=100`.
+    pub width: f64,
+    /// Preset number (raw byte, meaning of each value not documented).
+    pub preset: u8,
+}
+
+impl Default for Reverb {
+    fn default() -> Self {
+        Self {
+            decay: 86.0,
+            damping: 90.0,
+            predelay_ms: 50.0,
+            width: 50.0,
+            preset: 1,
+        }
+    }
 }
 
 /// Routing crosspoints, `matrix[input][output]`.
@@ -259,6 +318,39 @@ pub struct ControlRoom {
 pub struct Clock {
     pub sample_rate: SampleRate,
     pub source: ClockSource,
+    /// Format of the optical input (prop 5006 index 0).
+    #[serde(default)]
+    pub optical_in: OpticalMode,
+    /// Format of the optical output (prop 5006 index 1).
+    #[serde(default)]
+    pub optical_out: OpticalMode,
+}
+
+/// Optical port format (prop 5006: `0` = ADAT, 8 channels; `1` = TOSLINK
+/// stereo S/PDIF), per CueMix 5's property table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpticalMode {
+    #[default]
+    Adat,
+    Toslink,
+}
+
+impl OpticalMode {
+    pub const fn code(self) -> u8 {
+        match self {
+            OpticalMode::Adat => 0,
+            OpticalMode::Toslink => 1,
+        }
+    }
+
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(OpticalMode::Adat),
+            1 => Some(OpticalMode::Toslink),
+            _ => None,
+        }
+    }
 }
 
 // Defaults used when an older/partial preset file lacks a field (tolerant
@@ -268,38 +360,8 @@ impl Default for Clock {
         Self {
             sample_rate: SampleRate::Hz48000,
             source: ClockSource::Internal,
-        }
-    }
-}
-
-impl Default for Hpf {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            freq_hz: 80.0,
-        }
-    }
-}
-
-impl Default for EqBand {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            freq_hz: 1_000.0,
-            gain_db: 0.0,
-            q: 0.7,
-        }
-    }
-}
-
-impl Default for Reverb {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            return_gain: 0.0,
-            time_s: 2.0,
-            predelay_ms: 20.0,
-            sends: Vec::new(),
+            optical_in: OpticalMode::Adat,
+            optical_out: OpticalMode::Adat,
         }
     }
 }
@@ -328,11 +390,72 @@ pub enum ClockSource {
     Optical,
 }
 
+impl SampleRate {
+    pub const ALL: [SampleRate; 6] = [
+        SampleRate::Hz44100,
+        SampleRate::Hz48000,
+        SampleRate::Hz88200,
+        SampleRate::Hz96000,
+        SampleRate::Hz176400,
+        SampleRate::Hz192000,
+    ];
+
+    /// Rate in Hz (prop `10`).
+    pub const fn hz(self) -> u32 {
+        match self {
+            SampleRate::Hz44100 => 44_100,
+            SampleRate::Hz48000 => 48_000,
+            SampleRate::Hz88200 => 88_200,
+            SampleRate::Hz96000 => 96_000,
+            SampleRate::Hz176400 => 176_400,
+            SampleRate::Hz192000 => 192_000,
+        }
+    }
+
+    /// `None` for a rate the UltraLite-mk5 does not list.
+    pub fn from_hz(hz: u32) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.hz() == hz)
+    }
+}
+
+impl ClockSource {
+    /// Hardware code of prop `11` (`0` = S/PDIF, `2` = Optical, `3` = Internal).
+    pub const fn code(self) -> u8 {
+        match self {
+            ClockSource::Spdif => 0,
+            ClockSource::Optical => 2,
+            ClockSource::Internal => 3,
+        }
+    }
+
+    /// `None` for a code not seen yet (e.g. `1`).
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(ClockSource::Spdif),
+            2 => Some(ClockSource::Optical),
+            3 => Some(ClockSource::Internal),
+            _ => None,
+        }
+    }
+}
+
 impl MotuState {
+    /// Hardware-shaped DSP defaults for `topology` (input EQ / compressor per
+    /// preamp, gate per mic input, fixed output EQ), plus the reverb block.
+    /// Also used to migrate presets older than schema v2.
+    pub fn reset_dsp(&mut self) {
+        let t = self.topology;
+        self.input_eq = vec![EqBand::input_defaults(); usize::from(t.preamps)];
+        self.compressors = vec![Compressor::default(); usize::from(t.preamps)];
+        self.gates = vec![Gate::default(); usize::from(t.mic_inputs)];
+        self.output_eq = vec![EqBand::output_defaults(); OUTPUT_EQ_OUTPUTS];
+        self.reverb = Reverb::default();
+    }
+
     /// Neutral initial state (also the offline demo state).
     pub fn new(topology: Topology) -> Self {
         let inputs = usize::from(topology.mixer_inputs);
-        Self {
+        let mut s = Self {
             topology,
             mixes: (1..=topology.mixes)
                 .map(|n| Mix {
@@ -342,20 +465,18 @@ impl MotuState {
                 .collect(),
             main: MainOut { db: 0.0 },
             preamps: vec![Preamp::default(); usize::from(topology.preamps)],
-            channels: vec![ChannelDsp::default(); inputs],
-            reverb: Reverb {
-                enabled: false,
-                return_gain: 0.0,
-                time_s: 2.0,
-                predelay_ms: 20.0,
-                sends: vec![0.0; inputs],
-            },
+            input_eq: Vec::new(),
+            compressors: Vec::new(),
+            gates: Vec::new(),
+            output_eq: Vec::new(),
+            reverb: Reverb::default(),
             routing: Routing {
                 matrix: vec![
                     vec![false; usize::from(topology.routing_outputs)];
                     usize::from(topology.routing_inputs)
                 ],
             },
+            output_trims: vec![0.0; OUTPUT_TRIMS],
             control_room: ControlRoom {
                 dim: false,
                 mono: false,
@@ -363,11 +484,10 @@ impl MotuState {
                 talkback: false,
                 phones_db: 0.0,
             },
-            clock: Clock {
-                sample_rate: SampleRate::Hz48000,
-                source: ClockSource::Internal,
-            },
-        }
+            clock: Clock::default(),
+        };
+        s.reset_dsp();
+        s
     }
 }
 
@@ -383,10 +503,18 @@ impl Default for MotuState {
 
 /// Preamp gain range in dB (UltraLite-mk5 hardware: 0..74, U8 whole dB).
 pub const PREAMP_GAIN_MAX_DB: f64 = 74.0;
+/// Analog line outputs with a trim (UltraLite-mk5: Main 1-2 and Line 3-10).
+pub const OUTPUT_TRIMS: usize = 10;
 /// Lowest trim (main / phones) in dB (U8 attenuation 0..100).
 pub const TRIM_MIN_DB: f64 = -100.0;
 /// Highest mix fader gain: +12 dB (`10^(12/20)`), the top of the fader law.
 pub const MIX_GAIN_MAX: f64 = 3.981_071_705_534_972;
+/// Bands of each input EQ (UltraLite-mk5; the channel count is `topology.preamps`).
+pub const INPUT_EQ_BANDS: usize = 4;
+/// Outputs with an EQ (UltraLite-mk5).
+pub const OUTPUT_EQ_OUTPUTS: usize = 12;
+/// Bands of each output EQ (UltraLite-mk5).
+pub const OUTPUT_EQ_BANDS: usize = 3;
 
 /// One set-style parameter (0-based indices). JSON: `{"param":"mix_vol","bus":0,"ch":3,"gain":1.0}`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -434,10 +562,6 @@ pub enum Param {
         ch: u16,
         on: bool,
     },
-    EqBypass {
-        ch: u16,
-        on: bool,
-    },
     Route {
         input: u16,
         output: u16,
@@ -459,70 +583,169 @@ pub enum Param {
     PhonesVol {
         db: f64,
     },
-    // --- DSP, reverb, clock (Phase 3). Set-style: each variant carries the
-    // whole block so one message fully describes it. No hardware mapping yet
-    // (state, presets and UI only); ranges in `dsp_limits`.
-    /// One EQ band (`band` 0..=3).
-    EqBand {
+    /// Trim of one analog line output (`ch` 0 = output 1), whole dB clamped
+    /// to `TRIM_MIN_DB..=0.0`.
+    OutputTrim {
+        ch: u16,
+        db: f64,
+    },
+    // --- DSP, reverb, clock: one variant per hardware property (props
+    // 1002-1015, 1021-1026, 1030-1034, 10, 11), so a frame read from the MOTU
+    // maps to exactly one param. Read from the device; **not written yet**
+    // (`motu::props::encode` returns no frame). Ranges in `dsp_limits`.
+    /// Input EQ band filter type (raw, see [`eq_mode`]). `ch` 0..preamps, `band` 0..4.
+    InputEqMode {
         ch: u16,
         band: u8,
-        enabled: bool,
-        freq_hz: f64,
-        gain_db: f64,
-        q: f64,
+        mode: u8,
     },
-    Hpf {
+    /// Input EQ band bypass (`on` = bypassed).
+    InputEqBypass {
         ch: u16,
-        enabled: bool,
-        freq_hz: f64,
+        band: u8,
+        on: bool,
     },
-    Comp {
+    /// Input EQ band frequency, whole Hz.
+    InputEqFreq {
         ch: u16,
-        enabled: bool,
-        threshold_db: f64,
+        band: u8,
+        hz: f64,
+    },
+    /// Input EQ band gain, dB.
+    InputEqGain {
+        ch: u16,
+        band: u8,
+        db: f64,
+    },
+    /// Input EQ band bandwidth, octaves.
+    InputEqBw {
+        ch: u16,
+        band: u8,
+        octaves: f64,
+    },
+    /// Output EQ band filter type. `ch` = output 0..12, `band` 0..3.
+    OutputEqMode {
+        ch: u16,
+        band: u8,
+        mode: u8,
+    },
+    OutputEqBypass {
+        ch: u16,
+        band: u8,
+        on: bool,
+    },
+    OutputEqFreq {
+        ch: u16,
+        band: u8,
+        hz: f64,
+    },
+    OutputEqGain {
+        ch: u16,
+        band: u8,
+        db: f64,
+    },
+    OutputEqBw {
+        ch: u16,
+        band: u8,
+        octaves: f64,
+    },
+    /// Gate bypass (`on` = bypassed), mic inputs only.
+    GateBypass {
+        ch: u16,
+        on: bool,
+    },
+    GateThreshold {
+        ch: u16,
+        db: f64,
+    },
+    /// Whole ms.
+    GateAttack {
+        ch: u16,
+        ms: f64,
+    },
+    /// Whole ms.
+    GateRelease {
+        ch: u16,
+        ms: f64,
+    },
+    /// Compressor bypass (`on` = bypassed), analog inputs.
+    CompBypass {
+        ch: u16,
+        on: bool,
+    },
+    CompThreshold {
+        ch: u16,
+        db: f64,
+    },
+    /// Whole ms.
+    CompAttack {
+        ch: u16,
+        ms: f64,
+    },
+    /// Whole ms.
+    CompRelease {
+        ch: u16,
+        ms: f64,
+    },
+    CompRatio {
+        ch: u16,
         ratio: f64,
-        attack_ms: f64,
-        release_ms: f64,
-        gain_db: f64,
     },
-    Gate {
-        ch: u16,
-        enabled: bool,
-        threshold_db: f64,
-        attack_ms: f64,
-        release_ms: f64,
-    },
-    /// Reverb block; `return_gain` linear (`0.0..=MIX_GAIN_MAX`).
-    Reverb {
-        enabled: bool,
-        return_gain: f64,
-        time_s: f64,
-        predelay_ms: f64,
-    },
-    /// Per-input reverb send, linear gain.
-    ReverbSend {
+    /// Make-up gain, linear (`1.0` = 0 dB).
+    CompMakeup {
         ch: u16,
         gain: f64,
     },
-    Clock {
-        sample_rate: SampleRate,
+    /// Whole `0..=100`.
+    ReverbDecay {
+        value: f64,
+    },
+    /// Whole `0..=100`.
+    ReverbDamping {
+        value: f64,
+    },
+    /// Whole ms `0..=100`.
+    ReverbPredelay {
+        ms: f64,
+    },
+    /// Whole `0..=100`.
+    ReverbWidth {
+        value: f64,
+    },
+    /// Raw preset number.
+    ReverbPreset {
+        preset: u8,
+    },
+    SampleRate {
+        rate: SampleRate,
+    },
+    ClockSource {
         source: ClockSource,
+    },
+    /// Optical port format; `output` = the optical output, else the input.
+    OpticalMode {
+        output: bool,
+        mode: OpticalMode,
     },
 }
 
-/// Accepted ranges for the DSP / reverb params (values are clamped into them).
+/// Accepted ranges for the DSP / reverb params (values are clamped into
+/// them). **Provisional**: the hardware ranges are not documented, so they are
+/// chosen wide enough that a value read from the MOTU is never distorted.
 pub mod dsp_limits {
     pub const FREQ_HZ: (f64, f64) = (20.0, 20_000.0);
+    /// CueMix 5 ranges for the EQ: gain ±20 dB, Q 0.45-10.
     pub const EQ_GAIN_DB: (f64, f64) = (-20.0, 20.0);
-    pub const EQ_Q: (f64, f64) = (0.1, 10.0);
-    pub const COMP_THRESHOLD_DB: (f64, f64) = (-60.0, 0.0);
-    pub const COMP_RATIO: (f64, f64) = (1.0, 20.0);
-    pub const COMP_GAIN_DB: (f64, f64) = (0.0, 24.0);
-    pub const GATE_THRESHOLD_DB: (f64, f64) = (-80.0, 0.0);
-    pub const ATTACK_MS: (f64, f64) = (0.1, 200.0);
-    pub const RELEASE_MS: (f64, f64) = (10.0, 2_000.0);
-    pub const REVERB_TIME_S: (f64, f64) = (0.1, 10.0);
-    pub const REVERB_PREDELAY_MS: (f64, f64) = (0.0, 200.0);
+    pub const EQ_BW_OCT: (f64, f64) = (0.45, 10.0);
+    pub const THRESHOLD_DB: (f64, f64) = (-100.0, 0.0);
+    pub const COMP_RATIO: (f64, f64) = (1.0, 100.0);
+    /// Linear make-up gain (`16.0` ≈ +24 dB).
+    pub const COMP_MAKEUP: (f64, f64) = (0.0, 16.0);
+    pub const ATTACK_MS: (f64, f64) = (0.0, 1_000.0);
+    pub const RELEASE_MS: (f64, f64) = (0.0, 10_000.0);
+    /// Decay, damping, width.
+    pub const REVERB_PERCENT: (f64, f64) = (0.0, 100.0);
+    pub const REVERB_PREDELAY_MS: (f64, f64) = (0.0, 100.0);
 }
 
 /// Everything a Web or OSC client may request.
@@ -537,6 +760,13 @@ pub enum Command {
     /// Store the live state as `<presets_dir>/<name>.json` and make it active.
     SavePreset {
         name: String,
+    },
+    /// Store a preset file sent by the client (same JSON as the files in the
+    /// presets directory, any supported `schema_version`) as `<name>.json`,
+    /// then recall it.
+    ImportPreset {
+        name: String,
+        text: String,
     },
     /// Ask for a [`ServerEvent::Presets`] listing.
     ListPresets,
@@ -569,6 +799,10 @@ pub enum ServerEvent {
     /// Meter levels, linear peak `0.0..=1.0`, one per meter point (layout from
     /// the property table). High rate: bridges may drop/decimate.
     Meters { levels: Vec<f32> },
+    /// Raw, undecoded meter frame from the MOTU (property 6000, one byte per
+    /// meter point), for the meter probe used to map the layout. Rate-limited
+    /// by the device client (~15 Hz).
+    MeterRaw { raw: Vec<u8> },
     /// Request rejected; delivered only to the requesting client.
     Error { message: String },
 }
@@ -579,6 +813,38 @@ pub struct SessionInfo {
     pub active_preset: Option<String>,
     pub modified: bool,
     pub connection: ConnectionStatus,
+    /// What the connected device reported about itself; `None` in demo mode
+    /// or before the first sync.
+    #[serde(default)]
+    pub device: Option<DeviceInfo>,
+}
+
+/// Identity and layout of the connected device, read from its state dump on
+/// connect (`motu::identify`). Not part of presets: it describes the hardware.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeviceInfo {
+    /// Model code reported by the device (e.g. `UL5E`).
+    pub model: String,
+    /// Firmware version string.
+    pub firmware: String,
+    /// Dimensions counted from the dump.
+    pub topology: Topology,
+    /// Display name per mixer input (device names, else the model's defaults;
+    /// empty string = no name known).
+    pub input_names: Vec<String>,
+    /// Display name per mixer input when it is the left channel of a stereo
+    /// pair (e.g. `S/PDIF 1-2`); empty = use `input_names`.
+    pub stereo_names: Vec<String>,
+    /// Display name per stereo mix.
+    pub mix_names: Vec<String>,
+    /// Order in which to list the mixes (CueMix 5: Main, Phones, Line 3-4…);
+    /// empty = index order.
+    pub mix_order: Vec<u8>,
+    /// Per mixer input: `true` on the left channel of a stereo pair.
+    pub stereo_inputs: Vec<bool>,
+    /// Per mono bus: `true` on the left bus of a stereo mix.
+    pub stereo_buses: Vec<bool>,
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -605,7 +871,10 @@ impl Param {
     pub fn excluded_from_recall(&self) -> bool {
         matches!(
             self,
-            Param::MainVol { .. } | Param::PhonesVol { .. } | Param::Phantom { .. }
+            Param::MainVol { .. }
+                | Param::PhonesVol { .. }
+                | Param::OutputTrim { .. }
+                | Param::Phantom { .. }
         )
     }
 }
@@ -628,9 +897,21 @@ impl MotuState {
             "mix channels",
         )?;
         ok(self.preamps.len() == usize::from(t.preamps), "preamps")?;
+        ok(self.output_trims.len() == OUTPUT_TRIMS, "output trims")?;
         ok(t.mic_inputs <= t.preamps, "mic_inputs")?;
-        ok(self.channels.len() == inputs, "channels")?;
-        ok(self.reverb.sends.len() == inputs, "reverb sends")?;
+        let preamps = usize::from(t.preamps);
+        ok(
+            self.input_eq.len() == preamps
+                && self.input_eq.iter().all(|c| c.len() == INPUT_EQ_BANDS),
+            "input eq",
+        )?;
+        ok(self.compressors.len() == preamps, "compressors")?;
+        ok(self.gates.len() == usize::from(t.mic_inputs), "gates")?;
+        ok(
+            self.output_eq.len() == OUTPUT_EQ_OUTPUTS
+                && self.output_eq.iter().all(|c| c.len() == OUTPUT_EQ_BANDS),
+            "output eq",
+        )?;
         ok(
             self.routing.matrix.len() == usize::from(t.routing_inputs),
             "routing inputs",
@@ -647,6 +928,10 @@ impl MotuState {
 
     /// Validate shape and clamp every addressable value through [`Self::apply`].
     pub fn normalized(mut self) -> Result<Self, StateError> {
+        // Presets saved before output trims existed.
+        if self.output_trims.is_empty() {
+            self.output_trims = vec![0.0; OUTPUT_TRIMS];
+        }
         self.check_shape()?;
         for p in self.all_params() {
             self.apply(&p)?;
@@ -658,6 +943,7 @@ impl MotuState {
     pub fn keep_excluded_from(&mut self, live: &MotuState) {
         self.main.db = live.main.db;
         self.control_room.phones_db = live.control_room.phones_db;
+        self.output_trims.clone_from(&live.output_trims);
         for (mine, theirs) in self.preamps.iter_mut().zip(&live.preamps) {
             mine.phantom = theirs.phantom;
         }
@@ -669,25 +955,109 @@ fn range(value: f64, what: &'static str, (min, max): (f64, f64)) -> Result<f64, 
     Ok(finite(value, what)?.clamp(min, max))
 }
 
-fn comp_param(ch: u16, c: &Compressor) -> Param {
-    Param::Comp {
-        ch,
-        enabled: c.enabled,
-        threshold_db: c.threshold_db,
-        ratio: c.ratio,
-        attack_ms: c.attack_ms,
-        release_ms: c.release_ms,
-        gain_db: c.gain_db,
+/// Reject non-finite, round to a whole number, then clamp (hardware integers).
+fn whole(value: f64, what: &'static str, (min, max): (f64, f64)) -> Result<f64, StateError> {
+    Ok(finite(value, what)?.round().clamp(min, max))
+}
+
+/// One field of an EQ band (shared by the input and output EQ params).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EqField {
+    Mode(u8),
+    Bypass(bool),
+    Freq(f64),
+    Gain(f64),
+    Bw(f64),
+}
+
+impl EqField {
+    /// Clamp/round into the accepted range.
+    fn checked(self) -> Result<Self, StateError> {
+        use dsp_limits as L;
+        Ok(match self {
+            EqField::Freq(hz) => EqField::Freq(whole(hz, "eq_freq", L::FREQ_HZ)?),
+            EqField::Gain(db) => EqField::Gain(range(db, "eq_gain", L::EQ_GAIN_DB)?),
+            EqField::Bw(o) => EqField::Bw(range(o, "eq_bw", L::EQ_BW_OCT)?),
+            other => other,
+        })
+    }
+
+    /// Write into `band`; return whether it changed.
+    fn write(self, band: &mut EqBand) -> bool {
+        match self {
+            EqField::Mode(m) => set(&mut band.mode, m),
+            EqField::Bypass(on) => set(&mut band.bypass, on),
+            EqField::Freq(hz) => set(&mut band.freq_hz, hz),
+            EqField::Gain(db) => set(&mut band.gain_db, db),
+            EqField::Bw(o) => set(&mut band.bw_oct, o),
+        }
+    }
+
+    /// The param carrying this field for the input (`output == false`) or output EQ.
+    fn param(self, output: bool, ch: u16, band: u8) -> Param {
+        use Param as P;
+        match (self, output) {
+            (EqField::Mode(mode), false) => P::InputEqMode { ch, band, mode },
+            (EqField::Bypass(on), false) => P::InputEqBypass { ch, band, on },
+            (EqField::Freq(hz), false) => P::InputEqFreq { ch, band, hz },
+            (EqField::Gain(db), false) => P::InputEqGain { ch, band, db },
+            (EqField::Bw(octaves), false) => P::InputEqBw { ch, band, octaves },
+            (EqField::Mode(mode), true) => P::OutputEqMode { ch, band, mode },
+            (EqField::Bypass(on), true) => P::OutputEqBypass { ch, band, on },
+            (EqField::Freq(hz), true) => P::OutputEqFreq { ch, band, hz },
+            (EqField::Gain(db), true) => P::OutputEqGain { ch, band, db },
+            (EqField::Bw(octaves), true) => P::OutputEqBw { ch, band, octaves },
+        }
+    }
+
+    /// Every field of `b`, in a stable order.
+    fn all(b: &EqBand) -> [EqField; 5] {
+        [
+            EqField::Mode(b.mode),
+            EqField::Bypass(b.bypass),
+            EqField::Freq(b.freq_hz),
+            EqField::Gain(b.gain_db),
+            EqField::Bw(b.bw_oct),
+        ]
     }
 }
 
-fn gate_param(ch: u16, g: &Gate) -> Param {
-    Param::Gate {
-        ch,
-        enabled: g.enabled,
-        threshold_db: g.threshold_db,
-        attack_ms: g.attack_ms,
-        release_ms: g.release_ms,
+/// Split an EQ param into (is output EQ, channel, band, field).
+fn eq_parts(p: &Param) -> Option<(bool, u16, u8, EqField)> {
+    use Param as P;
+    Some(match *p {
+        P::InputEqMode { ch, band, mode } => (false, ch, band, EqField::Mode(mode)),
+        P::InputEqBypass { ch, band, on } => (false, ch, band, EqField::Bypass(on)),
+        P::InputEqFreq { ch, band, hz } => (false, ch, band, EqField::Freq(hz)),
+        P::InputEqGain { ch, band, db } => (false, ch, band, EqField::Gain(db)),
+        P::InputEqBw { ch, band, octaves } => (false, ch, band, EqField::Bw(octaves)),
+        P::OutputEqMode { ch, band, mode } => (true, ch, band, EqField::Mode(mode)),
+        P::OutputEqBypass { ch, band, on } => (true, ch, band, EqField::Bypass(on)),
+        P::OutputEqFreq { ch, band, hz } => (true, ch, band, EqField::Freq(hz)),
+        P::OutputEqGain { ch, band, db } => (true, ch, band, EqField::Gain(db)),
+        P::OutputEqBw { ch, band, octaves } => (true, ch, band, EqField::Bw(octaves)),
+        _ => return None,
+    })
+}
+
+/// Push the params for every field of `ys` that differs from `xs` (or all).
+fn eq_params(
+    out: &mut Vec<Param>,
+    output: bool,
+    xs: &[Vec<EqBand>],
+    ys: &[Vec<EqBand>],
+    all: bool,
+) {
+    for (ch, (a, b)) in xs.iter().zip(ys).enumerate() {
+        let Ok(ch) = u16::try_from(ch) else { break };
+        for (band, (x, y)) in a.iter().zip(b).enumerate() {
+            let Ok(band) = u8::try_from(band) else { break };
+            for (fx, fy) in EqField::all(x).into_iter().zip(EqField::all(y)) {
+                if all || fx != fy {
+                    out.push(fy.param(output, ch, band));
+                }
+            }
+        }
     }
 }
 
@@ -735,6 +1105,14 @@ impl MotuState {
     fn mix_channel(&mut self, bus: u8, ch: u16) -> Result<&mut MixChannel, StateError> {
         let mix = slot(&mut self.mixes, usize::from(bus), "mix")?;
         slot(&mut mix.channels, usize::from(ch), "mix channel")
+    }
+
+    fn gate(&mut self, ch: u16) -> Result<&mut Gate, StateError> {
+        slot(&mut self.gates, usize::from(ch), "gate")
+    }
+
+    fn comp(&mut self, ch: u16) -> Result<&mut Compressor, StateError> {
+        slot(&mut self.compressors, usize::from(ch), "compressor")
     }
 
     /// Apply one change. Returns the *effective* param (clamped) when the state
@@ -798,15 +1176,6 @@ impl MotuState {
                 ),
                 *param,
             ),
-            P::EqBypass { ch, on } => (
-                set(
-                    &mut slot(&mut self.channels, usize::from(ch), "channel")?
-                        .eq
-                        .bypass,
-                    on,
-                ),
-                *param,
-            ),
             P::Route { input, output, on } => {
                 let row = slot(
                     &mut self.routing.matrix,
@@ -829,130 +1198,129 @@ impl MotuState {
                     P::PhonesVol { db: v },
                 )
             }
-            P::EqBand {
-                ch,
-                band,
-                enabled,
-                freq_hz,
-                gain_db,
-                q,
-            } => {
-                let new = EqBand {
-                    enabled,
-                    freq_hz: range(freq_hz, "eq_band", dsp_limits::FREQ_HZ)?,
-                    gain_db: range(gain_db, "eq_band", dsp_limits::EQ_GAIN_DB)?,
-                    q: range(q, "eq_band", dsp_limits::EQ_Q)?,
-                };
-                let dsp = slot(&mut self.channels, usize::from(ch), "channel")?;
-                let slot_band = slot(&mut dsp.eq.bands, usize::from(band), "eq band")?;
-                (
-                    set(slot_band, new),
-                    P::EqBand {
-                        ch,
-                        band,
-                        enabled,
-                        freq_hz: new.freq_hz,
-                        gain_db: new.gain_db,
-                        q: new.q,
-                    },
-                )
-            }
-            P::Hpf {
-                ch,
-                enabled,
-                freq_hz,
-            } => {
-                let new = Hpf {
-                    enabled,
-                    freq_hz: range(freq_hz, "hpf", dsp_limits::FREQ_HZ)?,
-                };
-                let dsp = slot(&mut self.channels, usize::from(ch), "channel")?;
-                (
-                    set(&mut dsp.eq.hpf, new),
-                    P::Hpf {
-                        ch,
-                        enabled,
-                        freq_hz: new.freq_hz,
-                    },
-                )
-            }
-            P::Comp {
-                ch,
-                enabled,
-                threshold_db,
-                ratio,
-                attack_ms,
-                release_ms,
-                gain_db,
-            } => {
-                let new = Compressor {
-                    enabled,
-                    threshold_db: range(threshold_db, "comp", dsp_limits::COMP_THRESHOLD_DB)?,
-                    ratio: range(ratio, "comp", dsp_limits::COMP_RATIO)?,
-                    attack_ms: range(attack_ms, "comp", dsp_limits::ATTACK_MS)?,
-                    release_ms: range(release_ms, "comp", dsp_limits::RELEASE_MS)?,
-                    gain_db: range(gain_db, "comp", dsp_limits::COMP_GAIN_DB)?,
-                };
-                let dsp = slot(&mut self.channels, usize::from(ch), "channel")?;
-                (set(&mut dsp.comp, new), comp_param(ch, &new))
-            }
-            P::Gate {
-                ch,
-                enabled,
-                threshold_db,
-                attack_ms,
-                release_ms,
-            } => {
-                let new = Gate {
-                    enabled,
-                    threshold_db: range(threshold_db, "gate", dsp_limits::GATE_THRESHOLD_DB)?,
-                    attack_ms: range(attack_ms, "gate", dsp_limits::ATTACK_MS)?,
-                    release_ms: range(release_ms, "gate", dsp_limits::RELEASE_MS)?,
-                };
-                let dsp = slot(&mut self.channels, usize::from(ch), "channel")?;
-                (set(&mut dsp.gate, new), gate_param(ch, &new))
-            }
-            P::Reverb {
-                enabled,
-                return_gain,
-                time_s,
-                predelay_ms,
-            } => {
-                let return_gain = range(return_gain, "reverb", (0.0, MIX_GAIN_MAX))?;
-                let time_s = range(time_s, "reverb", dsp_limits::REVERB_TIME_S)?;
-                let predelay_ms = range(predelay_ms, "reverb", dsp_limits::REVERB_PREDELAY_MS)?;
-                let r = &mut self.reverb;
-                let changed = set(&mut r.enabled, enabled)
-                    | set(&mut r.return_gain, return_gain)
-                    | set(&mut r.time_s, time_s)
-                    | set(&mut r.predelay_ms, predelay_ms);
-                (
-                    changed,
-                    P::Reverb {
-                        enabled,
-                        return_gain,
-                        time_s,
-                        predelay_ms,
-                    },
-                )
-            }
-            P::ReverbSend { ch, gain } => {
-                let v = range(gain, "reverb_send", (0.0, MIX_GAIN_MAX))?;
+            P::OutputTrim { ch, db } => {
+                let v = whole_db(finite(db, "output_trim")?, TRIM_MIN_DB, 0.0);
                 (
                     set(
-                        slot(&mut self.reverb.sends, usize::from(ch), "reverb send")?,
+                        slot(&mut self.output_trims, usize::from(ch), "output trim")?,
                         v,
                     ),
-                    P::ReverbSend { ch, gain: v },
+                    P::OutputTrim { ch, db: v },
                 )
             }
-            P::Clock {
-                sample_rate,
-                source,
-            } => {
-                let changed = set(&mut self.clock.sample_rate, sample_rate)
-                    | set(&mut self.clock.source, source);
-                (changed, *param)
+            P::InputEqMode { .. }
+            | P::InputEqBypass { .. }
+            | P::InputEqFreq { .. }
+            | P::InputEqGain { .. }
+            | P::InputEqBw { .. }
+            | P::OutputEqMode { .. }
+            | P::OutputEqBypass { .. }
+            | P::OutputEqFreq { .. }
+            | P::OutputEqGain { .. }
+            | P::OutputEqBw { .. } => {
+                let Some((output, ch, band, field)) = eq_parts(param) else {
+                    return Ok(None);
+                };
+                let field = field.checked()?;
+                let (rows, what) = if output {
+                    (&mut self.output_eq, "output eq")
+                } else {
+                    (&mut self.input_eq, "input eq")
+                };
+                let row = slot(rows, usize::from(ch), what)?;
+                let b = slot(row, usize::from(band), "eq band")?;
+                (field.write(b), field.param(output, ch, band))
+            }
+            P::GateBypass { ch, on } => (set(&mut self.gate(ch)?.bypass, on), *param),
+            P::GateThreshold { ch, db } => {
+                let v = range(db, "gate_threshold", dsp_limits::THRESHOLD_DB)?;
+                (
+                    set(&mut self.gate(ch)?.threshold_db, v),
+                    P::GateThreshold { ch, db: v },
+                )
+            }
+            P::GateAttack { ch, ms } => {
+                let v = whole(ms, "gate_attack", dsp_limits::ATTACK_MS)?;
+                (
+                    set(&mut self.gate(ch)?.attack_ms, v),
+                    P::GateAttack { ch, ms: v },
+                )
+            }
+            P::GateRelease { ch, ms } => {
+                let v = whole(ms, "gate_release", dsp_limits::RELEASE_MS)?;
+                (
+                    set(&mut self.gate(ch)?.release_ms, v),
+                    P::GateRelease { ch, ms: v },
+                )
+            }
+            P::CompBypass { ch, on } => (set(&mut self.comp(ch)?.bypass, on), *param),
+            P::CompThreshold { ch, db } => {
+                let v = range(db, "comp_threshold", dsp_limits::THRESHOLD_DB)?;
+                (
+                    set(&mut self.comp(ch)?.threshold_db, v),
+                    P::CompThreshold { ch, db: v },
+                )
+            }
+            P::CompAttack { ch, ms } => {
+                let v = whole(ms, "comp_attack", dsp_limits::ATTACK_MS)?;
+                (
+                    set(&mut self.comp(ch)?.attack_ms, v),
+                    P::CompAttack { ch, ms: v },
+                )
+            }
+            P::CompRelease { ch, ms } => {
+                let v = whole(ms, "comp_release", dsp_limits::RELEASE_MS)?;
+                (
+                    set(&mut self.comp(ch)?.release_ms, v),
+                    P::CompRelease { ch, ms: v },
+                )
+            }
+            P::CompRatio { ch, ratio } => {
+                let v = range(ratio, "comp_ratio", dsp_limits::COMP_RATIO)?;
+                (
+                    set(&mut self.comp(ch)?.ratio, v),
+                    P::CompRatio { ch, ratio: v },
+                )
+            }
+            P::CompMakeup { ch, gain } => {
+                let v = range(gain, "comp_makeup", dsp_limits::COMP_MAKEUP)?;
+                (
+                    set(&mut self.comp(ch)?.makeup, v),
+                    P::CompMakeup { ch, gain: v },
+                )
+            }
+            P::ReverbDecay { value } => {
+                let v = whole(value, "reverb_decay", dsp_limits::REVERB_PERCENT)?;
+                (set(&mut self.reverb.decay, v), P::ReverbDecay { value: v })
+            }
+            P::ReverbDamping { value } => {
+                let v = whole(value, "reverb_damping", dsp_limits::REVERB_PERCENT)?;
+                (
+                    set(&mut self.reverb.damping, v),
+                    P::ReverbDamping { value: v },
+                )
+            }
+            P::ReverbPredelay { ms } => {
+                let v = whole(ms, "reverb_predelay", dsp_limits::REVERB_PREDELAY_MS)?;
+                (
+                    set(&mut self.reverb.predelay_ms, v),
+                    P::ReverbPredelay { ms: v },
+                )
+            }
+            P::ReverbWidth { value } => {
+                let v = whole(value, "reverb_width", dsp_limits::REVERB_PERCENT)?;
+                (set(&mut self.reverb.width, v), P::ReverbWidth { value: v })
+            }
+            P::ReverbPreset { preset } => (set(&mut self.reverb.preset, preset), *param),
+            P::SampleRate { rate } => (set(&mut self.clock.sample_rate, rate), *param),
+            P::ClockSource { source } => (set(&mut self.clock.source, source), *param),
+            P::OpticalMode { output, mode } => {
+                let slot = if output {
+                    &mut self.clock.optical_out
+                } else {
+                    &mut self.clock.optical_in
+                };
+                (set(slot, mode), *param)
             }
         };
         Ok(changed.then_some(effective))
@@ -1025,65 +1393,116 @@ impl MotuState {
                 out.push(Param::Phase { ch, on: y.phase });
             }
         }
-        for (ch, (x, y)) in self.channels.iter().zip(&target.channels).enumerate() {
+        eq_params(&mut out, false, &self.input_eq, &target.input_eq, all);
+        for (ch, (x, y)) in self.compressors.iter().zip(&target.compressors).enumerate() {
             let Ok(ch) = u16::try_from(ch) else { break };
-            if all || x.eq.bypass != y.eq.bypass {
-                out.push(Param::EqBypass {
-                    ch,
-                    on: y.eq.bypass,
-                });
-            }
-            for (band, (bx, by)) in x.eq.bands.iter().zip(&y.eq.bands).enumerate() {
-                let Ok(band) = u8::try_from(band) else { break };
-                if all || bx != by {
-                    out.push(Param::EqBand {
+            for (differs, p) in [
+                (x.bypass != y.bypass, Param::CompBypass { ch, on: y.bypass }),
+                (
+                    x.threshold_db != y.threshold_db,
+                    Param::CompThreshold {
                         ch,
-                        band,
-                        enabled: by.enabled,
-                        freq_hz: by.freq_hz,
-                        gain_db: by.gain_db,
-                        q: by.q,
-                    });
+                        db: y.threshold_db,
+                    },
+                ),
+                (
+                    x.attack_ms != y.attack_ms,
+                    Param::CompAttack {
+                        ch,
+                        ms: y.attack_ms,
+                    },
+                ),
+                (
+                    x.release_ms != y.release_ms,
+                    Param::CompRelease {
+                        ch,
+                        ms: y.release_ms,
+                    },
+                ),
+                (x.ratio != y.ratio, Param::CompRatio { ch, ratio: y.ratio }),
+                (
+                    x.makeup != y.makeup,
+                    Param::CompMakeup { ch, gain: y.makeup },
+                ),
+            ] {
+                if all || differs {
+                    out.push(p);
                 }
             }
-            if all || x.eq.hpf != y.eq.hpf {
-                out.push(Param::Hpf {
-                    ch,
-                    enabled: y.eq.hpf.enabled,
-                    freq_hz: y.eq.hpf.freq_hz,
-                });
-            }
-            if all || x.comp != y.comp {
-                out.push(comp_param(ch, &y.comp));
-            }
-            if all || x.gate != y.gate {
-                out.push(gate_param(ch, &y.gate));
+        }
+        for (ch, (x, y)) in self.gates.iter().zip(&target.gates).enumerate() {
+            let Ok(ch) = u16::try_from(ch) else { break };
+            for (differs, p) in [
+                (x.bypass != y.bypass, Param::GateBypass { ch, on: y.bypass }),
+                (
+                    x.threshold_db != y.threshold_db,
+                    Param::GateThreshold {
+                        ch,
+                        db: y.threshold_db,
+                    },
+                ),
+                (
+                    x.attack_ms != y.attack_ms,
+                    Param::GateAttack {
+                        ch,
+                        ms: y.attack_ms,
+                    },
+                ),
+                (
+                    x.release_ms != y.release_ms,
+                    Param::GateRelease {
+                        ch,
+                        ms: y.release_ms,
+                    },
+                ),
+            ] {
+                if all || differs {
+                    out.push(p);
+                }
             }
         }
+        eq_params(&mut out, true, &self.output_eq, &target.output_eq, all);
         let (ra, rb) = (&self.reverb, &target.reverb);
-        if all
-            || ra.enabled != rb.enabled
-            || ra.return_gain != rb.return_gain
-            || ra.time_s != rb.time_s
-            || ra.predelay_ms != rb.predelay_ms
-        {
-            out.push(Param::Reverb {
-                enabled: rb.enabled,
-                return_gain: rb.return_gain,
-                time_s: rb.time_s,
-                predelay_ms: rb.predelay_ms,
+        for (differs, p) in [
+            (ra.decay != rb.decay, Param::ReverbDecay { value: rb.decay }),
+            (
+                ra.damping != rb.damping,
+                Param::ReverbDamping { value: rb.damping },
+            ),
+            (
+                ra.predelay_ms != rb.predelay_ms,
+                Param::ReverbPredelay { ms: rb.predelay_ms },
+            ),
+            (ra.width != rb.width, Param::ReverbWidth { value: rb.width }),
+            (
+                ra.preset != rb.preset,
+                Param::ReverbPreset { preset: rb.preset },
+            ),
+        ] {
+            if all || differs {
+                out.push(p);
+            }
+        }
+        if all || self.clock.sample_rate != target.clock.sample_rate {
+            out.push(Param::SampleRate {
+                rate: target.clock.sample_rate,
             });
         }
-        for (ch, (x, y)) in ra.sends.iter().zip(&rb.sends).enumerate() {
-            let Ok(ch) = u16::try_from(ch) else { break };
-            if all || x != y {
-                out.push(Param::ReverbSend { ch, gain: *y });
-            }
-        }
-        if all || self.clock != target.clock {
-            out.push(Param::Clock {
-                sample_rate: target.clock.sample_rate,
+        if all || self.clock.source != target.clock.source {
+            out.push(Param::ClockSource {
                 source: target.clock.source,
+            });
+        }
+        if all || self.clock.optical_in != target.clock.optical_in {
+            out.push(Param::OpticalMode {
+                output: false,
+                mode: target.clock.optical_in,
+            });
+        }
+        if all || self.clock.optical_out != target.clock.optical_out {
+            out.push(Param::OpticalMode {
+                output: true,
+                mode: target.clock.optical_out,
             });
         }
         for (input, (ra, rb)) in self
@@ -1125,6 +1544,17 @@ impl MotuState {
         if all || a.phones_db != b.phones_db {
             out.push(Param::PhonesVol { db: b.phones_db });
         }
+        for (ch, (x, y)) in self
+            .output_trims
+            .iter()
+            .zip(&target.output_trims)
+            .enumerate()
+        {
+            let Ok(ch) = u16::try_from(ch) else { break };
+            if all || x != y {
+                out.push(Param::OutputTrim { ch, db: *y });
+            }
+        }
         out
     }
 }
@@ -1147,7 +1577,13 @@ pub struct Preset {
 /// Current preset file format. Bump on any *incompatible* change to
 /// `MotuState` (renamed field, changed unit) and add a migration + fixture.
 /// Additive changes (new fields with defaults) do not need a bump.
-pub const PRESET_SCHEMA_VERSION: u32 = 1;
+///
+/// - v1: per-mixer-input `channels` DSP and a `reverb` block with sends.
+/// - v2: hardware-shaped DSP (`input_eq`, `compressors`, `gates`,
+///   `output_eq`) and reverb (`decay`, `damping`, `predelay_ms`, `width`,
+///   `preset`); reverb sends/return are mix faders. Older files drop their
+///   DSP/reverb sections and take the defaults (`presets::parse_preset`).
+pub const PRESET_SCHEMA_VERSION: u32 = 2;
 
 impl Preset {
     /// `● Modifié` indicator: live state diverges from this snapshot, ignoring
@@ -1368,7 +1804,11 @@ mod diff_tests {
                 on: true,
             },
             Param::Phantom { ch: 1, on: true },
-            Param::EqBypass { ch: 4, on: true },
+            Param::InputEqBypass {
+                ch: 4,
+                band: 1,
+                on: true,
+            },
             Param::Route {
                 input: 2,
                 output: 9,
@@ -1391,6 +1831,38 @@ mod diff_tests {
 }
 
 #[cfg(test)]
+mod output_trim_tests {
+    use super::*;
+
+    #[test]
+    fn output_trims_clamp_and_are_not_recalled() {
+        let mut s = MotuState::default();
+        assert_eq!(
+            s.apply(&Param::OutputTrim { ch: 2, db: -7.4 }),
+            Ok(Some(Param::OutputTrim { ch: 2, db: -7.0 }))
+        );
+        assert_eq!(
+            s.apply(&Param::OutputTrim { ch: 3, db: 5.0 }),
+            Ok(None),
+            "trims only attenuate: +5 dB clamps to the current 0 dB"
+        );
+        assert!(s.apply(&Param::OutputTrim { ch: 99, db: 0.0 }).is_err());
+        assert!(Param::OutputTrim { ch: 0, db: 0.0 }.excluded_from_recall());
+        let mut preset = MotuState::default();
+        preset.keep_excluded_from(&s);
+        assert_eq!(preset.output_trims[2], -7.0);
+    }
+
+    #[test]
+    fn presets_without_output_trims_still_load() {
+        let mut old = MotuState::default();
+        old.output_trims.clear();
+        let n = old.normalized().unwrap_or_default();
+        assert_eq!(n.output_trims, vec![0.0; OUTPUT_TRIMS]);
+    }
+}
+
+#[cfg(test)]
 mod all_params_tests {
     use super::*;
 
@@ -1403,11 +1875,15 @@ mod all_params_tests {
             + 1 // main
             + usize::from(t.preamps) * 2 // gain, phase
             + usize::from(t.mic_inputs) * 2 // phantom, pad
-            + inputs * (1 + 4 + 1 + 1 + 1) // eq bypass, 4 bands, hpf, comp, gate
-            + 1 + inputs // reverb block + sends
-            + 1 // clock
+            + usize::from(t.preamps) * INPUT_EQ_BANDS * 5 // mode, bypass, freq, gain, bw
+            + usize::from(t.preamps) * 6 // compressor
+            + usize::from(t.mic_inputs) * 4 // gate
+            + OUTPUT_EQ_OUTPUTS * OUTPUT_EQ_BANDS * 5
+            + 5 // reverb
+            + 4 // sample rate, clock source, optical in/out format
             + usize::from(t.routing_inputs) * usize::from(t.routing_outputs)
-            + 5; // control room
+            + 5 // control room
+            + OUTPUT_TRIMS;
         let params = s.all_params();
         assert_eq!(params.len(), expected);
         let mut replay = MotuState::default();
@@ -1549,63 +2025,125 @@ mod dsp_param_tests {
     use super::*;
 
     #[test]
+    fn default_dsp_is_hardware_shaped() {
+        let s = MotuState::default();
+        assert_eq!(s.input_eq.len(), 8);
+        assert!(s.input_eq.iter().all(|c| c.len() == INPUT_EQ_BANDS));
+        assert_eq!(s.input_eq[0][0].mode, eq_mode::HIGH_PASS);
+        assert_eq!(s.input_eq[3][2].freq_hz, 3_500.0);
+        assert_eq!(s.compressors.len(), 8);
+        assert_eq!(s.gates.len(), 2);
+        assert_eq!(s.output_eq.len(), OUTPUT_EQ_OUTPUTS);
+        assert!(s.output_eq.iter().all(|c| c.len() == OUTPUT_EQ_BANDS));
+        assert_eq!(s.reverb.decay, 86.0);
+        assert!(s.check_shape().is_ok());
+    }
+
+    #[test]
     fn dsp_params_clamp_validate_and_replay() {
         let mut s = MotuState::default();
-        let r = s.apply(&Param::EqBand {
-            ch: 3,
-            band: 2,
-            enabled: true,
-            freq_hz: 50_000.0,
-            gain_db: -40.0,
-            q: 1.5,
-        });
         assert_eq!(
-            r,
-            Ok(Some(Param::EqBand {
+            s.apply(&Param::InputEqFreq {
                 ch: 3,
                 band: 2,
-                enabled: true,
-                freq_hz: 20_000.0,
-                gain_db: -20.0,
-                q: 1.5
+                hz: 50_000.4
+            }),
+            Ok(Some(Param::InputEqFreq {
+                ch: 3,
+                band: 2,
+                hz: 20_000.0
+            }))
+        );
+        assert_eq!(
+            s.apply(&Param::OutputEqGain {
+                ch: 11,
+                band: 2,
+                db: -12.7
+            }),
+            Ok(Some(Param::OutputEqGain {
+                ch: 11,
+                band: 2,
+                db: -12.7
+            }))
+        );
+        // Unknown filter types are kept.
+        assert_eq!(
+            s.apply(&Param::InputEqMode {
+                ch: 0,
+                band: 1,
+                mode: 7
+            }),
+            Ok(Some(Param::InputEqMode {
+                ch: 0,
+                band: 1,
+                mode: 7
             }))
         );
         assert!(matches!(
-            s.apply(&Param::EqBand {
+            s.apply(&Param::InputEqBw {
                 ch: 0,
                 band: 4,
-                enabled: true,
-                freq_hz: 100.0,
-                gain_db: 0.0,
-                q: 1.0
+                octaves: 1.0
             }),
             Err(StateError::Index {
                 what: "eq band",
                 ..
             })
         ));
-        assert_eq!(
-            s.apply(&Param::Comp {
-                ch: 0,
-                enabled: true,
-                threshold_db: f64::NAN,
-                ratio: 2.0,
-                attack_ms: 5.0,
-                release_ms: 50.0,
-                gain_db: 0.0
+        assert!(matches!(
+            s.apply(&Param::OutputEqBypass {
+                ch: 12,
+                band: 0,
+                on: true
             }),
-            Err(StateError::NonFinite("comp"))
+            Err(StateError::Index {
+                what: "output eq",
+                ..
+            })
+        ));
+        assert!(matches!(
+            s.apply(&Param::GateBypass { ch: 2, on: false }),
+            Err(StateError::Index { what: "gate", .. })
+        ));
+        assert!(matches!(
+            s.apply(&Param::CompRatio { ch: 8, ratio: 2.0 }),
+            Err(StateError::Index {
+                what: "compressor",
+                ..
+            })
+        ));
+        assert_eq!(
+            s.apply(&Param::CompThreshold {
+                ch: 0,
+                db: f64::NAN
+            }),
+            Err(StateError::NonFinite("comp_threshold"))
         );
-        let _ = s.apply(&Param::Reverb {
-            enabled: true,
-            return_gain: 0.5,
-            time_s: 99.0,
-            predelay_ms: 10.0,
+        assert_eq!(
+            s.apply(&Param::CompAttack { ch: 1, ms: 12.6 }),
+            Ok(Some(Param::CompAttack { ch: 1, ms: 13.0 })),
+            "Int16 ms are whole"
+        );
+        assert_eq!(
+            s.apply(&Param::CompMakeup { ch: 7, gain: 9.638 }),
+            Ok(Some(Param::CompMakeup { ch: 7, gain: 9.638 }))
+        );
+        assert_eq!(
+            s.apply(&Param::GateRelease { ch: 1, ms: 1e9 }),
+            Ok(Some(Param::GateRelease {
+                ch: 1,
+                ms: dsp_limits::RELEASE_MS.1
+            }))
+        );
+        assert_eq!(
+            s.apply(&Param::ReverbDecay { value: 140.0 }),
+            Ok(Some(Param::ReverbDecay { value: 100.0 }))
+        );
+        let _ = s.apply(&Param::ReverbPreset { preset: 4 });
+        let _ = s.apply(&Param::SampleRate {
+            rate: SampleRate::Hz96000,
         });
-        assert_eq!(s.reverb.time_s, 10.0);
-        let _ = s.apply(&Param::ReverbSend { ch: 31, gain: 0.25 });
-        let _ = s.apply(&Param::Clock {
-            sample_rate: SampleRate::Hz96000,
+        let _ = s.apply(&Param::ClockSource {
             source: ClockSource::Optical,
         });
 
@@ -1615,14 +2153,67 @@ mod dsp_param_tests {
             assert!(replay.apply(&p).is_ok());
         }
         assert_eq!(replay, s);
-        let json = serde_json::to_value(Param::Clock {
-            sample_rate: SampleRate::Hz48000,
-            source: ClockSource::Internal,
-        })
-        .unwrap_or_default();
+    }
+
+    #[test]
+    fn dsp_json_shapes() {
+        let j = |p: Param| serde_json::to_value(p).unwrap_or_default();
         assert_eq!(
-            json,
-            serde_json::json!({"param":"clock","sample_rate":"48000","source":"internal"})
+            j(Param::InputEqFreq {
+                ch: 0,
+                band: 1,
+                hz: 350.0
+            }),
+            serde_json::json!({"param":"input_eq_freq","ch":0,"band":1,"hz":350.0})
         );
+        assert_eq!(
+            j(Param::CompMakeup { ch: 2, gain: 1.0 }),
+            serde_json::json!({"param":"comp_makeup","ch":2,"gain":1.0})
+        );
+        assert_eq!(
+            j(Param::SampleRate {
+                rate: SampleRate::Hz48000
+            }),
+            serde_json::json!({"param":"sample_rate","rate":"48000"})
+        );
+        assert_eq!(
+            j(Param::ClockSource {
+                source: ClockSource::Internal
+            }),
+            serde_json::json!({"param":"clock_source","source":"internal"})
+        );
+    }
+
+    #[test]
+    fn clock_hardware_codes() {
+        for r in SampleRate::ALL {
+            assert_eq!(SampleRate::from_hz(r.hz()), Some(r));
+        }
+        assert_eq!(SampleRate::from_hz(12_345), None);
+        for c in [
+            ClockSource::Internal,
+            ClockSource::Spdif,
+            ClockSource::Optical,
+        ] {
+            assert_eq!(ClockSource::from_code(c.code()), Some(c));
+        }
+        assert_eq!(ClockSource::from_code(1), None);
+    }
+
+    #[test]
+    fn shape_checks_cover_dsp() {
+        let mut bad = MotuState::default();
+        bad.gates.pop();
+        assert_eq!(bad.check_shape(), Err(StateError::Shape("gates")));
+        let mut bad = MotuState::default();
+        bad.input_eq[2].pop();
+        assert_eq!(bad.check_shape(), Err(StateError::Shape("input eq")));
+        let mut bad = MotuState::default();
+        bad.output_eq.pop();
+        assert_eq!(bad.check_shape(), Err(StateError::Shape("output eq")));
+        let mut fixed = MotuState::default();
+        fixed.gates.clear();
+        fixed.reset_dsp();
+        assert!(fixed.check_shape().is_ok());
     }
 }

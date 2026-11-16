@@ -7,23 +7,35 @@
   import Meter from './Meter.svelte';
   import LabelEditor from './LabelEditor.svelte';
 
-  let { ch }: { ch: number } = $props();
+  /** `pair`: right channel of a stereo pair shown on this strip (the strip drives the left one). */
+  let { ch, pair }: { ch: number; pair?: number } = $props();
   const bus = $derived(store.bus);
   const mc = $derived(store.state?.mixes[bus]?.channels[ch]);
-  const eq = $derived(store.state?.channels[ch]?.eq);
+  const mcR = $derived(pair === undefined ? undefined : store.state?.mixes[bus]?.channels[pair]);
+  const name = $derived(store.stripName(ch, pair !== undefined));
+  /** The device keeps both halves of a pair; flag when they differ (e.g. left at -inf). */
+  const rDiffers = $derived(mcR !== undefined && mc !== undefined && Math.abs(mcR.gain - mc.gain) > 1e-6);
+  /** DSP (EQ, compressor, gate) only exists on the analog inputs. */
+  const dsp = $derived(store.hasDsp(ch));
   const label = $derived(store.label(ch));
   const off = $derived(!store.ready);
   let editing = $state(false);
 
+  /** A stereo strip drives both halves of its pair (the device stores them separately). */
+  function both(send: (c: number) => void): void {
+    send(ch);
+    if (pair !== undefined) send(pair);
+  }
+
   const panText = (v: number) => (Math.abs(v) < 0.005 ? 'C' : v < 0 ? `L${Math.round(-v * 100)}` : `R${Math.round(v * 100)}`);
 </script>
 
-{#if mc && eq}
-  <section class="strip" aria-label="Channel {store.labelName(ch)}">
+{#if mc}
+  <section class="strip" class:stereo={pair !== undefined} aria-label="Channel {name}">
     <div class="bar" style:background={label?.color ?? 'transparent'}></div>
     <div class="namewrap">
-      <button class="name" onclick={() => (editing = !editing)} aria-label="{S.rename}: {store.labelName(ch)}" disabled={off}>
-        {store.labelName(ch)}
+      <button class="name" title={name} onclick={() => (editing = !editing)} aria-label="{S.rename}: {name}" disabled={off}>
+        {name}
       </button>
       {#if editing}<LabelEditor {ch} onclose={() => (editing = false)} />{/if}
     </div>
@@ -34,9 +46,9 @@
       max={1}
       reset={0}
       step={0.01}
-      label={S.pan}
-      ariaLabel="{S.pan} {store.labelName(ch)}"
-      size={36}
+      label=""
+      ariaLabel="{S.pan} {name}"
+      size={28}
       format={panText}
       disabled={off}
       hint={store.hint('mix_pan')}
@@ -46,74 +58,80 @@
     <div class="faderrow">
       <Fader
         pos={gainToPos(mc.gain)}
-        label="Level {store.labelName(ch)}"
+        label="Level {name}"
         valueText="{formatDb(gainToDb(mc.gain))} dB"
         mark={0.75}
         disabled={off}
         hint={store.hint('mix_vol')}
-        onchange={(p, f) => store.set({ param: 'mix_vol', bus, ch, gain: posToGain(p) }, f)}
+        onchange={(p, f) => both((c) => store.set({ param: 'mix_vol', bus, ch: c, gain: posToGain(p) }, f))}
       />
-      <Meter index={ch} label="Meter {store.labelName(ch)}" />
+      <Meter index={ch} label="Meter {name}" />
+      {#if pair !== undefined}<Meter index={pair} label="Meter {name} right" />{/if}
     </div>
-    <div class="db">{formatDb(gainToDb(mc.gain))}</div>
+    <div class="db">
+      {formatDb(gainToDb(mc.gain))}{#if rDiffers && mcR}<span
+          class="rdiff"
+          title="Stereo pair: the left channel is at {formatDb(gainToDb(mc.gain))} dB, the right at {formatDb(gainToDb(mcR.gain))} dB on the MOTU"
+          >R {formatDb(gainToDb(mcR.gain))}</span
+        >{/if}
+    </div>
 
     <div class="btns">
       <button
         class="b red"
         class:on={mc.mute}
         aria-pressed={mc.mute}
-        aria-label="{S.mute} {store.labelName(ch)}"
+        aria-label="{S.mute} {name}"
         disabled={off}
         data-unmapped={store.unmapped('mix_mute') ? '' : undefined}
         title={store.hint('mix_mute')}
-        onclick={() => store.set({ param: 'mix_mute', bus, ch, on: !mc.mute }, true)}>M</button
+        onclick={() => both((c) => store.set({ param: 'mix_mute', bus, ch: c, on: !mc.mute }, true))}>M</button
       >
       <button
         class="b amber"
         class:on={mc.solo}
         aria-pressed={mc.solo}
-        aria-label="{S.solo} {store.labelName(ch)}"
+        aria-label="{S.solo} {name}"
         disabled={off}
         data-unmapped={store.unmapped('mix_solo') ? '' : undefined}
         title={store.hint('mix_solo')}
-        onclick={() => store.set({ param: 'mix_solo', bus, ch, on: !mc.solo }, true)}>S</button
+        onclick={() => both((c) => store.set({ param: 'mix_solo', bus, ch: c, on: !mc.solo }, true))}>S</button
       >
     </div>
-    <button
-      class="b wide cyan"
-      class:on={!eq.bypass}
-      aria-pressed={!eq.bypass}
-      aria-label="{S.eq} {eq.bypass ? 'bypassed' : 'active'} — {S.eqBypass} {store.labelName(ch)}"
-      title={S.eqBypass}
-      disabled={off}
-      data-unmapped={store.unmapped('eq_bypass') ? '' : undefined}
-      onclick={() => store.set({ param: 'eq_bypass', ch, on: !eq.bypass }, true)}>EQ</button
-    >
-    <button class="b wide" aria-label="{S.dsp} {store.labelName(ch)}" disabled={off} onclick={() => (store.dspChannel = ch)}>
-      {S.dsp}
-    </button>
+    {#if dsp}
+      <button
+        class="b dsp"
+        aria-label="{S.dsp} {name}"
+        title="{S.dsp} {name}"
+        disabled={off}
+        onclick={() => (store.dspChannel = ch)}>{S.dsp}</button
+      >
+    {:else}
+      <!-- Keeps the faders aligned with the strips that have DSP. -->
+      <span class="noDsp" aria-hidden="true"></span>
+    {/if}
   </section>
 {/if}
 
 <style>
   .strip {
     flex: none;
-    width: 88px;
+    /* Same width for every strip, mono or stereo: long names are cut with an ellipsis. */
+    width: 68px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding: 0 6px 8px;
+    gap: 4px;
+    padding: 0 3px 4px;
     background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-right: 1px solid var(--border);
     overflow: visible;
   }
   .bar {
     align-self: stretch;
     height: 5px;
     border-radius: 7px 7px 0 0;
-    margin: 0 -6px;
+    margin: 0 -3px;
   }
   .namewrap {
     position: relative;
@@ -123,9 +141,10 @@
     width: 100%;
     background: none;
     border: 0;
-    padding: 4px 2px;
+    padding: 3px 1px;
     text-align: center;
     font-weight: 600;
+    font-size: 12px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -138,10 +157,10 @@
   .faderrow {
     flex: 1;
     display: flex;
-    gap: 4px;
+    gap: 2px;
     align-items: stretch;
     align-self: stretch;
-    min-height: 160px;
+    min-height: 140px;
   }
   .faderrow :global(.fader) {
     margin: 0;
@@ -153,26 +172,31 @@
   }
   .btns {
     display: flex;
-    gap: 6px;
+    gap: 4px;
   }
   .b {
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0 4px;
+    font-size: 12px;
     background: var(--bg-alt);
     border: 1px solid var(--border);
     border-radius: 6px;
     cursor: pointer;
     --on: var(--cyan);
   }
-  .b.wide {
-    align-self: stretch;
-    min-height: 32px;
-  }
   .b.red {
     --on: var(--red);
   }
   .b.amber {
     --on: var(--amber);
+  }
+  .b.dsp {
+    min-width: 60px;
+  }
+  .noDsp {
+    display: block;
+    min-height: 28px;
   }
   .b.on {
     background: var(--on);
@@ -183,5 +207,10 @@
   .b:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+  .rdiff {
+    display: block;
+    font-size: 0.75em;
+    color: var(--amber, #f59e0b);
   }
 </style>

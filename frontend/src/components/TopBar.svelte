@@ -3,6 +3,11 @@
   import { S } from '../lib/strings';
   import { CLOCK_SOURCES, SAMPLE_RATES, PRESET_NAME_RE, type ClockSource, type SampleRate } from '../lib/protocol';
   import { isValidPresetName } from '../lib/validate';
+  import { PRESET_SCHEMA_VERSION, exportFileName, presetNameFromFile } from '../lib/presetFile';
+  import type { Snippet } from 'svelte';
+
+  /** The view tabs, shown in the same bar. */
+  let { children }: { children?: Snippet } = $props();
 
   let root: HTMLElement;
   let open = $state<'' | 'presets' | 'clock'>('');
@@ -27,9 +32,11 @@
   function key(e: KeyboardEvent) {
     if (e.key === 'Escape') open = '';
   }
-  function setClock(patch: Partial<{ sample_rate: SampleRate; source: ClockSource }>) {
-    if (!clock) return;
-    store.set({ param: 'clock', sample_rate: clock.sample_rate, source: clock.source, ...patch }, true);
+  function setRate(rate: SampleRate) {
+    store.set({ param: 'sample_rate', rate }, true);
+  }
+  function setSource(source: ClockSource) {
+    store.set({ param: 'clock_source', source }, true);
   }
   function saveAs() {
     if (!nameOk) return;
@@ -37,18 +44,48 @@
     newName = '';
   }
   const khz = (r: string) => `${Number(r) / 1000} kHz`;
+
+  let fileInput = $state<HTMLInputElement>();
+  /** Downloads the live state in the preset file format. */
+  function exportFile() {
+    const st = store.state;
+    if (!st) return;
+    const name = session.active_preset ?? 'cuemix-settings';
+    const data = {
+      schema_version: PRESET_SCHEMA_VERSION,
+      name,
+      exported_at: new Date().toISOString(),
+      device: session.device ? { model: session.device.model, firmware: session.device.firmware } : null,
+      state: st,
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = exportFileName(name, new Date());
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  async function importFile(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      // Compact it: the WebSocket accepts up to 256 KiB per message.
+      const text = JSON.stringify(JSON.parse(await file.text()));
+      store.importPreset(presetNameFromFile(file.name), text);
+      open = '';
+    } catch {
+      store.c.toasts.push({ id: ++store.c.toastSeq, message: `${file.name} is not a valid settings file` });
+    }
+  }
 </script>
 
 <svelte:window onpointerdown={outside} onkeydown={key} />
 
 <header class="top" bind:this={root}>
-  <span class="brand"
-    >{S.appName}{#if store.version}<span class="ver" title="Running version">v{store.version}</span>{/if}</span
-  >
-  <span class="preset">
-    {S.presetLabel}: <strong>{session.active_preset ?? S.noPreset}</strong>
-    {#if session.modified}<span class="modified">{S.modified}</span>{/if}
-  </span>
+  <span class="brand">{S.appName}</span>
+  <nav class="tabs">{@render children?.()}</nav>
 
   <div class="pw">
     <button class="btn" aria-haspopup="dialog" aria-expanded={open === 'clock'} disabled={off} onclick={() => toggle('clock')}>
@@ -56,13 +93,14 @@
     </button>
     {#if open === 'clock' && clock}
       <div class="pop" role="dialog" aria-label={S.clock}>
+        {#if store.hint('sample_rate')}<p class="hint">{store.hint('sample_rate')}</p>{/if}
         <label>{S.sampleRate}
-          <select value={clock.sample_rate} onchange={(e) => setClock({ sample_rate: e.currentTarget.value as SampleRate })}>
+          <select value={clock.sample_rate} onchange={(e) => setRate(e.currentTarget.value as SampleRate)}>
             {#each SAMPLE_RATES as r (r)}<option value={r}>{khz(r)}</option>{/each}
           </select>
         </label>
         <label>{S.clockSource}
-          <select value={clock.source} onchange={(e) => setClock({ source: e.currentTarget.value as ClockSource })}>
+          <select value={clock.source} onchange={(e) => setSource(e.currentTarget.value as ClockSource)}>
             {#each CLOCK_SOURCES as c (c)}<option value={c}>{c}</option>{/each}
           </select>
         </label>
@@ -71,7 +109,10 @@
   </div>
 
   <div class="pw">
-    <button class="btn" aria-haspopup="dialog" aria-expanded={open === 'presets'} disabled={off} onclick={() => toggle('presets')}>{S.presets}</button>
+    <button class="btn" aria-haspopup="dialog" aria-expanded={open === 'presets'} disabled={off} title="{S.presetLabel}: {session.active_preset ?? S.noPreset}{session.modified ? ` (${S.modified})` : ''}"
+      onclick={() => toggle('presets')}
+      >{session.active_preset ?? S.presets}{#if session.modified}<span class="modified" aria-label={S.modified}>●</span>{/if}</button
+    >
     {#if open === 'presets'}
       <div class="pop wide" role="dialog" aria-label={S.presets}>
         <p class="note">{S.presetRecallNote}</p>
@@ -95,6 +136,12 @@
           <button class="btn" type="submit" disabled={!nameOk}>{S.saveAs}</button>
         </form>
         {#if newName !== '' && !nameOk}<small class="err">{S.presetNameInvalid}</small>{/if}
+        <div class="files">
+          <button class="btn" onclick={exportFile}>{S.exportFile}</button>
+          <button class="btn" onclick={() => fileInput?.click()}>{S.importFile}</button>
+          <input bind:this={fileInput} type="file" accept=".json,application/json" hidden onchange={importFile} />
+        </div>
+        <p class="note">{S.fileNote}</p>
       </div>
     {/if}
   </div>
@@ -107,8 +154,9 @@
     flex: none;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 14px;
+    gap: 10px;
+    padding: 0 10px;
+    min-height: 44px;
     background: var(--bg-alt);
     border-bottom: 1px solid var(--border);
     position: relative;
@@ -116,32 +164,29 @@
   }
   .brand {
     font-weight: 700;
-  }
-  .ver {
-    margin-left: 6px;
-    font-weight: 400;
-    font-size: 11px;
-    opacity: 0.6;
-  }
-  .preset {
-    flex: 1;
-    color: var(--text-dim);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
-  .preset strong {
-    color: var(--text);
+  .tabs {
+    flex: 1;
+    min-width: 0;
+    align-self: stretch;
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
   .modified {
-    margin-left: 8px;
+    margin-left: 6px;
     color: var(--amber);
   }
   .pw {
     position: relative;
   }
   .btn {
-    min-height: 36px;
+    min-height: 32px;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     padding: 0 12px;
     background: var(--card);
     border: 1px solid var(--border);
@@ -169,6 +214,12 @@
     border-radius: var(--radius);
     box-shadow: 0 8px 24px #000a;
     z-index: 30;
+  }
+  .hint {
+    margin: 0;
+    max-width: 220px;
+    font-size: 12px;
+    color: var(--text-dim);
   }
   .pop.wide {
     width: min(340px, 92vw);
@@ -222,6 +273,12 @@
   form input {
     flex: 1;
     min-width: 0;
+  }
+  .files {
+    display: flex;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
   }
   .err {
     color: var(--red);
