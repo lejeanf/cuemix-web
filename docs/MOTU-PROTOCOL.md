@@ -45,7 +45,7 @@ Non mappés (pas de trame) : `MixVol/MixPan/MixMute/MixSolo`, `Route`, `EqBypass
 ## Handshake / synchronisation complète
 
 1. Découverte : annonces JSON en UDP multicast port 1280 (`{"uid","name","ip","model":"UltraLite-mk5","version","interval"}`).
-2. WebSocket binaire sur `ws://<ip>:1280` (1281 sur certains Mac, et chemin `/<serial>` requis sur firmware récent d'après les commentaires du gist ; mk5-linux se connecte sans chemin avec le firmware 2.0.8).
+2. WebSocket binaire sur `ws://<ip>:1280` (1281 sur certains Mac, et chemin `/<serial>` requis sur firmware récent d'après les commentaires du gist ; mk5-linux se connecte sans chemin avec le firmware 2.0.8). **Observé sur matériel (2026-11-15, Proxmox) :** découverte par l'annonce UDP puis connexion à `ws://169.254.x.x:1280` **sans chemin** réussie.
 3. **Aucune requête de lecture** : à la connexion l'appareil pousse tout seul l'état complet (> 2400 propriétés, une trame par index), puis diffuse chaque changement (y compris ceux de la face avant / d'autres clients). Pas de subscribe.
 4. L'appareil envoie aussi en continu des mises à jour (meters) tant qu'il y a du signal : une synchro "jusqu'au silence" ne termine jamais ; mk5-linux borne la synchro initiale à 5 s (silence de 500 ms).
 5. Écriture : trames `[id u16][index u16][len u16][payload]` (`Frame::encode_write`) — **le champ longueur est requis** (vérifié sur matériel le 2026-11-15 : sans lui, `5011` était émis mais jamais appliqué ; avec lui, le volume principal change). La lecture reste `[id][index][payload]` sans longueur ; l'appareil ferme le WebSocket si les écritures vont plus vite qu'il ne les applique (mk5-linux espace de 20 ms ; notre throttle de 25 ms est compatible). Ne pas ré-écrire tout l'état à la reconnexion (rafale de 2375 écritures -> déconnexions).
@@ -64,4 +64,4 @@ Inconnu. mk5-linux définit `METERS_ID = 6000` sans le décoder et ignore ce flu
 
 ## Inconnus à lever sur matériel
 
-Layout d'index des 1016-1019 ; layout EQ par bande/canal ; sémantique de 5010 (routage) et 5015-5017 ; plage réelle de gain ligne/micro par canal ; valeur 100 du trim ; linéarité de `mix_fader` ; chemin WebSocket selon firmware ; format des meters (6000).
+Layout d'index des 1016-1019 ; layout EQ par bande/canal ; sémantique de 5010 (routage) et 5015-5017 ; plage réelle de gain ligne/micro par canal ; valeur 100 du trim ; linéarité de `mix_fader` ; chemin WebSocket selon firmware (sans chemin : confirmé sur un appareil, version du firmware à relever) ; format des meters (6000).
