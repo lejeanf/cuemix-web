@@ -126,6 +126,8 @@ The embedded Svelte 5 console (dark theme) has four views, each reachable direct
 - **Output**: monitor and phones levels, mono, A/B, talkback, output trims per pair, and the output EQ (curve on the left, bands on the right, presets).
 - **Reverb**: reverb settings, sends (the Reverb mix) and returns.
 
+On a phone the UI opens in a **Simple** view: large Main and Phones volume controls with meters, ±1 dB buttons, Mono, Talkback and preset recall. **Advanced** in the header switches to the full console (which also fits phone and tablet screens); the choice is remembered per browser.
+
 The DSP drawer and the output EQ follow CueMix 5: a curve with draggable bands, and per band an on/off button, frequency, gain, Q and the filter types the hardware offers on that band. Faders: double-click/tap resets to 0 dB, Shift-drag is fine adjustment, mouse wheel nudges. Controls whose changes are not sent to the MOTU yet get a dashed outline and a tooltip. A diagnostic **Meter probe** view (`/?probe`) shows the card's raw meter points.
 
 ```sh

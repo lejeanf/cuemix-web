@@ -10,6 +10,7 @@
   import ControlRoom from './components/ControlRoom.svelte';
   import DspPanel from './components/DspPanel.svelte';
   import Probe from './components/Probe.svelte';
+  import Remote from './components/Remote.svelte';
 
   onMount(() => {
     store.start();
@@ -23,6 +24,7 @@
 
 <div class="app">
   <TopBar>
+    {#if !store.simple}
     <div class="tabs" role="tablist" aria-label="Views">
       {#each tabs as t (t)}
         <button role="tab" aria-selected={store.tab === t} class:sel={store.tab === t} onclick={() => {
@@ -33,13 +35,16 @@
         </button>
       {/each}
     </div>
+    {/if}
   </TopBar>
   {#if !store.socketOpen}
     <div class="offline" role="alert">{S.offlineBanner}</div>
   {/if}
 
   <main class="view">
-    {#if store.tab === 'mixer'}
+    {#if store.simple}
+      <Remote />
+    {:else if store.tab === 'mixer'}
       <Mixer />
     {:else if store.tab === 'input'}
       <Preamps />
@@ -52,8 +57,10 @@
     {/if}
   </main>
 
-  <ControlRoom />
-  <DspPanel />
+  {#if !store.simple}
+    <ControlRoom />
+    <DspPanel />
+  {/if}
 
   <div class="toasts" aria-live="polite">
     {#each store.c.toasts as t (t.id)}

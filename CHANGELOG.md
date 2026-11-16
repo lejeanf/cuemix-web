@@ -69,6 +69,12 @@ need attention. Preset files carry `schema_version`; see
   (`proxmox-setup.sh --update` adds them to an existing container).
 - Each view opens directly from the URL: `#mixer`, `#input`, `#output`,
   `#reverb` (kept in the address bar when switching tabs).
+- Phone remote: on a phone the UI opens in a **Simple** view with large
+  Main and Phones volume controls (slider, −/+ 1 dB, meters), Mono,
+  Talkback and preset recall. **Advanced** (button in the header) shows
+  every control; the choice is remembered per browser. The full console
+  also fits small screens: tabs on their own row, compact Control Room
+  bar, Output and EQ sections that wrap.
 - Browser tab icon.
 - `Int16` payloads (`ValueKind::I16`) for the DSP attack/release times.
 - OSC addresses for all of the above: `/eq/{ch}/band/{b}/{mode|bypass|freq|gain|bw}`,
