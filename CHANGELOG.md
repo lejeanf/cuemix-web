@@ -125,6 +125,9 @@ need attention. Preset files carry `schema_version`; see
 - Input tab: mic preamps and line inputs in two groups on one row, with
   smaller knobs and buttons.
 - Output tab: the EQ curve grows to fill the free height.
+- EQ editor (input DSP panel and output EQ) laid out like CueMix 5: a
+  coloured column per band with an on/off button, Freq / Gain / Q and the
+  band's filter-type icons, under a full-width curve.
 - Writes to the MOTU had no effect: the device ignores frames without a
   payload length field. Writes are now `[id][index][len u16][payload]`
   (verified on an UltraLite-mk5: main volume follows the web UI). Reads are

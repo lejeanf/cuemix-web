@@ -2,7 +2,7 @@
   import { store } from '../lib/store.svelte';
   import { wheel } from '../lib/gesture';
   import { EQ_MODE, type EqBand } from '../lib/protocol';
-  import { EQ_RANGE_DB, eqResponseDb, freqToX, xToFreq } from '../lib/eq';
+  import { EQ_RANGE_DB, eqResponseDb, freqToX, xToFreq, EQ_COLORS } from '../lib/eq';
 
   let {
     kind,
@@ -17,7 +17,6 @@
   const off = $derived(!store.ready);
   let svg = $state<SVGSVGElement>()!;
 
-  const COLORS = ['#06B6D4', '#10B981', '#F59E0B', '#EC4899'];
   const GRID_F = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
   const GRID_DB = [-24, -12, 0, 12, 24];
 
@@ -136,7 +135,7 @@
         cx={freqToX(b.freq_hz) * W}
         cy={yOf(handleDb(b))}
         r="10"
-        fill={COLORS[i % COLORS.length]}
+        fill={EQ_COLORS[i % EQ_COLORS.length]}
         role="slider"
         tabindex="0"
         aria-label="EQ band {i + 1}: {Math.round(b.freq_hz)} Hz, {b.gain_db.toFixed(1)} dB, Q {b.bw_oct.toFixed(2)}"

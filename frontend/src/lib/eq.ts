@@ -4,6 +4,8 @@
 import { EQ_MODE, type EqBand } from './protocol';
 
 export const EQ_FS = 48_000;
+/** One colour per band, shared by the curve handles and the band columns. */
+export const EQ_COLORS = ['#22D3EE', '#C084FC', '#F43F5E', '#3B82F6'];
 export const FREQ_MIN = 20;
 export const FREQ_MAX = 20_000;
 export const EQ_RANGE_DB = 24;

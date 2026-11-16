@@ -347,14 +347,13 @@
     flex: 1;
     min-height: 0;
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
   }
   .curve {
-    flex: 1 1 340px;
+    flex: 1;
     min-width: 0;
-    min-height: 120px;
+    min-height: 110px;
     position: relative;
   }
   .curve :global(.eq) {
@@ -365,13 +364,6 @@
     max-height: none !important;
   }
   .bandcol {
-    align-self: flex-start;
-  }
-  .bandcol {
-    flex: 0 1 430px;
-    min-width: 0;
-  }
-  .bandcol :global(.bands) {
-    grid-template-columns: 1fr;
+    flex: none;
   }
 </style>
