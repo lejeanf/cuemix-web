@@ -10,13 +10,16 @@
   import Reverb from './components/Reverb.svelte';
   import ControlRoom from './components/ControlRoom.svelte';
   import DspPanel from './components/DspPanel.svelte';
+  import Probe from './components/Probe.svelte';
 
   onMount(() => {
     store.start();
     return () => store.stop();
   });
 
-  const tabs: Tab[] = ['mixer', 'input', 'output', 'routing', 'reverb'];
+  /** The meter probe is a diagnostic view: shown with `?probe` or `#probe` in the URL. */
+  const probe = /probe/.test(location.search + location.hash);
+  const tabs: Tab[] = ['mixer', 'input', 'output', 'routing', 'reverb', ...(probe ? (['probe'] as Tab[]) : [])];
 </script>
 
 <div class="app">
@@ -42,6 +45,8 @@
       <Output />
     {:else if store.tab === 'routing'}
       <Routing />
+    {:else if store.tab === 'probe'}
+      <Probe />
     {:else}
       <Reverb />
     {/if}

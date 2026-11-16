@@ -95,6 +95,8 @@ pub enum DeviceEvent {
     /// Changes made on the hardware side.
     Changed(Vec<Param>),
     Meters(Vec<f32>),
+    /// Raw meter frame payload (see [`ServerEvent::MeterRaw`]).
+    MeterRaw(Vec<u8>),
     Status(ConnectionStatus),
 }
 
@@ -499,6 +501,9 @@ impl Engine {
             }
             DeviceEvent::Meters(levels) => {
                 self.emit(origin, Target::All, ServerEvent::Meters { levels })
+            }
+            DeviceEvent::MeterRaw(raw) => {
+                self.emit(origin, Target::All, ServerEvent::MeterRaw { raw })
             }
             DeviceEvent::Status(connection) => {
                 if self.session.connection != connection {

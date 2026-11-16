@@ -7,6 +7,13 @@
   const st = $derived(store.state);
   const off = $derived(!store.ready);
   let confirming = $state<Record<number, boolean>>({});
+  const nMic = $derived(st?.topology.mic_inputs ?? 0);
+  const all = $derived((st?.preamps ?? []).map((pa, ch) => ({ pa, ch })));
+  /** Mic preamps and line inputs, each in its own group. */
+  const groups = $derived([
+    { title: S.mics, items: all.filter((x) => x.ch < nMic) },
+    { title: S.lines, items: all.filter((x) => x.ch >= nMic) },
+  ].filter((g) => g.items.length));
 
   function phantom(ch: number, on: boolean) {
     if (on) {
@@ -23,106 +30,139 @@
 </script>
 
 {#if st}
-  <div class="grid">
-    {#each st.preamps as pa, ch (ch)}
-      {@const mic = ch < st.topology.mic_inputs}
-      <section class="card" aria-label="Preamp {store.labelName(ch)}">
-        <div class="bar" style:background={store.label(ch)?.color ?? 'transparent'}></div>
-        <h3>{store.labelName(ch)}</h3>
-        <Knob
-          value={pa.gain_db}
-          min={0}
-          max={mic ? PREAMP_GAIN_MAX_DB : LINE_GAIN_MAX_DB}
-          reset={0}
-          step={1}
-          size={56}
-          label="Gain {store.labelName(ch)}"
-          format={(v) => `${Math.round(v)} dB`}
-          disabled={off}
-          hint={store.hint('preamp_gain')}
-          onchange={(v, f) => store.set({ param: 'preamp_gain', ch, db: Math.round(v) }, f)}
-        />
-        <div class="btns">
-          <button
-            class="b"
-            class:on={pa.phase}
-            aria-pressed={pa.phase}
-            aria-label="{S.phase} {store.labelName(ch)}"
-            disabled={off}
-            onclick={() => store.set({ param: 'phase', ch, on: !pa.phase }, true)}>Ø</button
-          >
-          {#if mic}
-            <button
-              class="b"
-              class:on={pa.pad}
-              aria-pressed={pa.pad}
-              aria-label="{S.pad} {store.labelName(ch)}"
-              disabled={off}
-              onclick={() => store.set({ param: 'pad', ch, on: !pa.pad }, true)}>{S.pad}</button
-            >
-            <button
-              class="b red"
-              class:on={pa.phantom}
-              aria-pressed={pa.phantom}
-              aria-label="{S.phantom} {store.labelName(ch)}"
-              disabled={off}
-              onclick={() => phantom(ch, !pa.phantom)}>{S.phantom}</button
-            >
-          {/if}
-        </div>
-        {#if confirming[ch]}
-          <div class="confirm" role="alertdialog" aria-label={S.phantomConfirm}>
-            <p>{S.phantomConfirm}</p>
-            <div class="row">
-              <button class="b red on" onclick={() => confirm(ch)}>{S.enable}</button>
-              <button class="b" onclick={() => (confirming[ch] = false)}>{S.cancel}</button>
+  <div class="groups">
+    {#each groups as g (g.title)}
+      <section class="group" aria-label={g.title}>
+        <h3>{g.title}</h3>
+        <div class="chans">
+          {#each g.items as { pa, ch } (ch)}
+            {@const mic = ch < nMic}
+            <div class="ch" aria-label="Preamp {store.labelName(ch)}" role="group">
+              <div class="bar" style:background={store.label(ch)?.color ?? 'transparent'}></div>
+              <span class="nm" title={store.labelName(ch)}>{store.labelName(ch)}</span>
+              <Knob
+                value={pa.gain_db}
+                min={0}
+                max={mic ? PREAMP_GAIN_MAX_DB : LINE_GAIN_MAX_DB}
+                reset={0}
+                step={1}
+                size={44}
+                label={S.gain}
+                ariaLabel="Gain {store.labelName(ch)}"
+                format={(v) => `${Math.round(v)} dB`}
+                disabled={off}
+                hint={store.hint('preamp_gain')}
+                onchange={(v, f) => store.set({ param: 'preamp_gain', ch, db: Math.round(v) }, f)}
+              />
+              <div class="btns">
+                <button
+                  class="b"
+                  class:on={pa.phase}
+                  aria-pressed={pa.phase}
+                  aria-label="{S.phase} {store.labelName(ch)}"
+                  title={S.phase}
+                  disabled={off}
+                  onclick={() => store.set({ param: 'phase', ch, on: !pa.phase }, true)}>Ø</button
+                >
+                {#if mic}
+                  <button
+                    class="b"
+                    class:on={pa.pad}
+                    aria-pressed={pa.pad}
+                    aria-label="{S.pad} {store.labelName(ch)}"
+                    disabled={off}
+                    onclick={() => store.set({ param: 'pad', ch, on: !pa.pad }, true)}>{S.pad}</button
+                  >
+                  <button
+                    class="b red"
+                    class:on={pa.phantom}
+                    aria-pressed={pa.phantom}
+                    aria-label="{S.phantom} {store.labelName(ch)}"
+                    disabled={off}
+                    onclick={() => phantom(ch, !pa.phantom)}>{S.phantom}</button
+                  >
+                {/if}
+              </div>
+              {#if confirming[ch]}
+                <div class="confirm" role="alertdialog" aria-label={S.phantomConfirm}>
+                  <p>{S.phantomConfirm}</p>
+                  <div class="row">
+                    <button class="b red on" onclick={() => confirm(ch)}>{S.enable}</button>
+                    <button class="b" onclick={() => (confirming[ch] = false)}>{S.cancel}</button>
+                  </div>
+                </div>
+              {/if}
             </div>
-          </div>
-        {/if}
+          {/each}
+        </div>
       </section>
     {/each}
   </div>
 {/if}
 
 <style>
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 10px;
-    align-content: start;
+  .groups {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-start;
   }
-  .card {
+  .group {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 0 10px 10px;
+    padding: 6px 8px 8px;
+  }
+  h3 {
+    margin: 0 0 4px;
+    font-size: 13px;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  .chans {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .ch {
+    position: relative;
+    min-width: 64px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    overflow: hidden;
+    gap: 3px;
+    padding: 0 4px 5px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: visible;
   }
   .bar {
     align-self: stretch;
-    height: 5px;
-    margin: 0 -10px;
+    height: 3px;
+    margin: 0 -4px;
+    border-radius: 6px 6px 0 0;
   }
-  h3 {
-    margin: 0;
-    font-size: 14px;
+  .nm {
+    font-size: 12px;
+    font-weight: 600;
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .btns,
   .row {
     display: flex;
-    gap: 6px;
+    gap: 3px;
   }
   .b {
-    min-width: 40px;
-    min-height: 38px;
-    padding: 0 8px;
+    min-width: 24px;
+    min-height: 22px;
+    padding: 0 5px;
+    font-size: 11px;
     background: var(--bg-alt);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 4px;
     cursor: pointer;
     --on: var(--cyan);
   }
@@ -140,10 +180,18 @@
     cursor: not-allowed;
   }
   .confirm {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 10;
+    width: 180px;
+    margin-top: 4px;
+    background: var(--card);
     border: 1px solid var(--red);
     border-radius: 6px;
     padding: 6px;
     font-size: 12px;
+    box-shadow: 0 6px 18px #000a;
   }
   .confirm p {
     margin: 0 0 6px;

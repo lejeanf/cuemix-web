@@ -95,7 +95,9 @@ Une trame par message WebSocket, environ 2 500 trames non-mètre. Le nombre d'en
 
 ## Format des meters
 
-Inconnu. mk5-linux définit `METERS_ID = 6000` sans le décoder et ignore ce flux. À capturer sur matériel avant d'alimenter `ServerEvent::Meters`.
+Partiellement observé (dump de connexion d'un UltraLite-mk5, firmware 2.0.8, musique sur Line 3-4) : chaque trame est `[6000][index 0][100 octets]`, un octet par point de mesure, environ 20 trames/s. `0xff` sur la plupart des points (point inactif ou silence ?), `0x00` sur certains, des valeurs qui bougent (≈ 4-17, ≈ 150-160, ≈ 190-224) sur une trentaine d'autres. Ni l'affectation des 100 points (entrées, mixes, sorties) ni la loi octet → dB ne sont connues.
+
+Pour les établir, cuemix-web transmet la trame brute (`ServerEvent::MeterRaw`, ≈ 15/s) à la vue de diagnostic **Meter probe** (`/?probe`) : on règle une référence en silence, on joue un signal sur une entrée/sortie connue, la vue surligne les points qui ont bougé et copie un instantané JSON. `ServerEvent::Meters` (niveaux linéaires par point) reste vide tant que la table n'est pas établie.
 
 ## Inconnus à lever sur matériel
 

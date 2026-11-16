@@ -333,7 +333,7 @@ async fn session(mut socket: WebSocket, engine: EngineHandle, me: Origin) {
                     }
                     match &env.event {
                         ServerEvent::Changed { .. } if env.origin == me => continue,
-                        ServerEvent::Meters { .. } => {
+                        ServerEvent::Meters { .. } | ServerEvent::MeterRaw { .. } => {
                             let now = Instant::now();
                             if last_meter.is_some_and(|t| now.duration_since(t) < METER_MIN_INTERVAL) {
                                 continue;

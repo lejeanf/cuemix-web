@@ -228,6 +228,8 @@ export type ServerEvent =
   | { event: 'presets'; names: string[] }
   | ({ event: 'labels' } & Labels)
   | { event: 'meters'; levels: number[] }
+  /** Raw meter frame from the MOTU (prop 6000), for the meter probe. */
+  | { event: 'meter_raw'; raw: number[] }
   | { event: 'error'; message: string };
 
 // --------------------------------------------------------------- limits ---

@@ -56,6 +56,8 @@ pub const DEFAULT_SYNC_WINDOW: Duration = Duration::from_millis(500);
 pub const SYNC_MAX: Duration = Duration::from_secs(5);
 /// Meter stream property (motu-mk5-linux `METERS_ID`; format still unknown).
 pub const METERS_PROP_ID: u16 = 6000;
+/// Minimum spacing between two raw meter frames forwarded to the engine.
+const METER_RAW_INTERVAL: Duration = Duration::from_millis(66);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(10);
@@ -301,6 +303,13 @@ enum SessionEnd {
 }
 
 /// Decode one raw binary message (never panics; unknown/malformed gives `None`).
+/// Payload of a meter frame (`[6000][index][bytes…]`), if `bytes` is one.
+fn meter_payload(bytes: &[u8]) -> Option<&[u8]> {
+    (bytes.get(..2) == Some(&METERS_PROP_ID.to_be_bytes()[..]))
+        .then(|| bytes.get(HEADER_LEN..))
+        .flatten()
+}
+
 fn decode_bytes<C: PropCodec>(
     codec: &C,
     bytes: &[u8],
@@ -443,6 +452,7 @@ async fn session_inner<C: PropCodec>(
     // --- steady state ------------------------------------------------------
     let mut throttle = Throttle::new(cfg.throttle_interval);
     let mut pacer = Pacer::new();
+    let mut last_meter: Option<Instant> = None;
     loop {
         let throttle_deadline = throttle.next_deadline();
         let pacer_deadline = pacer.next_deadline(Instant::now());
@@ -485,6 +495,15 @@ async fn session_inner<C: PropCodec>(
             },
             msg = ws.next() => match msg {
                 Some(Ok(Message::Binary(bytes))) => {
+                    if let Some(raw) = meter_payload(&bytes) {
+                        let now = Instant::now();
+                        if last_meter.is_none_or(|t| now.duration_since(t) >= METER_RAW_INTERVAL) {
+                            last_meter = Some(now);
+                            // Meters are disposable: drop rather than wait when the engine is busy.
+                            let _ = link.events.try_send(DeviceEvent::MeterRaw(raw.to_vec()));
+                        }
+                        continue;
+                    }
                     if let Some(param) = decode_bytes(codec, &bytes, device.as_ref()) {
                         if link.events.send(DeviceEvent::Changed(vec![param])).await.is_err() {
                             return SessionEnd::Stop;
@@ -495,5 +514,19 @@ async fn session_inner<C: PropCodec>(
                 Some(Ok(_)) => {}
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod meter_tests {
+    use super::meter_payload;
+
+    #[test]
+    fn meter_payload_is_the_bytes_after_the_header() {
+        let mut frame = vec![0x17, 0x70, 0, 0];
+        frame.extend([0xff, 0x0d, 0x00]);
+        assert_eq!(meter_payload(&frame), Some(&[0xff, 0x0d, 0x00][..]));
+        assert_eq!(meter_payload(&[0x03, 0xe8, 0, 0, 1]), None);
+        assert_eq!(meter_payload(&[0x17]), None);
     }
 }

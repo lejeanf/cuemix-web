@@ -173,3 +173,16 @@ describe('routing names', () => {
     expect(routingOutputs(4, null)[3].name).toBe('Out 4');
   });
 });
+
+describe('meter probe', () => {
+  it('rolling stats and baseline diff', async () => {
+    const { ProbeWindow, changedFrom } = await import('./probe');
+    const w = new ProbeWindow(2);
+    w.push([255, 10]);
+    w.push([255, 20]);
+    w.push([255, 30]);
+    expect(w.count).toBe(2);
+    expect(w.stats()).toEqual({ mean: [255, 25], min: [255, 20], max: [255, 30] });
+    expect(changedFrom([255, 10], [255, 25])).toEqual([1]);
+  });
+});

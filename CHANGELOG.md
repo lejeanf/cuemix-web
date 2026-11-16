@@ -37,6 +37,12 @@ need attention. Preset files carry `schema_version`; see
   shows them as read-only ("changes here are not sent yet"): the encoders are
   written and unit-tested but switched off, so nothing new is sent to the
   device until each feature is checked on a card.
+- Meter probe (diagnostic view, open the UI with `?probe`): shows the
+  MOTU's raw meter frame (property 6000, 100 points) live, highlights the
+  points that change against a silent baseline and copies a JSON snapshot.
+  Used to map the meter layout before real meters are drawn. The server
+  forwards the frames as a new `meter_raw` event (≈ 15/s).
+- Browser tab icon.
 - `Int16` payloads (`ValueKind::I16`) for the DSP attack/release times.
 - OSC addresses for all of the above: `/eq/{ch}/band/{b}/{mode|bypass|freq|gain|bw}`,
   `/output/{n}/eq/band/{b}/…`, `/comp/{ch}/…`, `/gate/{ch}/…`,
@@ -88,6 +94,9 @@ need attention. Preset files carry `schema_version`; see
   Main L … ADAT 8 on an UltraLite-mk5), grouped by connector (Analog,
   Phones, S/PDIF, ADAT) with separators, and the hovered route is spelled
   out ("Line 3 → Main L"). Routing is still not read from the device.
+- Input tab: mic preamps and line inputs in two groups on one row, with
+  smaller knobs and buttons.
+- Output tab: the EQ curve grows to fill the free height.
 - Writes to the MOTU had no effect: the device ignores frames without a
   payload length field. Writes are now `[id][index][len u16][payload]`
   (verified on an UltraLite-mk5: main volume follows the web UI). Reads are

@@ -14,6 +14,10 @@
   let eqOut = $state(0);
   let eqBand = $state(0);
   const eqHint = $derived(store.hint('output_eq_freq'));
+  // The EQ curve fills the free height: its viewBox (640 wide) follows the box's aspect ratio.
+  let curveW = $state(0);
+  let curveH = $state(0);
+  const curveHeight = $derived(curveW > 0 ? Math.min(480, Math.max(90, Math.round((640 * curveH) / curveW))) : 150);
 
   /** CueMix 5 names each output pair after the mix that feeds it by default. */
   function pairName(ch: number): string {
@@ -151,7 +155,9 @@
         </div>
         {#if current}<p class="info">{current.info}</p>{/if}
         <div class="eqbody">
-          <div class="curve"><EqCurve kind="output" ch={eqOut} bind:selected={eqBand} height={150} /></div>
+          <div class="curve" bind:clientWidth={curveW} bind:clientHeight={curveH}>
+            <EqCurve kind="output" ch={eqOut} bind:selected={eqBand} height={curveHeight} />
+          </div>
           <div class="bandcol"><EqBands kind="output" ch={eqOut} bind:selected={eqBand} /></div>
         </div>
       </section>
@@ -164,6 +170,8 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    height: 100%;
+    min-height: 0;
   }
   .top {
     display: flex;
@@ -300,15 +308,35 @@
   .info {
     margin: 0 0 4px;
   }
+  .eqcard {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
   .eqbody {
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    align-items: flex-start;
+    align-items: stretch;
   }
   .curve {
     flex: 1 1 340px;
     min-width: 0;
+    min-height: 120px;
+    position: relative;
+  }
+  .curve :global(.eq) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-height: none !important;
+  }
+  .bandcol {
+    align-self: flex-start;
   }
   .bandcol {
     flex: 0 1 430px;

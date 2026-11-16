@@ -234,7 +234,7 @@ est accepté, et reçoit un **dump complet** — dumps limités à **1 / s au to
 UDP) ; `/sync` (sans argument) en redemande un ; bundles imbriqués > 8 niveaux rejetés avant
 décodage ; le feedback `changed` va aux cibles
 configurées + pairs, **sauf l'émetteur** ; bundles découpés ≤ 8 KiB. Non transmis en OSC :
-`presets`, `labels`, `meters`, `status`, `session`, `error`.
+`presets`, `labels`, `meters`, `meter_raw`, `status`, `session`, `error`. `meter_raw` (`{"event":"meter_raw","raw":[255,13,…]}`) porte la trame de meters brute du MOTU (propriété 6000, non décodée), ≈ 15/s, pour la vue de diagnostic *Meter probe* (`/?probe`) qui sert à établir la table des meters.
 
 ### 3.7 Configuration (`config.rs`)
 

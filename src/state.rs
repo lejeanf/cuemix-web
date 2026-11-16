@@ -750,6 +750,10 @@ pub enum ServerEvent {
     /// Meter levels, linear peak `0.0..=1.0`, one per meter point (layout from
     /// the property table). High rate: bridges may drop/decimate.
     Meters { levels: Vec<f32> },
+    /// Raw, undecoded meter frame from the MOTU (property 6000, one byte per
+    /// meter point), for the meter probe used to map the layout. Rate-limited
+    /// by the device client (~15 Hz).
+    MeterRaw { raw: Vec<u8> },
     /// Request rejected; delivered only to the requesting client.
     Error { message: String },
 }

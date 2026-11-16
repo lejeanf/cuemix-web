@@ -253,6 +253,8 @@ export function applyEvent(s: ClientState, ev: ServerEvent): ClientState {
     case 'labels':
       s.labels = { channels: { ...ev.channels } };
       break;
+    case 'meter_raw':
+      break;
     case 'meters':
       s.meters = ev.levels;
       break;

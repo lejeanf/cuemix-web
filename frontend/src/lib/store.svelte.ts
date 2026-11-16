@@ -10,7 +10,7 @@ import { isHwMapped, isHwReadOnly } from './hwmap';
 import { S } from './strings';
 
 export type Link = 'offline' | 'connecting' | 'online' | 'demo';
-export type Tab = 'mixer' | 'input' | 'output' | 'routing' | 'reverb';
+export type Tab = 'mixer' | 'input' | 'output' | 'routing' | 'reverb' | 'probe';
 
 export const RECONNECT_MIN_MS = 500;
 export const RECONNECT_MAX_MS = 8000;
@@ -39,6 +39,8 @@ class Store {
    *  update check: the box never contacts GitHub (maintainer decision). */
   version: string | null = $state(null);
   tab: Tab = $state('mixer');
+  /** Latest raw meter frame (meter probe); not deep-reactive. */
+  meterRaw: number[] | null = $state.raw(null);
   bus = $state(0);
   dspChannel: number | null = $state(null);
 
@@ -183,6 +185,10 @@ class Store {
   }
 
   private handle(ev: ServerEvent): void {
+    if (ev.event === 'meter_raw') {
+      this.meterRaw = ev.raw;
+      return;
+    }
     if (ev.event === 'meters') {
       // Hot path: bypass reactive state entirely, feed the canvas loop.
       meterBank.push(ev.levels);
