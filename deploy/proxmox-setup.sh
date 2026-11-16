@@ -6,7 +6,9 @@
 #   - eth1 on an isolated MOTU bridge (no IP, no gateway) with the container
 #     side at 169.254.254.1/16,
 # and installs the udev rule that moves the MOTU CDC-Ethernet link onto that
-# bridge when the interface appears.
+# bridge when the interface appears, plus a post-up hook on the bridge that
+# re-attaches it after every network reload (ifupdown2 `ifreload -a`, or
+# "Apply Configuration" in the Proxmox GUI, detaches undeclared ports).
 #
 # Run as root on the Proxmox VE host, from a checkout of this repository.
 # Idempotent: re-running keeps existing bridges, rules, containers and config.
@@ -89,8 +91,10 @@ Options:
   -n, --dry-run     Print every action without changing the system.
   -h, --help        Show this help and exit.
   --update          Update cuemix-web inside the existing container: pushes the
-                    current cuemix-update.sh and runs it there. Does not touch
-                    bridges, udev rules or the container configuration.
+                    current cuemix-update.sh and runs it there. Also refreshes
+                    the host MOTU helper, udev rule and bridge post-up hook
+                    (no network reload). Does not create bridges or change the
+                    container configuration.
   --pre             With --update: also consider pre-releases.
   --version vX.Y.Z  With --update: install this exact release tag.
   --ctid N          With --update: container ID (default: CTID in proxmox.env).
@@ -331,28 +335,14 @@ ensure_motu_bridge() {
     needs_reload=1
   fi
 
-  cfg_tmp="${WORKDIR}/motu-bridge.cfg"
-  cat > "${cfg_tmp}" <<EOF
-# Managed by cuemix-web deploy/proxmox-setup.sh.
-# Isolated MOTU bridge: no IP address, no gateway. The MOTU USB link is
-# attached by the udev rule ${UDEV_RULE}.
-auto ${br}
-iface ${br} inet manual
-    bridge-ports none
-    bridge-stp off
-    bridge-fd 0
-EOF
-
-  if [[ -f "${MOTU_BRIDGE_CFG}" ]] && cmp -s "${cfg_tmp}" "${MOTU_BRIDGE_CFG}"; then
-    log_info "unchanged: ${MOTU_BRIDGE_CFG}"
-  else
-    run mkdir -p -- "$(dirname -- "${MOTU_BRIDGE_CFG}")"
-    run install -m 0644 -- "${cfg_tmp}" "${MOTU_BRIDGE_CFG}"
-    log_info "wrote: ${MOTU_BRIDGE_CFG}"
+  if write_motu_bridge_cfg "${br}"; then
     needs_reload=1
   fi
 
   ensure_interfaces_source
+
+  # The helper must exist before the reload: the bridge's post-up calls it.
+  install_host_udev
 
   if [[ "${needs_reload}" -eq 1 ]]; then
     run ifreload -a
@@ -362,6 +352,48 @@ EOF
   if [[ "${DRY_RUN}" -eq 0 && ! -d "/sys/class/net/${br}/bridge" ]]; then
     die "${br} was not created by 'ifreload -a'; check that /etc/network/interfaces loads ${MOTU_BRIDGE_CFG} (ifquery ${br})"
   fi
+
+  # Attach a MOTU that is already plugged in (no-op without one).
+  run "${HOST_HELPER}" --all
+}
+
+# write_motu_bridge_cfg BRIDGE : (re)write MOTU_BRIDGE_CFG; returns 0 when it
+# changed. Does not reload the network.
+#
+# ifupdown2 removes every port that is not listed in bridge-ports whenever it
+# brings the bridge up again (`ifreload -a`, "Apply Configuration" in the GUI);
+# Proxmox only exempts tap/veth/fwpr ports. The MOTU link (enx<mac>) cannot be
+# listed, because a missing port would fail the bridge while the MOTU is
+# unplugged, so it is detached on every reload. post-up runs after that port
+# sync on each reload and at boot, and re-attaches whatever MOTU is present.
+write_motu_bridge_cfg() {
+  local br="$1" cfg_tmp="${WORKDIR}/motu-bridge.cfg"
+  cat > "${cfg_tmp}" <<EOF
+# Managed by cuemix-web deploy/proxmox-setup.sh.
+# Isolated MOTU bridge: no IP address, no gateway. The MOTU USB link is
+# attached by the udev rule ${UDEV_RULE} when it is plugged in, and again by
+# post-up after every network reload (ifreload -a / "Apply Configuration"
+# detaches ports that are not listed in bridge-ports).
+auto ${br}
+iface ${br} inet manual
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+    post-up [ ! -x ${HOST_HELPER} ] || ${HOST_HELPER} --all
+EOF
+
+  if [[ -f "${MOTU_BRIDGE_CFG}" ]] && cmp -s "${cfg_tmp}" "${MOTU_BRIDGE_CFG}"; then
+    log_info "unchanged: ${MOTU_BRIDGE_CFG}"
+    return 1
+  fi
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    printf '%s[dry-run]%s would write %s:\n' "${C_YELLOW}" "${C_RESET}" "${MOTU_BRIDGE_CFG}"
+    sed 's/^/    /' "${cfg_tmp}"
+  fi
+  run mkdir -p -- "$(dirname -- "${MOTU_BRIDGE_CFG}")"
+  run install -m 0644 -- "${cfg_tmp}" "${MOTU_BRIDGE_CFG}"
+  log_info "wrote: ${MOTU_BRIDGE_CFG}"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -387,13 +419,46 @@ install_host_udev() {
   # Order matters: bring the link up first, then enslave it to the bridge.
   cat > "${helper_src}" <<'HELPER'
 #!/bin/sh
-# Installed by cuemix-web deploy/proxmox-setup.sh. Called by udev with the
-# MOTU CDC-Ethernet interface name. Order: link up, then add to the bridge.
+# Installed by cuemix-web deploy/proxmox-setup.sh. Attaches the MOTU
+# CDC-Ethernet link to the isolated MOTU bridge (link up, then add to bridge).
+#
+#   cuemix-motu-bridge IFACE   udev, when the MOTU interface appears
+#   cuemix-motu-bridge --all   bridge post-up (after every ifreload) or by hand:
+#                              attach every MOTU link present (USB vendor 07fd,
+#                              driver cdc_ether). No-op when none is plugged
+#                              in; always exits 0 so it never fails a reload.
 set -eu
-IF="$1"
 BRIDGE="@BRIDGE@"
-ip link set "$IF" up
-ip link set "$IF" master "$BRIDGE"
+
+attach() {
+  ip link set "$1" up
+  ip link set "$1" master "$BRIDGE"
+}
+
+if [ "${1:-}" != "--all" ]; then
+  [ -n "${1:-}" ] || { echo "usage: $0 IFACE | --all" >&2; exit 2; }
+  attach "$1"
+  exit 0
+fi
+
+[ -d "/sys/class/net/$BRIDGE/bridge" ] || exit 0
+for dev in /sys/class/net/*; do
+  [ -e "$dev/device/driver" ] || continue
+  [ "$(basename "$(readlink -f "$dev/device/driver")")" = "cdc_ether" ] || continue
+  # device -> USB interface; its parent USB device holds idVendor.
+  vendor="$(cat "$(dirname "$(readlink -f "$dev/device")")/idVendor" 2>/dev/null || true)"
+  [ "$vendor" = "07fd" ] || continue
+  name="$(basename "$dev")"
+  if [ -e "$dev/master" ] && [ "$(basename "$(readlink -f "$dev/master")")" = "$BRIDGE" ]; then
+    continue
+  fi
+  if attach "$name"; then
+    echo "cuemix-motu-bridge: attached $name to $BRIDGE"
+  else
+    echo "cuemix-motu-bridge: could not attach $name to $BRIDGE" >&2
+  fi
+done
+exit 0
 HELPER
   sed -i "s|@BRIDGE@|${MOTU_BRIDGE}|" "${helper_src}"
 
@@ -625,8 +690,38 @@ push_update_units() {
   run pct exec "${ctid}" -- systemctl start --no-block cuemix-update-check.service || log_warn "first update check could not start"
 }
 
+# refresh_host_motu_link CTID : --update path for the host side. Rewrites the
+# helper, udev rule and bridge config (post-up hook) for the bridge the
+# container's eth1 uses, then attaches a present MOTU. No network reload: the
+# post-up hook is read from the file on the next reload or boot.
+refresh_host_motu_link() {
+  local ctid="$1"
+  log_step "MOTU bridge link (host)"
+  MOTU_BRIDGE="$(pct config "${ctid}" 2>/dev/null \
+    | sed -n 's/^net1:.*bridge=\([^,[:space:]]*\).*/\1/p' | head -n 1)"
+  if ! [[ "${MOTU_BRIDGE}" =~ ^[A-Za-z0-9_.-]{1,15}$ ]]; then
+    log_warn "container ${ctid} has no net1 bridge; MOTU host files not refreshed"
+    return 0
+  fi
+  if ! grep -qs '^# Managed by cuemix-web deploy/proxmox-setup.sh' "${MOTU_BRIDGE_CFG}"; then
+    log_warn "${MOTU_BRIDGE_CFG} is missing or not managed by this script; MOTU host files not refreshed (run deploy/proxmox-setup.sh without --update)"
+    return 0
+  fi
+  if ! grep -qsE "^iface[[:space:]]+${MOTU_BRIDGE}[[:space:]]" "${MOTU_BRIDGE_CFG}"; then
+    log_warn "${MOTU_BRIDGE_CFG} does not define ${MOTU_BRIDGE}; MOTU host files not refreshed"
+    return 0
+  fi
+  [[ -f "${UDEV_TEMPLATE}" ]] || die "missing ${UDEV_TEMPLATE} (run from a repository checkout)"
+  log_info "MOTU bridge: ${MOTU_BRIDGE} (from container ${ctid} net1)"
+  write_motu_bridge_cfg "${MOTU_BRIDGE}" || true
+  interfaces_sources_cfg || log_warn "/etc/network/interfaces does not load ${MOTU_BRIDGE_CFG}"
+  install_host_udev
+  run "${HOST_HELPER}" --all
+}
+
 # update_container : re-push the current cuemix-update.sh into the container
-# and run it there. Leaves bridges, udev rules and the container config alone.
+# and run it there, and refresh the host MOTU link files. Leaves bridges and
+# the container config alone.
 update_container() {
   log_step "Update cuemix-web in the container"
   command -v pct >/dev/null 2>&1 || die "pct not found: this is not a Proxmox VE host"
@@ -645,6 +740,8 @@ update_container() {
     die "container ${ctid} is not running; start it with: pct start ${ctid}"
   fi
   log_info "container ${ctid} is running"
+
+  refresh_host_motu_link "${ctid}"
 
   local dry_args=()
   if [[ "${DRY_RUN}" -eq 1 ]]; then
@@ -697,7 +794,6 @@ main() {
   load_config
   collect_settings
   ensure_motu_bridge
-  install_host_udev
   ensure_template
   create_container
   start_container
