@@ -104,6 +104,7 @@ describe('EQ math', () => {
     const { eqModesForBand } = await import('./protocol');
     expect(eqModesForBand(0, 4)).toEqual([EQ_MODE.BELL, EQ_MODE.LOW_SHELF, EQ_MODE.HIGH_PASS]);
     expect(eqModesForBand(1, 4)).toEqual([EQ_MODE.BELL]);
+    expect(eqModesForBand(2, 4)).toEqual([EQ_MODE.BELL]);
     expect(eqModesForBand(3, 4)).toEqual([EQ_MODE.BELL, EQ_MODE.HIGH_SHELF]);
     expect(eqModesForBand(2, 3)).toEqual([EQ_MODE.BELL, EQ_MODE.HIGH_SHELF]);
   });
@@ -150,14 +151,14 @@ describe('hardware mapping list', () => {
     expect(isHwMapped('dim')).toBe(false);
     expect(isHwReadOnly('mix_vol')).toBe(false);
   });
-  it('output EQ is written to the MOTU', () => {
-    for (const p of ['output_eq_mode', 'output_eq_bypass', 'output_eq_freq', 'output_eq_gain', 'output_eq_bw'] as const) {
+  it('input and output EQ are written to the MOTU', () => {
+    for (const p of ['input_eq_mode', 'input_eq_bypass', 'input_eq_freq', 'input_eq_gain', 'input_eq_bw', 'output_eq_mode', 'output_eq_bypass', 'output_eq_freq', 'output_eq_gain', 'output_eq_bw'] as const) {
       expect(isHwMapped(p)).toBe(true);
       expect(isHwReadOnly(p)).toBe(false);
     }
   });
-  it('input EQ, dynamics, reverb and clock are read from the MOTU but not written yet', () => {
-    for (const p of ['input_eq_freq', 'comp_makeup', 'gate_bypass', 'reverb_decay', 'sample_rate', 'clock_source'] as const) {
+  it('dynamics, reverb and clock are read from the MOTU but not written yet', () => {
+    for (const p of ['comp_makeup', 'gate_bypass', 'reverb_decay', 'sample_rate', 'clock_source'] as const) {
       expect(isHwMapped(p)).toBe(false);
       expect(isHwReadOnly(p)).toBe(true);
     }

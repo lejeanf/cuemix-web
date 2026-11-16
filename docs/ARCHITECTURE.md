@@ -61,7 +61,7 @@ changements venant du matériel sont appliqués et diffusés, **jamais renvoyés
 | `src/presets.rs` | Présets (`<presets_dir>/<nom>.json`), `labels.json`, écritures atomiques | ✅ |
 | `src/motu/fader.rs` | Lois de fader `0..1` (mix et trims) — utilisées **uniquement aux bords** | ✅ |
 | `src/motu/protocol.rs` | Trames BE, `8.24`, `Int16`, `Value`/`ValueKind` | ✅ |
-| `src/motu/props.rs` | Table `prop_id` (69 entrées, `verified: false`), `encode`/`decode` ; DSP/réverbe/horloge décodés ; **EQ de sortie actif** (écrit) ; encodeurs `encode_unverified` (EQ d'entrée, dynamique, réverbe, horloge) **non actifs** | 🟡 partiel (§8) |
+| `src/motu/props.rs` | Table `prop_id` (69 entrées, `verified: false`), `encode`/`decode` ; DSP/réverbe/horloge décodés ; **EQ d'entrée et de sortie actifs** (écrits) ; encodeurs `encode_unverified` (dynamique, réverbe, horloge) **non actifs** | 🟡 partiel (§8) |
 | `src/motu/throttle.rs` | Limiteur par paramètre, dernière valeur garantie | ✅ |
 | `src/motu/client.rs` | Client WS, `PropCodec`, sync Option A, backoff 1→10 s, mode démo | ✅ |
 | `src/motu/discovery.rs` | IP explicite → mDNS (provisoire) → ARP + sonde TCP | 🟡 (§8) |
@@ -117,7 +117,7 @@ MotuState
 ├── mixes[7]: { name, channels[32]: { gain, pan, mute, solo } }
 ├── main: { db }
 ├── preamps[8]: { gain_db, phantom, pad, phase }   (+48V / Pad : seulement les 2 entrées micro)
-├── input_eq[8][4]: { mode, bypass, freq_hz, gain_db, bw_oct }   (préamplis × INPUT_EQ_BANDS ; lu, non écrit)
+├── input_eq[8][4]: { mode, bypass, freq_hz, gain_db, bw_oct }   (préamplis × INPUT_EQ_BANDS ; lu et écrit)
 ├── compressors[8]: { bypass, threshold_db, attack_ms, release_ms, ratio, makeup }   (lu, non écrit)
 ├── gates[2]: { bypass, threshold_db, attack_ms, release_ms }     (entrées micro ; lu, non écrit)
 ├── output_eq[12][3]: { mode, bypass, freq_hz, gain_db, bw_oct }  (OUTPUT_EQ_OUTPUTS slots × OUTPUT_EQ_BANDS ; lu et écrit, slot 1 jamais écrit)
@@ -196,7 +196,7 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 `param` : `mix_vol` (`gain`), `mix_pan` (`value`), `mix_mute`, `mix_solo`, `main_vol` (`db`),
 `preamp_gain` (`db`), `phantom`, `pad`, `phase`, `route`, `dim`, `mono`, `speaker_b`,
 `talkback`, `phones_vol` (`db`), `output_trim` (`ch`, `db`), et **un param par propriété
-matérielle** pour le DSP (lus sur la MOTU ; seul l'EQ de sortie est écrit) : `input_eq_mode` (`ch`, `band`,
+matérielle** pour le DSP (lus sur la MOTU ; seuls les EQ d'entrée et de sortie sont écrits) : `input_eq_mode` (`ch`, `band`,
 `mode` octet brut), `input_eq_bypass` (`on`), `input_eq_freq` (`hz` entiers), `input_eq_gain`
 (`db`), `input_eq_bw` (`octaves` = Q), idem `output_eq_*` (`ch` = **slot** d'EQ 0–11 : 0 Main L-R, 1 inutilisé, 2–9 Line 3–10, 10 Phones L-R, 11 Reverb ; `band` 0–2),
 `gate_bypass` / `comp_bypass` (`on` = bypass), `gate_threshold` / `comp_threshold` (`db`),
@@ -310,7 +310,7 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 | D20 | Présets **schema v2** : migration v0/v1 → v2 dans `presets::parse_preset` (suppression de `channels` et de l'ancien `reverb`, puis `reset_dsp` aux dimensions du préset) ; fixtures figées `preset-v1.json` et `preset-v2.json` | L'ancien DSP (32 tranches, HPF séparé, Q) ne correspond à aucun réglage matériel : rien à convertir honnêtement |
 | D21 | Départs/retour de réverbe = paramètres de mix (mix « Reverb », entrée « Reverb ») ; plus de `reverb_send` ni de `return_gain` | C'est ainsi que la MOTU les stocke (dump) |
 | D22 | Mode d'EQ = octet brut (`u8`) + noms côté UI ; pas de bypass global d'EQ (`eq_bypass`, `/eq/{ch}/bypass` retirés) | Valeurs inconnues conservées ; le matériel n'a qu'un bypass par bande |
-| D23 | Encodeurs DSP écrits et testés ; **seul l'EQ de sortie est actif** (`props::encode` → `encode_output_eq`, le slot 1 inutilisé n'est jamais écrit). EQ d'entrée, compresseur, gate, réverbe et horloge restent dans `props::encode_unverified`, **non branchés** : `is_mapped` faux, rien n'est envoyé | Activation une fonction à la fois après un essai sur la carte |
+| D23 | Encodeurs DSP écrits et testés ; **les EQ d'entrée et de sortie sont actifs** (`props::encode` → `encode_eq_param` ; le slot 1 inutilisé de la sortie n'est jamais écrit ; une règle unique `state::eq_mode_allowed` limite les types de filtre par bande). Compresseur, gate, réverbe et horloge restent dans `props::encode_unverified`, **non branchés** : `is_mapped` faux, rien n'est envoyé | Activation une fonction à la fois après un essai sur la carte |
 | D24 | Mises à jour **déclenchées par l'utilisateur depuis l'UI**, par canal de release (`[update] channel` = `stable` ou `prerelease`, dans `config.toml`, pas dans l'UI) ; jamais automatiques (arbitrage mainteneur 2026-11-15, remplace D16). Un timer root quotidien (`cuemix-update --check --status-file`) écrit le statut ; le bouton *Install* ne fait que créer un fichier de demande vide que l'unité `.path` root transforme en `cuemix-update` | Le service web reste non-root et sans accès réseau sortant ; seul le dernier release officiel du canal (sha256, santé, retour arrière) peut être installé, et seulement à la demande d'une personne |
 | D25 | Meters : trame 6000 brute relayée (`meter_raw`, ≈ 30/s) et décodée **côté client** avec la table du bus de patch du mk5 (`frontend/src/lib/meterMap.ts`), confirmée au *Meter probe* et par la table de CueMix 5 | Le serveur reste agnostique ; d'autres modèles = une autre table |
 | D26 | Onglet *Routing* supprimé ; `route` et la matrice restent dans l'état (inertes) pour la compatibilité des présets | La matrice booléenne ne correspond pas au matériel (5010 = une source par sortie) ; les mixes couvrent l'usage |
@@ -320,9 +320,9 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 
 | # | Sujet | Arbitrage | État |
 |---|---|---|---|
-| Q1 | Encodage des fréquences EQ | Vérifier dans les sources | ✅ `Int32` Hz (props 1004/1024) ; gain/largeur EQ en `8.24` ; HPF = mode de bande 3 ; **lu** depuis le dump (index `ch × 4 + bande` en entrée, `sortie × 3 + bande` en sortie) ; encodeur prêt, non actif |
+| Q1 | Encodage des fréquences EQ | Vérifier dans les sources | ✅ `Int32` Hz (props 1004/1024) ; gain/largeur EQ en `8.24` ; HPF = mode de bande 3 ; **lu** depuis le dump (index `ch × 4 + bande` en entrée, `slot × 3 + bande` en sortie) ; **écrit** (EQ d'entrée et de sortie actifs, D23) |
 | Q2 | Dimensions | Défauts démo, topologie réelle à la connexion | ✅ comptées dans le dump de connexion (`motu::identify`) ; défauts D11 confirmés sur un mk5 |
-| Q3 | Table `prop_id` | Depuis motu-mk5-linux, puis la table de CueMix 5 (`dev.js`) | ✅ table complète connue (id, type, sens ; voir MOTU-PROTOCOL.md). **Lus et écrits** : gain/phase préamplis (8), pad/48V (2), main (vérifié sur carte), casque, trims de sortie (10, ordre des DAC), mono, talkback, matrice de mix 1016–1019 (`bus × 32 + entrée`, `motu::identify::encode_mix`), format optique 5006. **Mesurés** : meters 6000 (D25). **Lus seulement** (encodeurs non actifs, D23) : EQ d'entrée 1002–1006 (8 × 4), EQ de sortie 1022–1026 (12 × 3), gate 1007–1010, compresseur 1011–1015 + 1021, réverbe 1030–1034, horloge 10/11. **Connus, non implémentés** : routage 5010 (D26), A/B 5015–5017, talkback 5026–5031, loopback 5014 ; DIM absent du matériel |
+| Q3 | Table `prop_id` | Depuis motu-mk5-linux, puis la table de CueMix 5 (`dev.js`) | ✅ table complète connue (id, type, sens ; voir MOTU-PROTOCOL.md). **Lus et écrits** : gain/phase préamplis (8), pad/48V (2), main (vérifié sur carte), casque, trims de sortie (10, ordre des DAC), mono, talkback, matrice de mix 1016–1019 (`bus × 32 + entrée`, `motu::identify::encode_mix`), format optique 5006. **Mesurés** : meters 6000 (D25). **Lus et écrits** : EQ d'entrée 1002–1006 (8 × 4), EQ de sortie 1022–1026 (12 × 3). **Lus seulement** (encodeurs non actifs, D23) : gate 1007–1010, compresseur 1011–1015 + 1021, réverbe 1030–1034, horloge 10/11. **Connus, non implémentés** : routage 5010 (D26), A/B 5015–5017, talkback 5026–5031, loopback 5014 ; DIM absent du matériel |
 | Q4 | Volumes en gain linéaire `8.24` | Gain linéaire | 🟡 non confirmé ; seul indice : seuil de gate « 1 = 0 dB » |
 
 À vérifier **sur matériel** par le mainteneur (bloquant pour les faders de mix) :

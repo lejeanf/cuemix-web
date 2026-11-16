@@ -153,30 +153,46 @@ pub mod eq_mode {
 /// 1 = unused, 2..=9 = Line 3..10, 10 = Phones L-R, 11 = Reverb).
 pub const OUTPUT_EQ_UNUSED_SLOT: u16 = 1;
 
-/// Is `mode` a filter type CueMix 5 offers on output EQ band `band`? Band 0:
-/// bell / low shelf / high-pass, band 1: bell, band 2: bell / high shelf.
-/// Single source of truth for the state (`apply`) and the device encoder.
-pub fn output_eq_mode_allowed(band: u8, mode: u8) -> bool {
-    match band {
-        0 => matches!(
+/// Is `mode` a filter type CueMix 5 offers on band `band` of an EQ with
+/// `bands` bands (input: 4, output: 3)? The first band can be a bell, low
+/// shelf or high-pass, the last a bell or high shelf, the ones in between
+/// bells only. Single source of truth for the state (`check_writable`,
+/// `normalized`) and the device encoder.
+pub fn eq_mode_allowed(band: u8, bands: usize, mode: u8) -> bool {
+    let band = usize::from(band);
+    if band >= bands {
+        false
+    } else if band == 0 {
+        matches!(
             mode,
             eq_mode::BELL | eq_mode::LOW_SHELF | eq_mode::HIGH_PASS
-        ),
-        1 => mode == eq_mode::BELL,
-        2 => matches!(mode, eq_mode::BELL | eq_mode::HIGH_SHELF),
-        _ => false,
+        )
+    } else if band == bands - 1 {
+        matches!(mode, eq_mode::BELL | eq_mode::HIGH_SHELF)
+    } else {
+        mode == eq_mode::BELL
     }
 }
 
+/// [`eq_mode_allowed`] for the input (`output == false`) or output EQ.
+pub fn eq_band_mode_allowed(output: bool, band: u8, mode: u8) -> bool {
+    let bands = if output {
+        OUTPUT_EQ_BANDS
+    } else {
+        INPUT_EQ_BANDS
+    };
+    eq_mode_allowed(band, bands, mode)
+}
+
 /// Refuses a change asked by a client (web UI, OSC) that the device would
-/// never receive: the unused output EQ slot, or a filter type the output EQ
-/// band does not offer. Checked on the command path only: values reported by
+/// never receive: the unused output EQ slot, or a filter type the EQ band
+/// does not offer. Checked on the command path only: values reported by
 /// the device itself always go into the state, the card being the reference.
 pub fn check_writable(param: &Param) -> Result<(), StateError> {
-    let Some((true, ch, band, field)) = eq_parts(param) else {
+    let Some((output, ch, band, field)) = eq_parts(param) else {
         return Ok(());
     };
-    if ch == OUTPUT_EQ_UNUSED_SLOT {
+    if output && ch == OUTPUT_EQ_UNUSED_SLOT {
         return Err(StateError::Index {
             what: "unused output eq slot",
             index: usize::from(ch),
@@ -184,9 +200,9 @@ pub fn check_writable(param: &Param) -> Result<(), StateError> {
         });
     }
     if let EqField::Mode(mode) = field {
-        if !output_eq_mode_allowed(band, mode) {
+        if !eq_band_mode_allowed(output, band, mode) {
             return Err(StateError::Index {
-                what: "output eq mode for this band",
+                what: "eq mode for this band",
                 index: usize::from(mode),
                 len: 4,
             });
@@ -235,13 +251,14 @@ impl EqBand {
         }
     }
 
-    /// Input EQ defaults (values of the 2026-11-15 dump): HPF, then three bells.
+    /// Input EQ defaults of every channel (CueMix 5 values): low shelf 60 Hz,
+    /// bell 400 Hz, bell 2 kHz, high shelf 14 kHz, 0 dB, Q 1, not bypassed.
     fn input_defaults() -> Vec<EqBand> {
         vec![
-            Self::at(eq_mode::HIGH_PASS, 45.0),
-            Self::at(eq_mode::BELL, 350.0),
-            Self::at(eq_mode::BELL, 3_500.0),
-            Self::at(eq_mode::BELL, 7_000.0),
+            Self::at(eq_mode::LOW_SHELF, 60.0),
+            Self::at(eq_mode::BELL, 400.0),
+            Self::at(eq_mode::BELL, 2_000.0),
+            Self::at(eq_mode::HIGH_SHELF, 14_000.0),
         ]
     }
 
@@ -979,18 +996,23 @@ impl MotuState {
             self.output_trims = vec![0.0; OUTPUT_TRIMS];
         }
         self.check_shape()?;
-        // Output EQ values `apply` rejects (unused slot, filter type the band
-        // does not offer) are reset to the defaults instead of failing the
-        // whole preset.
-        let defaults = EqBand::output_defaults();
-        for (slot, bands) in self.output_eq.iter_mut().enumerate() {
-            let unused = slot == usize::from(OUTPUT_EQ_UNUSED_SLOT);
-            for (band, (b, d)) in bands.iter_mut().zip(&defaults).enumerate() {
-                let allowed = u8::try_from(band).is_ok_and(|n| output_eq_mode_allowed(n, b.mode));
-                if unused {
-                    *b = *d;
-                } else if !allowed {
-                    b.mode = d.mode;
+        // EQ values a client could not write (output EQ unused slot, filter
+        // type the band does not offer) are reset to the defaults instead of
+        // failing the whole preset.
+        for (output, rows, defaults) in [
+            (false, &mut self.input_eq, EqBand::input_defaults()),
+            (true, &mut self.output_eq, EqBand::output_defaults()),
+        ] {
+            for (ch, bands) in rows.iter_mut().enumerate() {
+                let unused = output && ch == usize::from(OUTPUT_EQ_UNUSED_SLOT);
+                for (band, (b, d)) in bands.iter_mut().zip(&defaults).enumerate() {
+                    let allowed =
+                        u8::try_from(band).is_ok_and(|n| eq_band_mode_allowed(output, n, b.mode));
+                    if unused {
+                        *b = *d;
+                    } else if !allowed {
+                        b.mode = d.mode;
+                    }
                 }
             }
         }
@@ -2098,8 +2120,18 @@ mod dsp_param_tests {
         let s = MotuState::default();
         assert_eq!(s.input_eq.len(), 8);
         assert!(s.input_eq.iter().all(|c| c.len() == INPUT_EQ_BANDS));
-        assert_eq!(s.input_eq[0][0].mode, eq_mode::HIGH_PASS);
-        assert_eq!(s.input_eq[3][2].freq_hz, 3_500.0);
+        let modes: Vec<u8> = s.input_eq[0].iter().map(|b| b.mode).collect();
+        assert_eq!(
+            modes,
+            [
+                eq_mode::LOW_SHELF,
+                eq_mode::BELL,
+                eq_mode::BELL,
+                eq_mode::HIGH_SHELF
+            ]
+        );
+        let freqs: Vec<f64> = s.input_eq[3].iter().map(|b| b.freq_hz).collect();
+        assert_eq!(freqs, [60.0, 400.0, 2_000.0, 14_000.0]);
         assert_eq!(s.compressors.len(), 8);
         assert_eq!(s.gates.len(), 2);
         assert_eq!(s.output_eq.len(), OUTPUT_EQ_OUTPUTS);
@@ -2153,20 +2185,62 @@ mod dsp_param_tests {
         };
         assert_eq!(s.apply(&dev), Ok(Some(dev)));
         s = MotuState::default();
-        // Allowed ones go through; the input EQ keeps accepting any mode.
+        // Allowed ones go through.
         let ok = Param::OutputEqMode {
             ch: 0,
             band: 0,
             mode: eq_mode::HIGH_PASS,
         };
+        assert_eq!(check_writable(&ok), Ok(()));
         assert_eq!(s.apply(&ok), Ok(Some(ok)));
-        assert!(s
-            .apply(&Param::InputEqMode {
+    }
+
+    #[test]
+    fn input_eq_modes_follow_the_band_rule_on_the_command_path() {
+        // 4 bands: first bell / low shelf / high-pass, middle bell, last bell / high shelf.
+        let allowed: [&[u8]; 4] = [&[0, 1, 3], &[0], &[0], &[0, 2]];
+        for (band, ok) in allowed.iter().enumerate() {
+            let band = band as u8;
+            for mode in 0..=u8::MAX {
+                let p = Param::InputEqMode { ch: 0, band, mode };
+                assert_eq!(check_writable(&p).is_ok(), ok.contains(&mode), "{p:?}");
+            }
+        }
+        // Same rule for the 3-band output EQ, from one function.
+        assert!(eq_mode_allowed(2, OUTPUT_EQ_BANDS, eq_mode::HIGH_SHELF));
+        assert!(!eq_mode_allowed(3, OUTPUT_EQ_BANDS, eq_mode::BELL));
+        // The device reference is always applied, whatever the mode.
+        let mut s = MotuState::default();
+        let dev = Param::InputEqMode {
+            ch: 0,
+            band: 1,
+            mode: 7,
+        };
+        assert_eq!(s.apply(&dev), Ok(Some(dev)));
+        // Non-mode fields and other params are not restricted.
+        assert_eq!(
+            check_writable(&Param::InputEqGain {
                 ch: 0,
                 band: 1,
-                mode: 7
-            })
-            .is_ok());
+                db: 3.0
+            }),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn normalized_repairs_invalid_input_eq_instead_of_failing() {
+        let mut s = MotuState::default();
+        s.input_eq[2][1].mode = eq_mode::HIGH_PASS;
+        s.input_eq[2][3].mode = eq_mode::LOW_SHELF;
+        s.input_eq[2][3].gain_db = 4.0;
+        s.input_eq[5][0].mode = 200;
+        let n = s.normalized().unwrap_or_default();
+        let fresh = EqBand::input_defaults();
+        assert_eq!(n.input_eq[2][1].mode, fresh[1].mode);
+        assert_eq!(n.input_eq[2][3].mode, fresh[3].mode);
+        assert_eq!(n.input_eq[2][3].gain_db, 4.0, "other fields kept");
+        assert_eq!(n.input_eq[5][0].mode, fresh[0].mode);
     }
 
     #[test]

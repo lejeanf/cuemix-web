@@ -2,7 +2,7 @@
 
 High-performance **Rust** web controller and bidirectional **OSC** bridge for the **MOTU UltraLite-mk5** audio interface. A single Rust binary embeds a dark-theme Svelte web UI and serves it together with a WebSocket API. OSC controllers (TouchOSC, QLab, ...) and browsers share one state core, so every change made from either side is applied, clamped and broadcast back to all clients.
 
-**Status:** in daily use on a real UltraLite-mk5 (firmware 2.0.8). The device is identified on connect, its whole state is read back, levels are metered, and the mixes, preamps, trims and monitoring are controlled. The output EQ is written to the card; the input EQ, dynamics, reverb and clock are read from it, and writing them is enabled one feature at a time after a test on a card.
+**Status:** in daily use on a real UltraLite-mk5 (firmware 2.0.8). The device is identified on connect, its whole state is read back, levels are metered, and the mixes, preamps, trims and monitoring are controlled. The input and output EQ are written to the card; dynamics, reverb and clock are read from it, and writing them is enabled one feature at a time after a test on a card.
 
 ![Mixer view: one strip per input or stereo pair with pan, fader, level meter, mute/solo and DSP; the selected mix's output meter beside the Main fader; the Control Room bar at the bottom](docs/images/webui-mixer.png)
 
@@ -19,7 +19,8 @@ Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`d
 - **Read and written:** preamp gain and phase (8 inputs), pad and +48 V (2 mic inputs), main volume (verified on a card), phones level, analog output trims (outputs 1–10, in the device's DAC order), mono, talkback, mix faders, pan, mute and solo (written with the layout read from the device; a stereo strip moves both halves of its pair), optical input/output format (ADAT / TOSLINK).
 - **Metered:** every mixer input (after the input DSP), each preamp (before the DSP), every analog output and the phones (before the trim), S/PDIF and optical inputs. One byte per point, −0.5 dB per step, about 30 updates per second.
 - **Output EQ, read and written:** 3 bands (type, on/off, frequency, gain, Q) on each of the card's EQ slots: Main, Line 3–10, Phones and the Reverb (the card has a twelfth, unused slot that is hidden and never written).
-- **Read from the device, not written yet:** input EQ (analog inputs 1–8, 4 bands: type, on/off, frequency, gain, Q), compressor (inputs 1–8), gate (mic 1–2), reverb (decay, damping, pre-delay, width, preset), sample rate and clock source. The UI shows the card's settings and says when a change is not sent yet. Reverb sends are the Reverb mix faders and the reverb return is the "Reverb" mixer input pair in every mix.
+- **Input EQ, read and written:** analog inputs 1–8 (Mic 1–2, Line 3–8), 4 bands (type, on/off, frequency, gain, Q). On a stereo input pair CueMix uses the left channel's EQ; edit that one.
+- **Read from the device, not written yet:** compressor (inputs 1–8), gate (mic 1–2), reverb (decay, damping, pre-delay, width, preset), sample rate and clock source. The UI shows the card's settings and says when a change is not sent yet. Reverb sends are the Reverb mix faders and the reverb return is the "Reverb" mixer input pair in every mix.
 - **Detected on connect:** model, firmware, channel counts, stereo pairs and the CueMix 5 channel/mix names (the UI sizes itself to the device).
 - **Known but not implemented:** routing (prop 5010: one source per output; the mixes cover normal use), A/B speakers (5015–5017), talkback settings (5026–5031), loopback source (5014). DIM has no hardware property. There is no global EQ bypass on the hardware: on/off is per band.
 
@@ -151,7 +152,7 @@ UDP `:8000`. **Indices are 1-based on the wire** (the server converts them to 0-
 | `/mix/main/vol` | float `0..1` | `main_vol` → `db` (trim: `1.0` = 0 dB, `0` = −100 dB) |
 | `/preamp/{ch}/gain` | float dB `0..74` | `preamp_gain` (`db`) |
 | `/preamp/{ch}/48v` · `/pad` · `/phase` | int | `phantom` · `pad` · `phase` |
-| `/eq/{ch}/band/{b}/mode` · `/bypass` | int | `input_eq_mode` (raw type: 0 bell, 2 shelf?, 3 high-pass) · `input_eq_bypass`; `ch` 1–8, `b` 1–4 |
+| `/eq/{ch}/band/{b}/mode` · `/bypass` | int | `input_eq_mode` (0 bell, 1 low shelf, 2 high shelf, 3 high-pass; band 1: 0/1/3, bands 2–3: 0, band 4: 0/2, others refused) · `input_eq_bypass` (1 = bypassed); `ch` 1–8, `b` 1–4 |
 | `/eq/{ch}/band/{b}/freq` · `/gain` · `/bw` | float | `input_eq_freq` (Hz) · `input_eq_gain` (dB) · `input_eq_bw` (Q, 0.45–10) |
 | `/output/{n}/eq/band/{b}/mode` · `/bypass` · `/freq` · `/gain` · `/bw` | int / float | `output_eq_*`, same units; `n` = EQ slot 1–12 (1 Main, 3–10 Line 3–10, 11 Phones, 12 Reverb; 2 unused), `b` 1–3 |
 | `/comp/{ch}/bypass` | int | `comp_bypass` (1 = bypassed); `ch` 1–8 |
