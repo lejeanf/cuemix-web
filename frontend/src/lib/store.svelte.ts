@@ -219,6 +219,8 @@ class Store {
     ws.onopen = () => {
       this.attempt = 0;
       this.socketOpen = true;
+      // The server replays the patch only when it knows one: drop ours.
+      this.patch = null;
       if (this.measureStopPending) this.measureStop();
       // Re-read on every (re)connect: the server may have just been updated.
       void this.refreshVersion();

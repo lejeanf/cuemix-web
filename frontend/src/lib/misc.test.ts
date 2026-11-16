@@ -287,6 +287,9 @@ describe('output patch', () => {
     expect(lv[METER_SLOT.output(10)]).toBeCloseTo(rawToLinear(20), 9);
     expect(lv[METER_SLOT.output(11)]).toBeCloseTo(rawToLinear(22), 9);
     expect(lv[METER_SLOT.output(0)]).toBeCloseTo(rawToLinear(20), 9); // Main unchanged
+    // On that table every output but Phones reads the same point as without a patch.
+    const own = [46, 47, 48, 49, 54, 55, 56, 57, 62, 63, 64, 65];
+    own.forEach((p, o) => expect(outputSourcePoint(o, card)).toBe(o >= 10 ? p - 18 : p));
   });
 });
 

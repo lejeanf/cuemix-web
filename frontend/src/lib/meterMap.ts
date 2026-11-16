@@ -27,7 +27,8 @@ const MK5_OUTPUT: readonly number[] = [46, 47, 48, 49, 54, 55, 56, 57, 62, 63, 6
  * same order as MK5_OUTPUT: Main L/R, Line 3-10, Phones L/R.
  *
  * Read on a card (firmware 2.0.8): destinations 0-21 carry the inputs (USB
- * record), 24-31 USB playback (ADAT out), and the analog/S/PDIF outputs sit at
+ * record), 24-31 probably the ADAT outputs (24/25 carry the Line 3-4 mix, 26-31
+ * USB playback 16-21), and the analog/S/PDIF outputs sit at
  * 32-45 in hardware order: Line 5-10 = 32-37, Main = 38/39, Line 3-4 = 40/41,
  * Phones = 42/43, S/PDIF = 44/45. With every output on its CueMix default each
  * of them is fed by its own mix, except Phones and S/PDIF which follow Main;

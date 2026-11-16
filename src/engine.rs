@@ -664,8 +664,10 @@ impl Engine {
                 if self.session.connection != connection {
                     self.session.connection = connection;
                     self.emit(origin, Target::All, ServerEvent::Status { connection });
-                    // Demo mode: no device behind the state any more.
-                    if connection == ConnectionStatus::Demo && !self.patch.is_empty() {
+                    // Link lost (reconnecting) or demo mode: the patch read
+                    // from the previous session may not describe the next
+                    // device; the next session's dump re-sends it.
+                    if connection != ConnectionStatus::Online && !self.patch.is_empty() {
                         self.patch.clear();
                         self.emit(
                             origin,
@@ -1095,12 +1097,34 @@ mod tests {
             .unwrap();
         let init = h.initial_events().await.unwrap();
         assert_eq!(init.len(), 5);
-        assert_eq!(init[4], ServerEvent::Patch { sources: table });
+        assert_eq!(
+            init[4],
+            ServerEvent::Patch {
+                sources: table.clone()
+            }
+        );
         link.events
             .send(DeviceEvent::Status(ConnectionStatus::Online))
             .await
             .unwrap();
         let _ = next(&mut rx).await; // status
+                                     // Link lost: the patch is dropped until the next session re-reads it.
+        link.events
+            .send(DeviceEvent::Status(ConnectionStatus::Connecting))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await; // status
+        assert_eq!(
+            next(&mut rx).await.event,
+            ServerEvent::Patch {
+                sources: Vec::new()
+            }
+        );
+        link.events
+            .send(DeviceEvent::Patch(table.clone()))
+            .await
+            .unwrap();
+        let _ = next(&mut rx).await; // patch
         link.events
             .send(DeviceEvent::Status(ConnectionStatus::Demo))
             .await
