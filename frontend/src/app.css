@@ -39,6 +39,15 @@ body,
   margin: 0;
 }
 
+/* The page itself never scrolls: only the view inside the app does. On
+   phones with collapsing browser toolbars, 100% can be taller than what is
+   visible, and the document would scroll the top bar out of sight. */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   background: var(--bg);
   color: var(--text);

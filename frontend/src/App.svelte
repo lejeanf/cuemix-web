@@ -79,6 +79,8 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    /* The visible height, following the phone browser's toolbars. */
+    height: 100dvh;
   }
   .tabs {
     display: flex;
