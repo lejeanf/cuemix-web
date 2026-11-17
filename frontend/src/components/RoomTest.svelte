@@ -384,12 +384,14 @@
     background: var(--bg);
     color: var(--text);
     overflow: hidden;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
   }
   @media (min-width: 641px) {
     .scrim {
       align-items: center;
     }
     .dlg {
+      padding: 0;
       max-width: 480px;
       max-height: min(90vh, 640px);
       border: 1px solid var(--border);

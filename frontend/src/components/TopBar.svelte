@@ -159,6 +159,7 @@
   </div>
   {/if}
 
+  {#if !store.embed}
   <button class="btn mode" aria-pressed={!store.simple} title={store.simple ? 'Show every control' : 'Volume remote for phones'} onclick={() => store.setSimple(!store.simple)}
     >{store.simple ? 'Advanced' : 'Simple'}</button
   >
@@ -166,6 +167,7 @@
   <button class="status {link}" class:show={showStatus} aria-label="Connection: {linkText}" title={linkText} onclick={() => flashStatus()}>
     <span class="dot" aria-hidden="true"></span><span class="txt" aria-hidden="true">{linkText}</span>
   </button>
+  {/if}
 </header>
 
 <style>
@@ -174,8 +176,9 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 0 10px;
-    min-height: 44px;
+    /* Safe areas (notch, status bar, landscape sides) are 0 on desktop. */
+    padding: env(safe-area-inset-top, 0px) max(10px, env(safe-area-inset-right, 0px)) 0 max(10px, env(safe-area-inset-left, 0px));
+    min-height: calc(44px + env(safe-area-inset-top, 0px));
     background: var(--bg-alt);
     border-bottom: 1px solid var(--border);
     position: relative;
@@ -378,7 +381,7 @@
     .top {
       flex-wrap: wrap;
       gap: 6px;
-      padding: 0 8px;
+      padding: env(safe-area-inset-top, 0px) max(8px, env(safe-area-inset-right, 0px)) 0 max(8px, env(safe-area-inset-left, 0px));
     }
     /* The first row is as tall in Simple and Advanced views. */
     .brand {

@@ -9,6 +9,7 @@ import { ParamSender } from './sender';
 import { clamp } from './validate';
 import { isHwMapped, isHwReadOnly, visibleTabs, type Tab } from './hwmap';
 import { S } from './strings';
+import { LIVENESS_CHECK_MS, needsLivenessCheck, parseLaunchFlags, resolveSimple, shouldDropSilentSocket, shouldReconnectNow } from './launch';
 
 export type Link = 'offline' | 'connecting' | 'online' | 'demo';
 export type { Tab };
@@ -35,15 +36,22 @@ export function healthUrl(loc: Pick<Location, 'pathname'>): string {
 
 const TABS: readonly Tab[] = ['mixer', 'input', 'output', 'reverb', 'probe'];
 const VIEW_KEY = 'cuemix.view';
-/** Simple (phone remote) or advanced view: remembered per browser, phones start simple. */
+/** Simple (phone remote) or advanced view: remembered per browser, phones start simple.
+ *  `?simple` in the URL forces Simple for this load without saving it. */
 function initialSimple(): boolean {
+  let stored: string | null = null;
   try {
-    const v = localStorage.getItem(VIEW_KEY);
-    if (v === 'simple' || v === 'advanced') return v === 'simple';
+    stored = localStorage.getItem(VIEW_KEY);
   } catch {
     /* storage blocked: fall back to the screen size */
   }
-  return typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches;
+  const narrow = typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 640px)').matches;
+  return resolveSimple(launchFlags(), stored, narrow);
+}
+
+/** `?simple` / `?embed` of this page load (see lib/launch.ts). */
+function launchFlags() {
+  return parseLaunchFlags(typeof location === 'undefined' ? '' : location.search);
 }
 
 function tabFromHash(): Tab {
@@ -65,6 +73,8 @@ class Store {
   tab: Tab = $state(tabFromHash());
   /** Phone remote (Main / Phones volume) instead of the full console. */
   simple = $state(initialSimple());
+  /** `?embed`: running inside the native app's web view (hides the view toggle and status dot). */
+  embed = launchFlags().embed;
   setSimple(on: boolean): void {
     this.simple = on;
     try {
@@ -103,6 +113,8 @@ class Store {
   private attempt = 0;
   private retry: ReturnType<typeof setTimeout> | null = null;
   private stopped = true;
+  private lastMsgAt = 0;
+  private liveTimer: ReturnType<typeof setTimeout> | null = null;
   private sender = new ParamSender((p) => this.sendRaw({ cmd: 'set', ...p } as Command));
   private fakeTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -189,12 +201,67 @@ class Store {
     if (!this.stopped) return;
     this.stopped = false;
     this.connect();
+    document.addEventListener('visibilitychange', this.onVisible);
+    window.addEventListener('pageshow', this.onPageShow);
     if (import.meta.env.DEV && new URLSearchParams(location.search).has('fakeMeters')) this.startFakeMeters();
+  }
+
+  private onVisible = (): void => {
+    if (document.visibilityState !== 'visible') return;
+    this.reconnectNow();
+    this.checkLiveness();
+  };
+
+  /** After unlock a socket can still read OPEN while dead. While online/demo
+   *  the server streams meters (~30/s): if nothing arrives within
+   *  LIVENESS_CHECK_MS of becoming visible, drop it without waiting for a
+   *  close handshake and reconnect at once. */
+  private checkLiveness(): void {
+    if (this.stopped || this.liveTimer) return;
+    if (!needsLivenessCheck(this.ws ? this.ws.readyState : null, this.link)) return;
+    const visibleAt = Date.now();
+    this.liveTimer = setTimeout(() => {
+      this.liveTimer = null;
+      if (this.stopped) return;
+      const ws = this.ws;
+      if (!ws || !shouldDropSilentSocket(ws.readyState, this.link, this.lastMsgAt, visibleAt)) return;
+      ws.onclose = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      this.ws = null;
+      this.socketOpen = false;
+      ws.close();
+      if (this.retry) clearTimeout(this.retry);
+      this.retry = null;
+      this.attempt = 0;
+      this.connect();
+    }, LIVENESS_CHECK_MS);
+  }
+  private clearLiveness(): void {
+    if (this.liveTimer) clearTimeout(this.liveTimer);
+    this.liveTimer = null;
+  }
+  private onPageShow = (e: PageTransitionEvent): void => {
+    if (e.persisted) this.reconnectNow();
+  };
+
+  /** Page back from lock/background: reconnect now instead of waiting for the
+   *  backoff timer. One attempt at a time (a socket already connecting is left alone). */
+  reconnectNow(): void {
+    if (!shouldReconnectNow(this.stopped, this.ws ? this.ws.readyState : null)) return;
+    if (this.retry) clearTimeout(this.retry);
+    this.retry = null;
+    // Foreground reconnect: show "connecting", not "offline".
+    this.attempt = 0;
+    this.connect();
   }
 
   stop(): void {
     this.stopped = true;
+    document.removeEventListener('visibilitychange', this.onVisible);
+    window.removeEventListener('pageshow', this.onPageShow);
     if (this.retry) clearTimeout(this.retry);
+    this.clearLiveness();
     if (this.fakeTimer) clearInterval(this.fakeTimer);
     this.sender.dispose();
     this.ws?.close();
@@ -226,6 +293,7 @@ class Store {
       void this.refreshVersion();
     };
     ws.onmessage = (m) => {
+      this.lastMsgAt = Date.now();
       if (typeof m.data !== 'string') return;
       let ev: ServerEvent;
       try {
@@ -237,6 +305,7 @@ class Store {
     };
     ws.onclose = () => {
       if (this.ws !== ws) return;
+      this.clearLiveness();
       this.socketOpen = false;
       this.ws = null;
       if (this.stopped) return;
