@@ -112,7 +112,7 @@
     overflow-y: auto;
     background: var(--bg-alt);
     border-left: 1px solid var(--border);
-    padding: 10px 14px 20px;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) 14px;
     display: flex;
     flex-direction: column;
     gap: 10px;

@@ -46,7 +46,7 @@
     <div class="offline" role="alert">{S.offlineBanner}</div>
   {/if}
 
-  <main class="view">
+  <main class="view" class:simple={store.simple}>
     {#if store.simple}
       <Remote />
     {:else if store.tab === 'mixer'}
@@ -106,7 +106,7 @@
   }
   .offline {
     flex: none;
-    padding: 6px 14px;
+    padding: 6px max(14px, env(safe-area-inset-right, 0px)) 6px max(14px, env(safe-area-inset-left, 0px));
     background: #3b1212;
     color: #fecaca;
     font-size: 13px;
@@ -115,12 +115,16 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 8px 10px;
+    padding: 8px max(10px, env(safe-area-inset-right, 0px)) 8px max(10px, env(safe-area-inset-left, 0px));
+  }
+  /* No bottom bar in Simple view: keep clear of the home indicator. */
+  .view.simple {
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   }
   .toasts {
     position: fixed;
-    right: 12px;
-    bottom: 44px;
+    right: max(12px, env(safe-area-inset-right, 0px));
+    bottom: calc(44px + env(safe-area-inset-bottom, 0px));
     z-index: 60;
     display: flex;
     flex-direction: column;

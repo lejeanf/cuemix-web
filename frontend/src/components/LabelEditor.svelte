@@ -65,7 +65,7 @@
     /* fixed: the strip container scrolls horizontally and would clip an absolute popover */
     position: fixed;
     z-index: 50;
-    top: 72px;
+    top: calc(72px + env(safe-area-inset-top, 0px));
     left: 50%;
     transform: translateX(-50%);
     width: min(260px, 92vw);

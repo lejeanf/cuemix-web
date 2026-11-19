@@ -53,7 +53,7 @@
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
-    padding: 3px 10px;
+    padding: 3px max(10px, env(safe-area-inset-right, 0px)) calc(3px + env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
     font-size: 12px;
     background: var(--bg-alt);
     border-top: 1px solid var(--border);
