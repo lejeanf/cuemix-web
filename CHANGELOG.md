@@ -12,6 +12,11 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-19
+
+The web UI can be installed on the iPhone home screen as **Cue Desk**
+(milestone 0 of the iOS plan, `docs/IOS-PLAN.md`).
+
 ### Added
 - **Home-screen app on iPhone.** The web UI ships a web app manifest (`Cue Desk`,
   standalone, `start_url` `./?simple`), an `apple-touch-icon` and new original
@@ -31,6 +36,11 @@ need attention. Preset files carry `schema_version`; see
 - Safe areas: with `viewport-fit=cover` the top bar, bottom bars, drawer, toasts
   and landscape sides stay clear of the status bar, notch and home indicator
   (no change on desktop). The favicon uses the new icon.
+
+### Compatibility
+- No change to presets or `config.toml`. Update as usual (Advanced view,
+  **Install**, or `cuemix-update`). The home-screen app keeps its own
+  storage, separate from Safari, so it starts with default settings.
 
 ## [0.5.1] - 2026-11-16
 
