@@ -270,6 +270,7 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
   non-mètre** (les mètres, prop `6000`, défilent en continu), plafond **5 s**, identifie
   l'appareil (`Identified`), décode le dump avec ce layout, puis `Synced` → `Snapshot` à tous. On ne réécrit jamais l'état au matériel à la reconnexion.
 * **Mode démo** : MOTU absente → `Demo`, état en mémoire ; les commandes sont drainées.
+  Sur un hôte Proxmox, le lien MOTU doit rester sur le pont isolé : règle `udev` + hook `post-up` + minuteur `systemd` de 30 s (`cuemix-motu-bridge --all`), et NetworkManager (s'il tourne) l'ignore (`NM_UNMANAGED`, `nmcli device set … managed no`) ; sinon ses réactivations détachent le lien et l'application retombe en démo. Voir `docs/HANDOFF.md` §6.1.
 * **Throttling** : par paramètre, 1re valeur immédiate puis ≤ 1 / 25 ms, valeurs intermédiaires
   fusionnées, dernière garantie ; puis **cadenceur global ≥ 20 ms entre trames** (y compris les
   params multi-trames et les rafales de rappel) — la MOTU ferme la socket si on écrit trop vite.

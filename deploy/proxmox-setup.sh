@@ -8,7 +8,9 @@
 # and installs the udev rule that moves the MOTU CDC-Ethernet link onto that
 # bridge when the interface appears, plus a post-up hook on the bridge that
 # re-attaches it after every network reload (ifupdown2 `ifreload -a`, or
-# "Apply Configuration" in the Proxmox GUI, detaches undeclared ports).
+# "Apply Configuration" in the Proxmox GUI, detaches undeclared ports). A
+# systemd timer (every 30 s) re-attaches it too, and NetworkManager (when the
+# host runs it) is told to leave the MOTU link unmanaged.
 #
 # Run as root on the Proxmox VE host, from a checkout of this repository.
 # Idempotent: re-running keeps existing bridges, rules, containers and config.
@@ -26,6 +28,8 @@ CONFIG_EXAMPLE="${REPO_DIR}/config.example.toml"
 UPDATE_SCRIPT="${SCRIPT_DIR}/cuemix-update.sh"
 
 HOST_HELPER="/usr/local/sbin/cuemix-motu-bridge"
+HOST_BRIDGE_SERVICE="/etc/systemd/system/cuemix-motu-bridge.service"
+HOST_BRIDGE_TIMER="/etc/systemd/system/cuemix-motu-bridge.timer"
 UDEV_RULE="/etc/udev/rules.d/99-motu-mk5.rules"
 MOTU_BRIDGE_CFG="/etc/network/interfaces.d/cuemix-motu.cfg"
 
@@ -92,9 +96,9 @@ Options:
   -h, --help        Show this help and exit.
   --update          Update cuemix-web inside the existing container: pushes the
                     current cuemix-update.sh and runs it there. Also refreshes
-                    the host MOTU helper, udev rule and bridge post-up hook
-                    (no network reload). Does not create bridges or change the
-                    container configuration.
+                    the host MOTU helper, udev rule, bridge post-up hook and
+                    30 s re-attach timer (no network reload). Does not create
+                    bridges or change the container configuration.
   --pre             With --update: also consider pre-releases.
   --version vX.Y.Z  With --update: install this exact release tag.
   --ctid N          With --update: container ID (default: CTID in proxmox.env).
@@ -414,7 +418,8 @@ install_if_changed() {
 install_host_udev() {
   log_step "MOTU udev rule and helper (host)"
   local helper_src="${WORKDIR}/motu-bridge-helper" rule_src="${WORKDIR}/99-motu-mk5.rules"
-  local changed=0
+  local service_src="${WORKDIR}/cuemix-motu-bridge.service" timer_src="${WORKDIR}/cuemix-motu-bridge.timer"
+  local changed=0 units_changed=0
 
   # Order matters: bring the link up first, then enslave it to the bridge.
   cat > "${helper_src}" <<'HELPER'
@@ -423,12 +428,23 @@ install_host_udev() {
 # CDC-Ethernet link to the isolated MOTU bridge (link up, then add to bridge).
 #
 #   cuemix-motu-bridge IFACE   udev, when the MOTU interface appears
-#   cuemix-motu-bridge --all   bridge post-up (after every ifreload) or by hand:
-#                              attach every MOTU link present (USB vendor 07fd,
-#                              driver cdc_ether). No-op when none is plugged
-#                              in; always exits 0 so it never fails a reload.
+#   cuemix-motu-bridge --all   bridge post-up (after every ifreload), the
+#                              30 s systemd timer, or by hand: attach every
+#                              MOTU link present (USB vendor 07fd, driver
+#                              cdc_ether) and tell NetworkManager, if running,
+#                              to leave it unmanaged. No-op when none is
+#                              plugged in; always exits 0.
 set -eu
 BRIDGE="@BRIDGE@"
+
+# say LEVEL MSG : print MSG and, when logger exists, send it to the journal at
+# LEVEL. The timer's unit keeps only notice and above (LogLevelMax), so the
+# journal holds the re-attach events, not one start/stop pair every 30 s.
+say() {
+  lvl="$1"; shift
+  if [ "$lvl" = warning ]; then echo "$*" >&2; else echo "$*"; fi
+  command -v logger >/dev/null 2>&1 && logger -t cuemix-motu-bridge -p "daemon.$lvl" -- "$*" || true
+}
 
 attach() {
   ip link set "$1" up
@@ -449,13 +465,19 @@ for dev in /sys/class/net/*; do
   vendor="$(cat "$(dirname "$(readlink -f "$dev/device")")/idVendor" 2>/dev/null || true)"
   [ "$vendor" = "07fd" ] || continue
   name="$(basename "$dev")"
+  # NetworkManager would DHCP this link and its re-activations detach it from
+  # the bridge. Only here (not in the udev path): no D-Bus from udev RUN.
+  # timeout: a wedged NetworkManager must not hold up the re-attach.
+  if command -v nmcli >/dev/null 2>&1     && timeout 5 nmcli -t -f RUNNING general 2>/dev/null | grep -q '^running$'; then
+    timeout 5 nmcli device set "$name" managed no >/dev/null 2>&1 || true
+  fi
   if [ -e "$dev/master" ] && [ "$(basename "$(readlink -f "$dev/master")")" = "$BRIDGE" ]; then
     continue
   fi
   if attach "$name"; then
-    echo "cuemix-motu-bridge: attached $name to $BRIDGE"
+    say notice "cuemix-motu-bridge: attached $name to $BRIDGE"
   else
-    echo "cuemix-motu-bridge: could not attach $name to $BRIDGE" >&2
+    say warning "cuemix-motu-bridge: could not attach $name to $BRIDGE"
   fi
 done
 exit 0
@@ -463,13 +485,58 @@ HELPER
   sed -i "s|@BRIDGE@|${MOTU_BRIDGE}|" "${helper_src}"
 
   sed "s|@HELPER@|${HOST_HELPER}|" "${UDEV_TEMPLATE}" > "${rule_src}"
+  # Proxmox host only (not in the shared template): a NetworkManager running
+  # on a PVE host would DHCP the MOTU link, and its re-activations detach the
+  # link from the isolated bridge. ACTION!="remove" keeps the property on
+  # `change` events too (udev recomputes properties for every event).
+  cat >> "${rule_src}" <<'NMRULE'
+
+# NetworkManager must ignore the MOTU link (cuemix-web, Proxmox host).
+ACTION!="remove", SUBSYSTEM=="net", ENV{ID_VENDOR_ID}=="07fd", ENV{ID_USB_DRIVER}=="cdc_ether", ENV{NM_UNMANAGED}="1"
+NMRULE
+
+  # Watchdog: re-attach the link every 30 s if anything detaches it.
+  cat > "${service_src}" <<SERVICE
+[Unit]
+Description=cuemix-web: keep the MOTU link on its isolated bridge
+
+[Service]
+Type=oneshot
+ExecStart=${HOST_HELPER} --all
+TimeoutStartSec=20
+# Journal: re-attach events only, not a start/finish pair every 30 s.
+LogLevelMax=notice
+NoNewPrivileges=yes
+ProtectHome=yes
+SERVICE
+  cat > "${timer_src}" <<'TIMER'
+[Unit]
+Description=cuemix-web: re-attach the MOTU link to its bridge every 30 s
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
+TIMER
 
   install_if_changed "${helper_src}" "${HOST_HELPER}" 0755 && changed=1 || true
   install_if_changed "${rule_src}" "${UDEV_RULE}" 0644 && changed=1 || true
+  install_if_changed "${service_src}" "${HOST_BRIDGE_SERVICE}" 0644 && units_changed=1 || true
+  install_if_changed "${timer_src}" "${HOST_BRIDGE_TIMER}" 0644 && units_changed=1 || true
 
   if [[ "${changed}" -eq 1 ]]; then
     run udevadm control --reload-rules
     run udevadm trigger --subsystem-match=net --action=add
+  fi
+  if [[ "${units_changed}" -eq 1 ]]; then
+    run systemctl daemon-reload
+    run systemctl enable cuemix-motu-bridge.timer
+    run systemctl restart cuemix-motu-bridge.timer
+  else
+    run systemctl enable --now cuemix-motu-bridge.timer
   fi
 }
 
