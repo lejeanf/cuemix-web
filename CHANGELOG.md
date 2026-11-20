@@ -12,10 +12,11 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
-## [0.5.2] - 2026-11-19
+## [0.5.2] - 2026-11-20
 
 The web UI can be installed on the iPhone home screen as **Cue Desk**
-(milestone 0 of the iOS plan, `docs/IOS-PLAN.md`).
+(milestone 0 of the iOS plan, `docs/IOS-PLAN.md`), and the MOTU link on a
+Proxmox host survives NetworkManager.
 
 ### Added
 - **Home-screen app on iPhone.** The web UI ships a web app manifest (`Cue Desk`,
@@ -37,10 +38,20 @@ The web UI can be installed on the iPhone home screen as **Cue Desk**
   and landscape sides stay clear of the status bar, notch and home indicator
   (no change on desktop). The favicon uses the new icon.
 
+### Fixed
+- Proxmox host: the MOTU link no longer drops out of the isolated MOTU bridge
+  (the app fell back to demo mode) when NetworkManager runs on the host. The
+  link is now marked unmanaged for NetworkManager, and a systemd timer (every
+  30 s) re-attaches it if anything detaches it (see
+  `journalctl -u cuemix-motu-bridge`).
+
 ### Compatibility
 - No change to presets or `config.toml`. Update as usual (Advanced view,
   **Install**, or `cuemix-update`). The home-screen app keeps its own
   storage, separate from Safari, so it starts with default settings.
+- The MOTU link fix lives on the Proxmox host: run
+  `sudo deploy/proxmox-setup.sh --update` from a checkout of this release.
+  The in-app updater only updates the container.
 
 ## [0.5.1] - 2026-11-16
 
