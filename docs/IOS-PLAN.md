@@ -230,6 +230,47 @@ to; a Control Center toggle could not run a fade at all. So:
 - **Docs**: a new ARCHITECTURE decision entry, §3.5 (JSON), §3.6 (OSC, also fixing the stale
   meter rate there), §3.7 (config); HANDOFF §3.1 OSC table; README ("Main on/off" wording).
 
+### 5.2b Speaker plug (decided 2026-11-25, ships with 0.6.0)
+
+Monitor (Main) on/off can also switch a smart plug that powers the speakers (for example a
+Shelly), in the right order so the speakers never pop and never stay on at full volume.
+
+- **Sequence (run by the engine, so it works from any client, OSC or `/api/v1/command`):**
+  - **Off:** fade out (as §5.2) → when the fade ends at the minimum, wait `off_delay_ms`
+    (default 300) → plug off. A fade cancelled by a knob move leaves the plug on.
+  - **On:** plug on → if it answered, wait `warmup_ms` (default 2000, adjustable) → fade in.
+    If it did not answer within the timeout: fade in right away and send a warning
+    ("Speaker plug did not respond"). An Off pressed during the warm-up cancels it and
+    switches the plug off.
+  - Only the `power` command drives the plug. A knob move never switches it (the Simple view
+    shows the plug state, so a raised knob with the plug off is visible).
+  - Phones never use the plug.
+- **Plug types (presets), host + switch id `N`:**
+  - `shelly_rpc`: Shelly Gen2, Plus, Pro, Gen3 and **Gen4** — `http://HOST/rpc/Switch.Set?id=N&on=true|false`.
+  - `shelly_gen1`: `http://HOST/relay/N?turn=on|off`.
+  - `tasmota`: `http://HOST/cm?cmnd=Power%20On|Off` (`Power<N+1>` when N > 0).
+  - `custom`: two full URLs (on, off).
+- **Request rules (the server is told where to send requests, so it is fenced):** plain
+  `http://` GET only (local smart plugs do not do HTTPS), no redirects followed, timeout
+  `timeout_ms` (default 2000), response body ignored apart from the status line (2xx = OK).
+  The target must resolve to a private, link-local or loopback address (RFC 1918, 169.254/16,
+  127/8, IPv6 ULA/link-local); anything else is refused, at save time and again at send time.
+  No credentials (plugs with a password are out of scope for now).
+- **Where the settings live:** `[speaker_plug]` in `config.toml` gives the defaults
+  (`enabled = false` in `config.example.toml`, example host `192.0.2.10`). The Advanced view's
+  menu edits them; edits are saved in a server file next to the labels file
+  (`speaker-plug.json`), which overrides `config.toml`. **Real addresses never go in Git.**
+- **Protocol:**
+  - Commands: `set_speaker_plug { settings }` (validated, saved, broadcast) and
+    `test_speaker_plug { on }` (sends one request, answers with a result).
+  - Event `speaker_plug { settings, state }` on connect and on every change, where `state` is
+    `off | on | warming | error | unknown` (last known result of our own requests; the plug is
+    not polled).
+  - The `power` event's `main` gains `plug` (the same state, or `null` when no plug is set).
+- **UI:** an Advanced-menu entry "Speaker plug": enable switch, type, host, switch id (or the
+  two URLs for custom), warm-up, the resulting URLs shown read-only, **Test on / Test off**,
+  Save. The Simple view's Monitor button shows a small plug indicator and the warming state.
+
 ### 5.3 Home network only, HTTPS, Local Network permission (decided)
 
 The app is used at home only: no public access, no tokens, no pairing; the server's security model
