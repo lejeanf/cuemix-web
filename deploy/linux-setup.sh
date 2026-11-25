@@ -200,7 +200,7 @@ uninstall() {
     log_warn "user ${SERVICE_USER} was not created by this script; leaving it in place"
   fi
 
-  log_info "kept: ${CONF_DIR} (configuration) and ${STATE_DIR} (presets, labels)"
+  log_info "kept: ${CONF_DIR} (configuration) and ${STATE_DIR} (presets, labels, power level, speaker plug)"
   log_info "kept: installed packages such as avahi-daemon (they may be used by other software)"
   log_info "uninstall complete"
 }

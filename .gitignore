@@ -10,6 +10,8 @@ deploy/*.env
 !*.env.example
 deploy/proxmox.env
 data/labels.json
+data/power.json
+data/speaker-plug.json
 data/presets/*.json
 !data/presets/default.json
 

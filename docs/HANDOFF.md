@@ -72,6 +72,8 @@ Toutes les commandes sont bidirectionnelles (le serveur renvoie le feedback OSC 
 | `/mix/{bus}/ch/{ch}/mute` | `int` / `float` | `0` ou `1` | Mute du canal dans le bus |
 | `/mix/{bus}/ch/{ch}/solo` | `int` / `float` | `0` ou `1` | Solo du canal dans le bus |
 | `/mix/main/vol` | `float` | `0.0` à `1.0` | Volume général de sortie principale (*Main Out*) |
+| `/mix/main/power` | `int` / `float` | `0` ou `1` | Marche/arrêt de Monitor : fondu serveur, mémorise le niveau ; commande aussi la prise enceintes si elle est configurée (feedback `0/1` = où va le canal) |
+| `/controlroom/phones/power` | `int` / `float` | `0` ou `1` | Marche/arrêt du casque (fondu serveur, sans prise) |
 | `/preamp/{ch}/gain` | `float` | `0.0` à `60.0` | Gain du préampli micro/ligne en dB |
 | `/preamp/{ch}/48v` | `int` | `0` ou `1` | Alimentation fantôme +48V |
 | `/preamp/{ch}/pad` | `int` | `0` ou `1` | Atténuateur Pad -20 dB |
@@ -128,7 +130,7 @@ Toutes les commandes sont bidirectionnelles (le serveur renvoie le feedback OSC 
 * **Fichiers strictement inscrits dans `.gitignore` :**
   * `config.toml` et `*.local.toml`
   * `deploy/*.env` (sauf `*.env.example`)
-  * `data/presets/*.json` et `data/labels.json`
+  * `data/presets/*.json`, `data/labels.json`, `data/power.json` et `data/speaker-plug.json`
   * `.env`, `*.pem`, `*.key`
 * **Audit CI Anti-Fuite :** Un job GitHub Actions (`gitleaks` + vérification par expressions régulières) bloque automatiquement toute Pull Request contenant des IP privées réelles, clés ou secrets.
 

@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::plug::SpeakerPlugSettings;
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -22,6 +24,8 @@ pub struct Config {
     pub web: Web,
     pub update: Update,
     pub measure: Measure,
+    /// Defaults of the speaker plug; `speaker_plug_file` (saved from the UI) overrides them.
+    pub speaker_plug: SpeakerPlugSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,6 +101,10 @@ impl Default for Engine {
 pub struct Storage {
     pub presets_dir: PathBuf,
     pub labels_file: PathBuf,
+    /// Remembered Monitor / Phones levels (what "On" fades back to).
+    pub power_file: PathBuf,
+    /// Speaker plug settings saved from the UI; overrides `[speaker_plug]`.
+    pub speaker_plug_file: PathBuf,
 }
 
 impl Default for Storage {
@@ -104,6 +112,8 @@ impl Default for Storage {
         Self {
             presets_dir: PathBuf::from("/var/lib/cuemix-web/presets"),
             labels_file: PathBuf::from("/var/lib/cuemix-web/labels.json"),
+            power_file: PathBuf::from("/var/lib/cuemix-web/power.json"),
+            speaker_plug_file: PathBuf::from("/var/lib/cuemix-web/speaker-plug.json"),
         }
     }
 }
@@ -325,6 +335,48 @@ mod tests {
         assert_eq!(
             cfg.throttle_interval(),
             std::time::Duration::from_millis(25)
+        );
+    }
+
+    #[test]
+    fn speaker_plug_section_and_storage_keys() {
+        let (cfg, unknown) = Config::parse_with_warnings(
+            "[speaker_plug]
+enabled = true
+kind = \"tasmota\"
+host = \"plug.example:8080\"
+switch_id = 1
+warmup_ms = 3000
+             [storage]
+power_file = \"/tmp/p.json\"
+speaker_plug_file = \"/tmp/s.json\"
+",
+        )
+        .unwrap_or_default();
+        assert!(unknown.is_empty(), "{unknown:?}");
+        assert!(cfg.speaker_plug.enabled);
+        assert_eq!(cfg.speaker_plug.kind, crate::plug::PlugKind::Tasmota);
+        assert_eq!(cfg.speaker_plug.host, "plug.example:8080");
+        assert_eq!(cfg.speaker_plug.switch_id, 1);
+        assert_eq!(cfg.speaker_plug.warmup_ms, 3000);
+        assert_eq!(
+            cfg.speaker_plug.off_delay_ms, 300,
+            "other keys keep their defaults"
+        );
+        assert_eq!(cfg.storage.power_file, PathBuf::from("/tmp/p.json"));
+        assert_eq!(cfg.storage.speaker_plug_file, PathBuf::from("/tmp/s.json"));
+        // Defaults: no plug, files next to the labels file.
+        let d = Config::default();
+        assert!(!d.speaker_plug.enabled);
+        assert_eq!(d.speaker_plug.warmup_ms, 2000);
+        assert_eq!(d.speaker_plug.timeout_ms, 2000);
+        assert_eq!(
+            d.storage.power_file,
+            PathBuf::from("/var/lib/cuemix-web/power.json")
+        );
+        assert_eq!(
+            d.storage.speaker_plug_file,
+            PathBuf::from("/var/lib/cuemix-web/speaker-plug.json")
         );
     }
 

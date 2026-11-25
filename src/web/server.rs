@@ -4,7 +4,9 @@
 //! - `GET /ws` upgrades to a WebSocket carrying JSON text frames:
 //!   client → server: [`Command`]; server → client: [`ServerEvent`].
 //!   `Snapshot`, `Labels`, `Presets` are always sent first after the upgrade.
-//! - `GET /api/health` returns `{"status":"ok","version":…}`.
+//! - `GET /api/health` returns `{"status":"ok","version":…,"api":1}`.
+//! - `GET /api/v1/summary` and `POST /api/v1/command`: the short HTTP API (`super::api`).
+//!   Same `Origin` rule as `/ws`.
 //! - `GET /api/measure/noise.wav` streams the room-test pink noise (`crate::measure`).
 //! - every other path serves the embedded `frontend/dist/` bundle, falling
 //!   back to `index.html` for client-side routes. Only embedded names are
@@ -12,7 +14,7 @@
 //! - the client IP used in logs is the peer address, or the rightmost
 //!   `X-Forwarded-For` entry (appended by the trusted proxy) when
 //!   `web.trust_forwarded_headers = true`.
-//! - `/ws` rejects cross-site browser connections (403): an `Origin` header
+//! - `/ws` and `/api/v1/*` reject cross-site browser requests (403): an `Origin` header
 //!   must match the request host or an entry of `web.allowed_origins`.
 //! - every WebSocket write has a [`SEND_TIMEOUT`]; a client that stops
 //!   reading is disconnected so it can never pin memory or stall others.
@@ -22,10 +24,11 @@ use std::time::Duration;
 
 use anyhow::Context;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
+use axum::extract::DefaultBodyLimit;
 use axum::extract::{ConnectInfo, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{Sink, SinkExt};
 use rust_embed::RustEmbed;
@@ -72,7 +75,7 @@ impl WebConfig {
 
 #[derive(Clone)]
 pub(super) struct AppState {
-    engine: EngineHandle,
+    pub(super) engine: EngineHandle,
     pub(super) cfg: WebConfig,
 }
 
@@ -81,15 +84,17 @@ pub fn router(engine: EngineHandle, cfg: WebConfig) -> Router {
     Router::new()
         .route("/ws", get(ws_handler))
         .route("/api/health", get(health))
+        .route("/api/v1/summary", get(super::api::summary))
+        .route(
+            "/api/v1/command",
+            post(super::api::command).layer(DefaultBodyLimit::max(super::api::MAX_BODY_BYTES)),
+        )
         .route(
             "/api/measure/noise.wav",
             get(crate::measure::noise::handler),
         )
         .route("/api/update", get(super::update::status))
-        .route(
-            "/api/update/install",
-            axum::routing::post(super::update::install),
-        )
+        .route("/api/update/install", post(super::update::install))
         .fallback(get(static_handler))
         .with_state(AppState { engine, cfg })
 }
@@ -112,7 +117,11 @@ pub async fn serve(
 }
 
 async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}))
+    Json(serde_json::json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+        "api": crate::engine::API_VERSION,
+    }))
 }
 
 // ---------------------------------------------------------------- static ---
@@ -206,7 +215,7 @@ fn parse_origin(raw: &str) -> Option<(String, String, u16)> {
 }
 
 /// Whether a WebSocket upgrade with these headers may proceed.
-fn origin_allowed(headers: &HeaderMap, cfg: &WebConfig) -> bool {
+pub(super) fn origin_allowed(headers: &HeaderMap, cfg: &WebConfig) -> bool {
     let Some(origin) = headers.get(header::ORIGIN) else {
         return true; // non-browser client
     };

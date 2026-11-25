@@ -224,7 +224,10 @@ export type Command =
   | { cmd: 'list_presets' }
   | { cmd: 'set_label'; ch: number; label: ChannelLabel | null }
   | { cmd: 'measure_start' }
-  | { cmd: 'measure_stop' };
+  | { cmd: 'measure_stop' }
+  | { cmd: 'power'; channel: PowerChannel; on: boolean }
+  | { cmd: 'set_speaker_plug'; settings: SpeakerPlugSettings }
+  | { cmd: 'test_speaker_plug'; on: boolean };
 
 /** Server → client. On connect: `snapshot`, then `labels`, then `presets`. */
 export type ServerEvent =
@@ -240,7 +243,53 @@ export type ServerEvent =
   | ({ event: 'measure' } & MeasureInfo)
   /** Output patch (prop 5010, read-only): index = destination, value = source point. Empty = unknown. */
   | { event: 'patch'; sources: number[] }
-  | { event: 'error'; message: string };
+  | { event: 'error'; message: string }
+  | ({ event: 'power' } & PowerInfo)
+  | { event: 'speaker_plug'; settings: SpeakerPlugSettings; urls: { on: string; off: string }; state: PlugState }
+  | { event: 'speaker_plug_result'; on: boolean; ok: boolean; message: string }
+  | { event: 'notice'; level: 'warning' | 'info'; message: string };
+
+// ---------------------------------------------------------------- power ---
+
+export type PowerChannel = 'main' | 'phones';
+export type FadeDirection = 'in' | 'out';
+/** State of the switched speaker plug as the server sees it. */
+export type PlugState = 'off' | 'on' | 'warming' | 'error' | 'unknown';
+
+export interface ChannelPower {
+  /** Level above the minimum. */
+  on: boolean;
+  /** Server-side fade (or plug warm-up) in progress. */
+  fading: FadeDirection | null;
+}
+export interface PowerInfo {
+  main: ChannelPower & { /** null = no plug enabled. */ plug: PlugState | null };
+  phones: ChannelPower & { plug: null };
+}
+
+export type PlugKind = 'shelly_rpc' | 'shelly_gen1' | 'tasmota' | 'custom';
+export interface SpeakerPlugSettings {
+  enabled: boolean;
+  kind: PlugKind;
+  /** IP or hostname, no scheme, no path ("" for custom). */
+  host: string;
+  /** 0..=15 */
+  switch_id: number;
+  on_url: string;
+  off_url: string;
+  /** 0..=10000 */
+  warmup_ms: number;
+  /** 0..=5000 */
+  off_delay_ms: number;
+  /** 500..=10000 */
+  timeout_ms: number;
+}
+
+export interface PlugResult {
+  on: boolean;
+  ok: boolean;
+  message: string;
+}
 
 /** Room measurement (noise played by an MPD server, see docs). `unavailable` = not configured. */
 export type MeasureState = 'unavailable' | 'idle' | 'starting' | 'quiet' | 'playing' | 'restoring' | 'error';

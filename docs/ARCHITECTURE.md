@@ -7,7 +7,7 @@
 
 | | |
 |---|---|
-| Version du contrat | `0.3.0` + non publié : DSP / réverbe / horloge à la forme du matériel, lus sur la MOTU (présets schema v2, D19–D23) |
+| Version du contrat | `0.3.0` + non publié (0.6.0 : `power`, prise enceintes, `/api/v1`, D29) : DSP / réverbe / horloge à la forme du matériel, lus sur la MOTU (présets schema v2, D19–D23) |
 | MSRV | Rust `1.85`, édition 2021 (relevée depuis 1.80, décision D18) |
 | Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` (embarqué via `rust-embed`) |
 
@@ -57,7 +57,10 @@ changements venant du matériel sont appliqués et diffusés, **jamais renvoyés
 | `src/config.rs` | `config.toml` + surcharges `CUEMIX_*` | ✅ |
 | `src/state.rs` | `MotuState`, `Topology`, `DeviceInfo`, `Param`, `Command`, `ServerEvent`, `diff`, `all_params` | ✅ |
 | `src/motu/identify.rs` | Identification de l'appareil (modèle, firmware, dimensions, paires stéréo, noms) et décodage de la matrice de mix depuis le dump de connexion | ✅ |
-| `src/engine.rs` | Acteur : `EngineHandle`, `Envelope{Origin,Target}`, `DeviceLink`, `Shutdown` | ✅ |
+| `src/engine.rs` | Acteur : `EngineHandle`, `Envelope{Origin,Target}`, `DeviceLink`, `Shutdown`, requêtes `Summary` / `Api` (HTTP court) | ✅ |
+| `src/engine/sequence.rs` | Marche/arrêt serveur (D29) : un `Option<Fade>` par canal et branche `sleep_until` de la boucle, niveau mémorisé, séquence de la prise enceintes (Main), événements `power` / `speaker_plug` | ✅ |
+| `src/power.rs` | Courbe du fondu (smoothstep, 12 ms/dB, 250–1200 ms, pas de 28 ms), `Fade`, niveau mémorisé (`power.json`) — pur, testé à horloge virtuelle | ✅ |
+| `src/plug.rs` | Prise enceintes : réglages, URL (vecteurs `design/vectors/speaker-plug-urls.json`), barrière (adresses locales), client HTTP GET écrit à la main sur `TcpStream` | ✅ |
 | `src/presets.rs` | Présets (`<presets_dir>/<nom>.json`), `labels.json`, écritures atomiques | ✅ |
 | `src/motu/fader.rs` | Lois de fader `0..1` (mix et trims) — utilisées **uniquement aux bords** | ✅ |
 | `src/motu/protocol.rs` | Trames BE, `8.24`, `Int16`, `Value`/`ValueKind` | ✅ |
@@ -67,11 +70,12 @@ changements venant du matériel sont appliqués et diffusés, **jamais renvoyés
 | `src/motu/discovery.rs` | IP explicite → mDNS (provisoire) → ARP + sonde TCP | 🟡 (§8) |
 | `src/osc/address.rs` | Table OSC ⇄ `Command`, conversions 0..1 ⇄ unités natives | ✅ |
 | `src/osc/bridge.rs` | UDP `rosc`, pairs (TTL 10 min, max 64), bundles ≤ 8 KiB | ✅ |
-| `src/web/server.rs` | Axum : `/ws`, `/api/health`, SPA embarquée, `X-Forwarded-For` | ✅ |
+| `src/web/server.rs` | Axum : `/ws`, `/api/health` (`api`), SPA embarquée, `X-Forwarded-For` | ✅ |
+| `src/web/api.rs` | HTTP court `GET /api/v1/summary`, `POST /api/v1/command` (contrôles, widgets, Raccourcis ; même règle `Origin` que `/ws`) | ✅ |
 | `src/web/update.rs` | `GET /api/update` (lit le statut écrit par le timer root), `POST /api/update/install` (crée seulement le fichier de demande ; en-tête `x-cuemix-update` exigé) | ✅ |
 | `src/measure/` | Test de pièce (D28) : `mod.rs` (tâche pilotée par l'engine : instantané → silence des autres entrées → MPD → attente → restauration exacte, chien de garde), `mpd.rs` (client MPD TCP texte, délais 2 s), `noise.rs` (`GET /api/measure/noise.wav`, bruit rose 90 s en flux) | ✅ |
 | `src/zeroconf.rs` | Annonce mDNS `http://<mdns_hostname>.local:<port>` | ✅ |
-| `tests/` | Mock MOTU + intégration `mock_motu`, `motu_client`, `osc_bridge`, `web_server` | ✅ |
+| `tests/` | Mock MOTU + intégration `mock_motu`, `motu_client`, `osc_bridge`, `web_server`, `speaker_plug` (séquence complète contre une vraie prise HTTP sur 127.0.0.1) | ✅ |
 
 Le code Rust vit à la **racine** (`Cargo.toml`, `src/`), conformément à HANDOFF §7.
 
@@ -164,6 +168,51 @@ MotuState
 * Liste des présets en cache mémoire (aucune I/O disque par connexion client).
 * Labels : nom 1–64 caractères imprimables, couleur `#RRGGBB` ; écriture `fsync` + renommage ;
   retour arrière et erreur si l'écriture échoue.
+* **Marche/arrêt de Monitor (Main) et Phones** (`power`, D29). Le moteur possède le fondu :
+  `Option<Fade>` par canal, une branche `sleep_until(prochaine échéance)` dans le `select!`.
+  Même courbe que l'ancien fondu navigateur (smoothstep, linéaire en dB, 12 ms/dB, 250–1200 ms,
+  un pas toutes les 28 ms sur une grille fixe, valeurs en dB entiers, dernier pas exactement à
+  l'heure). Chaque pas est un `Changed` d'origine `System` (tous les clients voient le bouton
+  bouger, y compris celui qui a appuyé). **Ce qui annule un fondu** : un `set` de ce volume
+  (Web, OSC, API) ; une valeur du matériel à plus de 0,5 dB de tous les derniers pas écrits
+  (l'écho d'un pas écrit ne l'annule pas : on retient les 8 derniers pas, conservés lors d'une inversion et pendant 2 s après la fin du fondu ; une valeur matérielle sans rapport avec eux est un geste). Les présets ne touchent pas ces volumes (D13) :
+  ils n'annulent rien. **Niveau mémorisé** (mêmes règles que l'ancien navigateur) : Arrêt le
+  mémorise sauf si un fondu tourne déjà ; Marche remonte jusqu'à lui puis l'oublie ; un `set`
+  (ou un geste matériel) vers un vrai niveau l'oublie ; sans mémoire, Marche va à −70 dB. Fichier
+  `power.json` (`[storage] power_file`), écrit après chaque changement, jamais dans un préset.
+  « Marche » = niveau au-dessus du minimum ; `fading` vient du moteur.
+* **Prise enceintes** (Main seulement, `[speaker_plug]`, D29) : Arrêt = fondu → fin au minimum →
+  `off_delay_ms` → prise éteinte (pas si un geste a annulé le fondu : la prise reste allumée) ;
+  Marche = prise allumée → réponse OK → `warmup_ms` → fondu (pas de réponse dans `timeout_ms` :
+  fondu tout de suite + `notice` « Speaker plug did not respond ») ; Arrêt pendant l'attente annule
+  la montée et éteint la prise. Seul `power` pilote la prise (ni un geste sur le bouton, ni
+  Phones). La requête part dans une tâche, jamais dans la boucle : sa réponse revient comme
+  message interne (`Internal`), numérotée — une réponse périmée (annulée entre-temps) est ignorée.
+  Un `set_speaker_plug` est validé, **contrôlé par la barrière** (tâche), écrit dans
+  `speaker-plug.json` puis diffusé ; l'état de la prise (`off|on|warming|error|unknown`) est celui
+  de nos propres requêtes (la prise n'est pas interrogée).
+* **Liaison MOTU** (D29) : le fondu tourne dans tous les modes (la démo reste utilisable), mais la prise
+  n'est commandée, et un niveau n'est mémorisé (et écrit dans `power.json`), que si la liaison est `Online`
+  **et** l'état lu sur la carte (`Synced`). Quand la liaison quitte `Online`, les fondus et la séquence de la
+  prise s'arrêtent sans aucune requête à la prise (son état est laissé tel quel, `warming` redevient
+  `unknown`). Un `power` qui aurait eu besoin de la prise hors de ce cas lance le fondu seul et diffuse
+  `notice` « MOTU not connected: speaker plug left as is ».
+* **Requêtes à la prise** : un seul agent (tâche + file) ; jamais deux requêtes en vol ; de la séquence on ne
+  garde que le dernier souhait, qui n'est pas renvoyé si la prise est déjà connue dans cet état (même
+  version des réglages) ; un changement de réglages invalide les réponses en route, et un `set_speaker_plug`
+  plus ancien ne remplace jamais un plus récent (numéro d'ordre). `test_speaker_plug` passe par le même agent
+  et est refusé pendant une séquence, et en « On » tant que Main n'est pas au minimum (« Turn Monitor off
+  first »). Délai avant l'extinction : au moins 50 ms. Marche alors que Main est audible mais que la prise
+  n'est pas connue allumée : le bouton est mis au minimum (enceintes hors tension, donc silence), puis
+  prise → échauffement → remontée au niveau d'origine ; Marche pendant le délai d'extinction (prise encore
+  allumée) remonte directement, sans échauffement. L'écriture de `power.json` se fait en tâche de fond
+  (atomique, dernière valeur gagnante).
+* `power` et `speaker_plug` sont émis à la connexion (après `measure`) et à chaque changement
+  réel (comparés au dernier envoyé, à la fin de chaque tour de boucle) ; ils ne touchent jamais
+  `● Modifié`.
+* **Requêtes HTTP courtes** : `Request::Summary` et `Request::Api { command }` ; la seconde exécute
+  la commande comme un client mais renvoie le **vrai résultat** (rejet capturé par `reply_error`)
+  au lieu d'un événement `error` vers un WebSocket.
 
 ### 3.5 Contrat JSON WebSocket (`/ws`)
 
@@ -181,9 +230,12 @@ Client → serveur (`Command`, tag `cmd`) :
 {"cmd":"set_label","ch":2,"label":{"name":"Vox","color":"#06B6D4"}}
 {"cmd":"measure_start"}
 {"cmd":"measure_stop"}
+{"cmd":"power","channel":"main","on":false}
+{"cmd":"set_speaker_plug","settings":{"enabled":true,"kind":"shelly_rpc","host":"plug.example","switch_id":0,"on_url":"","off_url":"","warmup_ms":2000,"off_delay_ms":300,"timeout_ms":2000}}
+{"cmd":"test_speaker_plug","on":true}
 ```
 
-Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`, `labels`, `presets`, `measure`.
+Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`, `labels`, `presets`, `measure`, `power`, `speaker_plug` (puis `patch` s'il est connu).
 
 ```json
 {"event":"snapshot","state":{…},"session":{"active_preset":null,"modified":false,"connection":"demo"}}
@@ -194,8 +246,73 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 {"event":"labels","channels":{"2":{"name":"Vox","color":"#06B6D4"}}}
 {"event":"meters","levels":[0.0,0.12,…]}
 {"event":"measure","state":"playing","source":[6,7],"until":"2026-11-16T20:15:30Z"}
+{"event":"power","main":{"on":true,"fading":"out","plug":"on"},"phones":{"on":true,"fading":null,"plug":null}}
+{"event":"speaker_plug","settings":{…},"urls":{"on":"http://plug.example/rpc/Switch.Set?id=0&on=true","off":"…&on=false"},"state":"unknown"}
+{"event":"speaker_plug_result","on":true,"ok":false,"message":"no answer (timeout)"}
+{"event":"notice","level":"warning","message":"Speaker plug did not respond"}
 {"event":"error","message":"…"}
 ```
+
+`power` : `on` = niveau au-dessus du minimum (`TRIM_MIN_DB`), `fading` ∈ `null`/`"in"`/`"out"`
+(pendant l'attente de la prise : Main = `"in"`, `plug` = `"warming"`), `plug` ∈ `null` (aucune prise
+active, toujours `null` pour `phones`) ou l'état de la prise. Il n'appartient pas à l'état de la carte :
+ni `● Modifié`, ni préset. `speaker_plug` : `settings` (voir ci-dessous), `urls` (`""` si les réglages ne
+permettent pas de les construire), `state` ∈ `off|on|warming|error|unknown`. `speaker_plug_result`
+ne va qu'au client qui a demandé le test (`test_speaker_plug` s'exécute sur les réglages **enregistrés**,
+même désactivés ; un seul test à la fois). `notice` est diffusé à tous. Un `set_speaker_plug` refusé
+(plage, URL, barrière) répond par un `error` au demandeur seul.
+
+Réglages de la prise (`SpeakerPlugSettings`) :
+
+```json
+{"enabled":true,"kind":"shelly_rpc","host":"plug.example","switch_id":0,"on_url":"","off_url":"",
+ "warmup_ms":2000,"off_delay_ms":300,"timeout_ms":2000}
+```
+
+`kind` ∈ `shelly_rpc` (Gen2/Plus/Pro/Gen3/Gen4 : `http://HOST/rpc/Switch.Set?id=N&on=true|false`),
+`shelly_gen1` (`http://HOST/relay/N?turn=on|off`), `tasmota` (`http://HOST/cm?cmnd=Power%20On|Off`,
+`Power<N+1>` si N > 0), `custom` (`on_url` / `off_url` tels quels, `http://` obligatoire ; `host` vide).
+`host` : IP ou nom, sans schéma, chemin ni identifiants ni espaces, IPv6 entre crochets, `:port`
+optionnel. Plages : `switch_id` 0–15, `warmup_ms` 0–10000, `off_delay_ms` 0–5000, `timeout_ms`
+500–10000 ; les URL ne sont exigées que si `enabled`. Les mêmes vecteurs valides/invalides
+(`design/vectors/speaker-plug-urls.json`) servent à `cargo test` et à vitest.
+
+**Barrière** (à l'enregistrement **et** avant chaque envoi) : `GET http://` seulement, aucune
+redirection, aucun identifiant ; toute adresse résolue doit être privée (`10/8`, `172.16/12`,
+`192.168/16`), lien-local (`169.254/16`, `fe80::/10`), de bouclage (`127/8`, `::1`) ou ULA IPv6
+(`fc00::/7`) — une adresse IPv4 « mappée » suit la règle IPv4 ; la connexion se fait sur l'adresse
+**déjà vérifiée** (pas de seconde résolution). Délai `timeout_ms` pour l'ensemble (résolution
+comprise) ; seule la ligne d'état et les en-têtes sont lus (8 KiB max), 2xx = succès, le corps est ignoré.
+
+#### API HTTP courte (`/api/v1`, version `1`, D29)
+
+Pensée pour des appels de quelques secondes en arrière-plan (contrôles, widgets, Raccourcis) : pas de
+WebSocket ni de snapshot. `GET /api/health` annonce `"api": 1` (entier, incrémenté si une route
+change de façon incompatible ; les clients ignorent les champs inconnus). Les deux routes appliquent
+la même règle `Origin` que `/ws` (403 `{"ok":false,"error":"origin not allowed"}` ; pas d'`Origin` =
+accepté) et répondent avec `Cache-Control: no-store`.
+
+`GET /api/v1/summary` → 200 :
+
+```json
+{"api":1,"version":"0.6.0",
+ "main":{"db":-12.0,"on":true,"fading":null,"plug":"on"},
+ "phones":{"db":-30.0,"on":true,"fading":null,"plug":null},
+ "preset":{"active":"live","modified":false},
+ "presets":["default","live"],
+ "motu":{"status":"online","model":"UL5E","firmware":"2.0.8+2568"}}
+```
+
+`db` = dB entiers `-100..0` ; `on`, `fading`, `plug` comme l'événement `power` ; `motu.status` ∈
+`online`/`connecting`/`demo` ; `model` / `firmware` = `null` sans appareil identifié.
+
+`POST /api/v1/command` — corps JSON = **la même `Command` que `/ws`**, limitée à
+`{"cmd":"set","param":"main_vol","db":-12}`, `{"cmd":"set","param":"phones_vol","db":-30}`,
+`{"cmd":"power","channel":"main","on":true}` et `{"cmd":"load_preset","name":"live"}` (corps ≤ 16 KiB,
+sinon 413). Réponses : `200 {"ok":true}` ; sinon `{"ok":false,"error":"…"}` avec **400** (JSON invalide,
+commande non permise — dont `measure_start`, qui reste lié au client WebSocket qui l'a lancé —,
+valeur ou nom refusé par le moteur), **404** (préset inexistant), **403** (`Origin`), **503**
+(moteur arrêté). Le changement est diffusé à tous les clients comme d'habitude (origine `System`).
 
 `measure` : `state` ∈ `unavailable` (pas de `[measure] mpd`, aucune MOTU identifiée ou liaison pas `online`), `idle`,
 `starting`, `quiet` (la musique de l'utilisateur est mise en pause et la pièce reste silencieuse 3,5 s : le téléphone enregistre le bruit de fond ; `until` = fin de cette phase), `playing` (MPD a confirmé la lecture du bruit), `restoring`, `error` (avec `message` ;
@@ -220,7 +337,7 @@ matérielle** pour le DSP (lus sur la MOTU ; seuls les EQ d'entrée et de sortie
 est idempotent ; plages dans `state::dsp_limits` (provisoires, larges ; miroir TS :
 `frontend/src/lib/protocol.ts`,
 loi de fader : `frontend/src/lib/fader.ts`, portage exact de `motu::fader`). Le serveur ne renvoie pas un `changed` au client
-qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants ≤ 256 KiB (un fichier de réglages importé fait ≈ 20 Ko). `import_preset` enregistre le JSON reçu (même format qu'un fichier de preset, toute version lisible) sous `<name>.json` puis le rappelle comme `load_preset`.
+qui l'a provoqué ; `meters` est limité à 60/s par client (la source en produit ≈ 30/s). Messages entrants ≤ 256 KiB (un fichier de réglages importé fait ≈ 20 Ko). `import_preset` enregistre le JSON reçu (même format qu'un fichier de preset, toute version lisible) sous `<name>.json` puis le rappelle comme `load_preset`.
 
 ### 3.6 Table OSC (UDP `:8000`, indices **1-based**)
 
@@ -230,6 +347,7 @@ qui l'a provoqué ; `meters` est limité à 60/s par client. Messages entrants �
 | `/mix/{bus}/ch/{ch}/pan` | float `-1..1` | `mix_pan` |
 | `/mix/{bus}/ch/{ch}/mute` · `/solo` | int/float/bool | `mix_mute` · `mix_solo` |
 | `/mix/main/vol` | float `0..1` | `main_vol` (trim : 1.0 = 0 dB, 0 = −100 dB) |
+| `/mix/main/power` · `/controlroom/phones/power` | int/float/bool | `Command::Power` (fondu serveur, D29) ; feedback : int `0/1` = **où va** le canal (démarre à 1 dès qu'un fondu d'allumage commence, à 0 dès qu'un fondu d'extinction commence) |
 | `/preamp/{ch}/gain` | float dB `0..74` | `preamp_gain` |
 | `/preamp/{ch}/48v` · `/pad` · `/phase` | int | `phantom` · `pad` · `phase` |
 | `/eq/{ch}/band/{b}/mode` · `/bypass` · `/freq` · `/gain` · `/bw` | int / float | `input_eq_*` (`ch` 1–8, `b` 1–4 ; Hz, dB, Q) |
@@ -248,8 +366,11 @@ Pont OSC : un pair est enregistré (TTL 10 min, 64 max, **8 nouveaux / 10 s**) d
 est accepté, et reçoit un **dump complet** — dumps limités à **1 / s au total** (anti-amplification
 UDP) ; `/sync` (sans argument) en redemande un ; bundles imbriqués > 8 niveaux rejetés avant
 décodage ; le feedback `changed` va aux cibles
-configurées + pairs, **sauf l'émetteur** ; bundles découpés ≤ 8 KiB. Non transmis en OSC :
-`presets`, `labels`, `meters`, `meter_raw`, `status`, `session`, `error`. `meter_raw` (`{"event":"meter_raw","raw":[255,13,…]}`) porte la trame de meters brute du MOTU (propriété 6000, non décodée), ≈ 15/s, pour la vue de diagnostic *Meter probe* (`/?probe`) qui sert à établir la table des meters.
+configurées + pairs, **sauf l'émetteur** ; bundles découpés ≤ 8 KiB. Le feedback `power`
+(`/mix/main/power`, `/controlroom/phones/power`) va à **tous** les pairs, émetteur compris (le fondu est
+l'œuvre du serveur, pas un geste du pair), seulement pour les canaux dont l'état a changé, et fait
+partie du dump complet. Non transmis en OSC :
+`presets`, `labels`, `meters`, `meter_raw`, `status`, `session`, `speaker_plug`, `speaker_plug_result`, `notice`, `error`. `meter_raw` (`{"event":"meter_raw","raw":[255,13,…]}`) porte la trame de meters brute du MOTU (propriété 6000, non décodée), ≈ 30/s (`METER_RAW_INTERVAL` = 33 ms), pour la vue de diagnostic *Meter probe* (`/?probe`) qui sert à établir la table des meters.
 
 `patch` (`{"event":"patch","sources":[46,47,…]}`) porte la table de patch 5010 lue sur la carte (index = destination, valeur = point source ; liste vide = inconnue). Le client MOTU l'accumule (`apply_patch_frame`), le moteur la garde (`Engine.patch`, hors `MotuState` et hors présets), la diffuse à chaque changement, la rejoue après les événements initiaux quand elle est connue et la vide en mode démo. Lecture seule : aucun `Command`, aucun encodeur, pas de `check_writable`. Côté web : `store.patch`, tableau « Patch (5010) » du *Meter probe*, et `outputSourcePoint` (`meterMap.ts`) qui fait suivre aux meters de sortie la source réellement patchée dès que `MK5_PATCH_DEST` (indice de destination par sortie, vide tant qu'il n'est pas lu sur la carte) est renseigné.
 
@@ -258,6 +379,18 @@ configurées + pairs, **sauf l'émetteur** ; bundles découpés ≤ 8 KiB. Non t
 Fichier : `--config` → `$CUEMIX_CONFIG` → `./config.toml` → `/etc/cuemix-web/config.toml` ;
 absent = défauts, invalide = erreur, clés inconnues signalées par un avertissement (D15). Surcharges `CUEMIX_HTTP_BIND`,
 `CUEMIX_OSC_LISTEN`, `CUEMIX_MOTU_IP`. `throttle_hz = 40` → 25 ms.
+
+`[storage]` : `presets_dir`, `labels_file`, et (0.6.0) `power_file` (niveaux mémorisés, défaut
+`/var/lib/cuemix-web/power.json`) et `speaker_plug_file` (réglages enregistrés depuis l'interface, défaut
+`/var/lib/cuemix-web/speaker-plug.json`) — dans le volume Docker `cuemix-data` comme `labels.json`,
+git-ignorés (`data/power.json`, `data/speaker-plug.json`).
+
+`[speaker_plug]` (0.6.0) : mêmes champs que `SpeakerPlugSettings` (§3.5) ; défauts `enabled = false`,
+`kind = "shelly_rpc"`, `host = ""`, `switch_id = 0`, `warmup_ms = 2000`, `off_delay_ms = 300`,
+`timeout_ms = 2000`. Si `speaker_plug_file` existe, son contenu **remplace entièrement** cette section.
+Des réglages invalides au démarrage (fichier ou section) **ou un `speaker-plug.json` illisible** donnent une
+prise **désactivée** (avertissement dans le journal) : on ne revient jamais silencieusement à une autre prise. `config.example.toml` donne un exemple commenté en `192.0.2.10` ; les vraies adresses ne
+vont jamais dans Git.
 
 ## 4. Comportements moteur
 
@@ -295,9 +428,15 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 * `/ws` : en-tête `Origin` vérifié (même hôte que `Host`, ou `web.allowed_origins`), sinon 403
   (anti-détournement cross-site) ; envois bornés à 2 s (un client bloqué est déconnecté) ;
   `X-Forwarded-For` : entrée la plus à droite, seulement si `trust_forwarded_headers` (défaut `false`).
+* `/api/v1/*` : même contrôle `Origin` que `/ws` ; commandes limitées à `main_vol`, `phones_vol`, `power`,
+  `load_preset` (le test de pièce reste lié à son WebSocket) ; corps ≤ 16 KiB.
+* **Prise enceintes** : le serveur reçoit une adresse à contacter, donc il est borné — `http://` en GET
+  uniquement, sans redirection ni identifiants, délai court, réponse lue sur 8 KiB au plus, et toute
+  adresse résolue doit être privée, lien-local ou de bouclage (à l'enregistrement **et** à chaque envoi,
+  sur l'adresse vérifiée). Un seul test manuel à la fois. Les prises à mot de passe ne sont pas gérées.
 * **Pas d'authentification** : n'exposer que sur un LAN de confiance ou derrière un proxy authentifiant.
 * Fichiers locaux git-ignorés : `config.toml`, `*.local.toml`, `deploy/*.env`, `.env`, `*.pem`,
-  `*.key`, `data/labels.json`, `data/presets/*.json`, `.claude/`.
+  `*.key`, `data/labels.json`, `data/power.json`, `data/speaker-plug.json`, `data/presets/*.json`, `.claude/`.
 * `.gitleaks.toml` : règles par défaut + RFC1918 ; exemples en `192.0.2.x`/`127.0.0.1`/`169.254.x.x`.
 
 ## 7. Journal des décisions
@@ -332,6 +471,7 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 | D26 | Onglet *Routing* supprimé ; `route` et la matrice restent dans l'état (inertes) pour la compatibilité des présets | La matrice booléenne ne correspond pas au matériel (5010 = une source par sortie) ; les mixes couvrent l'usage |
 | D27 | Valeur 1006/1026 = **Q** (0,45-10) et non une largeur en octaves ; le champ garde le nom `bw_oct` pour les présets | Table et UI de CueMix 5 |
 | D28 | Bruit de test de pièce fourni par le **MPD de l'utilisateur** (`[measure] mpd`, sortie analogique reliée à Line 7-8) et servi par `GET /api/measure/noise.wav` ; la carte n'a **aucun générateur** (table des propriétés de CueMix 5 vérifiée). Pendant le test : instantané puis silence des autres entrées du Main (bus 0), solos coupés, EQ de sortie Main (slot 0) et EQ d'entrée des sources en bypass, via les `Set` normaux ; restauration exacte des seules valeurs changées (une entrée déjà coupée reste coupée), puis reprise de MPD (morceau, position, pause ; MPD est mis en pause par le serveur pendant la phase `quiet`, un arrêt à ce stade fait simplement `pause 0`) ; chien de garde `max_seconds` (20-80 s) ; écritures « silence d'abord » (mutes/solos qui coupent, puis le reste, puis les démutes). L'analyse (micro du téléphone) se fait dans le navigateur | Pas de nouvelle fonction matériel ni de dépendance ; le bruit passe par la chaîne réelle (entrée → mixage → sortie) ; toute erreur réseau MPD aboutit à une restauration propre puis `error` → `idle`. La liste de restauration est écrite dans `measure-restore.json` (à côté de `labels.json`) avant tout changement et gardée jusqu'à ce que la liaison soit restée `online` 3 s après l'envoi : perte de liaison, débranchement, arrêt ou crash en cours de test → restauration rejouée dès que la MOTU est de nouveau `online` (y compris au redémarrage). Limite : après un crash, MPD n'est pas restauré |
+| D29 | **Marche/arrêt de Monitor et Phones sur le serveur** (commande `power`, fondu du moteur, niveau mémorisé dans `power.json`), **prise enceintes** (Main : arrêt = fondu → délai → prise éteinte ; marche = prise → échauffement → fondu), et **API HTTP courte** `/api/v1` (arbitrage mainteneur 2026-11-25, `docs/IOS-PLAN.md` §5.1–5.2b ; sortie en 0.6.0). Le navigateur ne fait plus le fondu (`channelFade` et les clés `localStorage` supprimées, sans migration : le pire cas est un Marche qui monte à −70 dB). Le moteur applique la même courbe que l'ancien code web ; les réglages de la prise viennent de `[speaker_plug]` et du fichier enregistré depuis l'interface ; la requête est un `GET` HTTP écrit à la main sur `TcpStream` (aucune dépendance HTTP ajoutée) et **bornée par une barrière d'adresses locales** | Le niveau mémorisé et le fondu doivent être partagés entre appareils (téléphone, portable, OSC, contrôles iOS, qui ne peuvent pas faire tourner un fondu) ; une prise commandée par le serveur marche depuis n'importe quel client et ne coupe jamais les enceintes à pleine puissance. Compatibilité : `power` / `speaker_plug` / `notice` sont de nouveaux événements (un client ancien les ignore) ; l'événement `power` s'insère entre `measure` et `patch` à la connexion |
 
 ### Application écran d'accueil (iOS)
 

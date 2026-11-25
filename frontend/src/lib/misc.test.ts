@@ -5,7 +5,6 @@ import { EQ_MODE, TRIM_MIN_DB, eqModeName, type EqBand, type Param } from './pro
 import { ParamSender, paramKey } from './sender';
 import { isHexColor, isValidLabelName, isValidPresetName } from './validate';
 import { isHwMapped, isHwReadOnly } from './hwmap';
-import { FADE_SAFE_DB, FADE_STORAGE_KEY, PHONES_STORAGE_KEY, fadeMs, forgetRemembered, isOff, loadRemembered, planIn, planOut, saveRemembered, valueAt } from './fade';
 
 describe('ParamSender throttle', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -300,96 +299,5 @@ describe('preset files', () => {
     expect(presetNameFromFile('???.json')).toBe('imported');
     expect(presetNameFromFile('x'.repeat(80) + '.json')).toHaveLength(64);
     expect(exportFileName('Live set', new Date('2026-11-15T10:00:00Z'))).toBe('cuemix-Live_set-2026-11-15.json');
-  });
-});
-
-describe('master fade', () => {
-  it('fades out from the current level all the way to the minimum', () => {
-    const p = planOut(-20);
-    expect(p).toMatchObject({ from: -20, to: TRIM_MIN_DB, end: TRIM_MIN_DB });
-    expect(valueAt(p, 0)).toBe(-20);
-    expect(valueAt(p, 0.5)).toBe(-60);
-    expect(valueAt(p, 1)).toBe(TRIM_MIN_DB);
-    const seq = [0, 0.2, 0.4, 0.6, 0.8, 0.99].map((t) => valueAt(p, t));
-    expect([...seq].sort((a, b) => b - a)).toEqual(seq);
-    // passes through values below -60 (the old floor), so the knob never jumps
-    expect(seq.some((v) => v < -60 && v > TRIM_MIN_DB)).toBe(true);
-  });
-  it('a quiet level still sweeps to the minimum', () => {
-    const p = planOut(-65);
-    expect(p.from).toBe(-65);
-    expect(p.to).toBe(TRIM_MIN_DB);
-    expect(valueAt(p, 0.5)).toBeLessThan(-65);
-    expect(valueAt(p, 1)).toBe(TRIM_MIN_DB);
-  });
-  it('fades in from the minimum to the remembered level and never above it', () => {
-    const p = planIn(TRIM_MIN_DB, -30);
-    expect(p).toMatchObject({ from: TRIM_MIN_DB, to: -30, end: -30 });
-    for (let t = 0; t <= 1.2; t += 0.05) expect(valueAt(p, t)).toBeLessThanOrEqual(-30);
-    expect(valueAt(p, 0)).toBe(TRIM_MIN_DB);
-    expect(valueAt(p, 0.5)).toBeLessThan(-60);
-    expect(valueAt(p, 1)).toBe(-30);
-  });
-  it('a remembered level below -60 is reached by a continuous sweep', () => {
-    const p = planIn(TRIM_MIN_DB, -65);
-    for (let t = 0; t <= 1; t += 0.1) expect(valueAt(p, t)).toBeLessThanOrEqual(-65);
-    expect(valueAt(p, 1)).toBe(-65);
-  });
-  it('without a remembered level, fades up to -70 dB at most; never above 0', () => {
-    expect(planIn(TRIM_MIN_DB, null).end).toBe(FADE_SAFE_DB);
-    expect(planIn(TRIM_MIN_DB, 12).end).toBe(0);
-    expect(planIn(TRIM_MIN_DB, Number.NaN).end).toBe(FADE_SAFE_DB);
-  });
-  it('a fade in starting above the remembered level never raises it', () => {
-    const p = planIn(-10, -30);
-    for (let t = 0; t <= 1; t += 0.05) expect(valueAt(p, t)).toBeLessThanOrEqual(-30);
-  });
-  it('reversing mid-fade starts from the current level', () => {
-    const p = planIn(-45, -20);
-    expect(p.from).toBe(-45);
-    expect(valueAt(p, 0)).toBe(-45);
-    expect(p.ms).toBeLessThan(1200);
-    expect(planOut(-45).from).toBe(-45);
-  });
-  it('a full sweep takes 1.2 s, shorter spans less, never under 250 ms', () => {
-    expect(planOut(0).ms).toBe(1200);
-    expect(planIn(TRIM_MIN_DB, 0).ms).toBe(1200);
-    expect(planOut(-80).ms).toBeLessThan(planOut(0).ms);
-    expect(planOut(TRIM_MIN_DB + 1).ms).toBe(250);
-  });
-  it('detects off, durations are bounded, and storage failures are harmless', () => {
-    expect(isOff(TRIM_MIN_DB)).toBe(true);
-    expect(isOff(TRIM_MIN_DB + 0.5)).toBe(true);
-    expect(isOff(-65)).toBe(false);
-    expect(fadeMs(100)).toBe(1200);
-    expect(fadeMs(1)).toBe(250);
-    expect(fadeMs(-50)).toBe(600);
-    expect(loadRemembered(FADE_STORAGE_KEY)).toBeNull(); // no storage in node: harmless
-    const m = new Map<string, string>();
-    vi.stubGlobal('localStorage', {
-      getItem: (k: string) => m.get(k) ?? null,
-      setItem: (k: string, v: string) => void m.set(k, v),
-      removeItem: (k: string) => void m.delete(k),
-    });
-    expect(loadRemembered(FADE_STORAGE_KEY)).toBeNull();
-    saveRemembered(FADE_STORAGE_KEY, -30);
-    expect(loadRemembered(FADE_STORAGE_KEY)).toBe(-30);
-    forgetRemembered(FADE_STORAGE_KEY);
-    expect(loadRemembered(FADE_STORAGE_KEY)).toBeNull();
-    // each channel keeps its own level
-    expect(FADE_STORAGE_KEY).not.toBe(PHONES_STORAGE_KEY);
-    saveRemembered(FADE_STORAGE_KEY, -30);
-    saveRemembered(PHONES_STORAGE_KEY, -12);
-    expect(loadRemembered(FADE_STORAGE_KEY)).toBe(-30);
-    expect(loadRemembered(PHONES_STORAGE_KEY)).toBe(-12);
-    forgetRemembered(FADE_STORAGE_KEY);
-    expect(loadRemembered(FADE_STORAGE_KEY)).toBeNull();
-    expect(loadRemembered(PHONES_STORAGE_KEY)).toBe(-12);
-    forgetRemembered(PHONES_STORAGE_KEY);
-    for (const bad of [String(TRIM_MIN_DB), '5', 'abc', '', ' ', 'Infinity']) {
-      m.set(FADE_STORAGE_KEY, bad);
-      expect(loadRemembered(FADE_STORAGE_KEY)).toBeNull();
-    }
-    vi.unstubAllGlobals();
   });
 });

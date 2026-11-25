@@ -971,12 +971,8 @@ mod tests {
             .unwrap_or_default();
         let dir =
             std::env::temp_dir().join(format!("cuemix-measure-{}-{nanos}", std::process::id()));
-        let (engine, link, _task) = engine::start(EngineConfig {
-            topology: Topology::default(),
-            presets_dir: dir.join("presets"),
-            labels_file: dir.join("labels.json"),
-        })
-        .await;
+        let (engine, link, _task) =
+            engine::start(EngineConfig::for_dir(Topology::default(), &dir)).await;
         let info = DeviceInfo {
             topology: Topology::default(),
             ..Default::default()

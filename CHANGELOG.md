@@ -12,6 +12,37 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+### Added
+- **Speaker plug.** Monitor (Main) on/off can switch a smart plug that powers the
+  speakers, in a safe order: **Off** fades out, waits 0.3 s, then switches the
+  plug off; **On** switches the plug on, waits a warm-up (2 s by default,
+  adjustable), then fades in. If the plug does not answer, the volume fades in
+  anyway and the app shows "Speaker plug did not respond". The plug is only
+  switched while the MOTU is online. Set it up in the Advanced view: **⋯ →
+  Speaker plug** (Shelly Gen2 / Plus / Pro / Gen3 / Gen4, Shelly Gen1, Tasmota, or
+  two custom URLs), with **Test on / Test off**. The server only sends plain
+  `http` GET requests to addresses on the home network (private, link-local or
+  loopback); anything else is refused.
+- On/off and the fade now run **on the server**, so every device shows the same
+  state and the knob moves everywhere during a fade. New `power` command and
+  event, OSC `/mix/main/power` and `/controlroom/phones/power`.
+- Short HTTP API for the coming iOS app: `GET /api/v1/summary`,
+  `POST /api/v1/command` (Monitor/Phones volume, power, preset recall only).
+  `/api/health` reports `"api": 1`.
+
+### Changed
+- The level that Monitor/Phones return to after Off is remembered by the
+  server (`power.json`), shared by every device and kept across restarts.
+
+### Compatibility
+- Presets and existing `config.toml` files keep working. New optional keys:
+  `[storage] power_file` and `speaker_plug_file` (defaults in
+  `/var/lib/cuemix-web/`), `[speaker_plug]` (off by default); see
+  `config.example.toml`. Plug settings edited in the UI are saved in
+  `speaker-plug.json` and override `config.toml`.
+- The level each browser remembered for on/off (`localStorage`) is not carried
+  over: the first On after the update fades to -70 dB if nothing was remembered.
+
 ## [0.5.2] - 2026-11-20
 
 The web UI can be installed on the iPhone home screen as **Cue Desk**

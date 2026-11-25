@@ -89,6 +89,9 @@ async fn main() -> Result<()> {
         topology,
         presets_dir: config.storage.presets_dir.clone(),
         labels_file: config.storage.labels_file.clone(),
+        power_file: config.storage.power_file.clone(),
+        speaker_plug_file: config.storage.speaker_plug_file.clone(),
+        speaker_plug: config.speaker_plug.clone(),
     })
     .await;
     let (trigger, shutdown) = engine::shutdown_channel();

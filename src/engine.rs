@@ -22,21 +22,33 @@
 //!   fader back to the client that is dragging it) and a [`Target`]
 //!   (`Only(origin)` for replies and errors).
 //! - The engine never blocks on the device: forwarding uses `try_send`.
+//! - Monitor / Phones on/off is a server-side fade (`power`, [`sequence`]): one
+//!   `Option<Fade>` per channel and a timer branch in the loop; the speaker plug request
+//!   (Main only) runs in a spawned task and comes back as an internal message.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::motu::client::ConnectionStatus;
 use crate::motu::props;
+use crate::plug::{self, PlugState, PlugTransport, SpeakerPlugSettings};
+use crate::power::{self, FadeDir, PowerChannel, Remembered};
 use crate::presets::{self, PresetStore};
 use crate::state::{
     Command, DeviceInfo, Labels, MeasureState, MeasureStatus, MotuState, Param, Preset,
     ServerEvent, SessionInfo, Topology,
 };
+
+mod sequence;
+
+/// Version of the short HTTP API (`/api/v1/*`), reported by `/api/health` as `api`.
+pub const API_VERSION: u32 = 1;
 
 /// Capacity of the client → engine request queue.
 const REQUEST_QUEUE: usize = 1024;
@@ -161,6 +173,60 @@ enum Request {
     MeasureStatus(MeasureStatus),
     /// A Web client disconnected.
     ClientGone(Origin),
+    /// `GET /api/v1/summary`.
+    Summary(oneshot::Sender<Summary>),
+    /// `POST /api/v1/command`: runs like a client command, but the outcome goes back to the
+    /// caller instead of to a WebSocket.
+    Api {
+        command: Command,
+        reply: oneshot::Sender<Result<(), ApiError>>,
+    },
+}
+
+/// A command refused through the HTTP API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApiError {
+    /// The thing asked for (a preset) does not exist.
+    pub not_found: bool,
+    pub message: String,
+}
+
+/// One channel of the API summary.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ChannelSummary {
+    /// Whole dB, `-100..=0`.
+    pub db: f64,
+    /// Level above the minimum.
+    pub on: bool,
+    pub fading: Option<FadeDir>,
+    /// Speaker plug state (Main only, `null` when no plug is enabled).
+    pub plug: Option<PlugState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PresetSummary {
+    pub active: Option<String>,
+    pub modified: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MotuSummary {
+    /// `online`, `connecting` or `demo`.
+    pub status: ConnectionStatus,
+    pub model: Option<String>,
+    pub firmware: Option<String>,
+}
+
+/// `GET /api/v1/summary`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Summary {
+    pub api: u32,
+    pub version: &'static str,
+    pub main: ChannelSummary,
+    pub phones: ChannelSummary,
+    pub preset: PresetSummary,
+    pub presets: Vec<String>,
+    pub motu: MotuSummary,
 }
 
 /// What the engine forwards to the room-test task.
@@ -228,6 +294,29 @@ impl EngineHandle {
             .map_err(|_| EngineClosed)
     }
 
+    /// Short-API summary (`GET /api/v1/summary`).
+    pub async fn summary(&self) -> Result<Summary, EngineClosed> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(Request::Summary(tx))
+            .await
+            .map_err(|_| EngineClosed)?;
+        rx.await.map_err(|_| EngineClosed)
+    }
+
+    /// Short-API command (`POST /api/v1/command`): the real outcome, not an event.
+    pub async fn api_command(
+        &self,
+        command: Command,
+    ) -> Result<Result<(), ApiError>, EngineClosed> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Request::Api { command, reply })
+            .await
+            .map_err(|_| EngineClosed)?;
+        rx.await.map_err(|_| EngineClosed)
+    }
+
     /// Unique id for a new Web connection.
     pub fn next_client_id(&self) -> u64 {
         self.ids.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -239,10 +328,63 @@ pub struct EngineConfig {
     pub topology: Topology,
     pub presets_dir: PathBuf,
     pub labels_file: PathBuf,
+    /// Remembered Monitor / Phones levels.
+    pub power_file: PathBuf,
+    /// Speaker plug settings saved from the UI (overrides `speaker_plug`).
+    pub speaker_plug_file: PathBuf,
+    /// Speaker plug defaults (`[speaker_plug]` in `config.toml`).
+    pub speaker_plug: SpeakerPlugSettings,
+}
+
+impl EngineConfig {
+    /// Every data file inside `dir` (tests, demos).
+    pub fn for_dir(topology: Topology, dir: &Path) -> Self {
+        Self {
+            topology,
+            presets_dir: dir.join("presets"),
+            labels_file: dir.join("labels.json"),
+            power_file: dir.join("power.json"),
+            speaker_plug_file: dir.join("speaker-plug.json"),
+            speaker_plug: SpeakerPlugSettings::default(),
+        }
+    }
+}
+
+/// Messages the engine sends itself from the tasks it spawns (plug requests).
+#[derive(Debug)]
+enum Internal {
+    /// Result of a plug request made by the power sequence.
+    Switched {
+        seq: u64,
+        on: bool,
+        result: Result<String, String>,
+    },
+    /// Result of `TestSpeakerPlug`.
+    Tested {
+        origin: Origin,
+        on: bool,
+        result: Result<String, String>,
+    },
+    /// Fence check of settings being saved.
+    Checked {
+        origin: Origin,
+        settings: SpeakerPlugSettings,
+        result: Result<(), String>,
+        /// Order of the `set_speaker_plug` requests.
+        ticket: u64,
+    },
 }
 
 /// Spawn the engine task.
 pub async fn start(cfg: EngineConfig) -> (EngineHandle, DeviceLink, JoinHandle<()>) {
+    start_with(cfg, Arc::new(plug::HttpPlug)).await
+}
+
+/// [`start`] with another way to reach the speaker plug (tests use a fake).
+pub async fn start_with(
+    cfg: EngineConfig,
+    transport: Arc<dyn PlugTransport>,
+) -> (EngineHandle, DeviceLink, JoinHandle<()>) {
     let (req_tx, req_rx) = mpsc::channel(REQUEST_QUEUE);
     let (dev_cmd_tx, dev_cmd_rx) = mpsc::channel(DEVICE_QUEUE);
     let (dev_ev_tx, dev_ev_rx) = mpsc::channel(DEVICE_QUEUE);
@@ -255,13 +397,22 @@ pub async fn start(cfg: EngineConfig) -> (EngineHandle, DeviceLink, JoinHandle<(
             Labels::default()
         }
     };
+    let remembered = match power::load_remembered(&cfg.power_file).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, "remembered levels not loaded, starting empty");
+            Remembered::default()
+        }
+    };
+    let plug_settings = initial_plug_settings(&cfg.speaker_plug_file, cfg.speaker_plug).await;
+    let (internal_tx, internal_rx) = mpsc::unbounded_channel();
     let store = PresetStore::new(cfg.presets_dir);
     let preset_names = store.list().await.unwrap_or_else(|e| {
         tracing::warn!(error = %e, "cannot list presets");
         Vec::new()
     });
 
-    let engine = Engine {
+    let mut engine = Engine {
         state: MotuState::new(cfg.topology),
         session: SessionInfo::default(),
         active: None,
@@ -271,13 +422,25 @@ pub async fn start(cfg: EngineConfig) -> (EngineHandle, DeviceLink, JoinHandle<(
         measure_tx: None,
         measure_owner: None,
         labels_file: cfg.labels_file,
+        power: sequence::PowerState::new(remembered, cfg.power_file),
+        plug: sequence::PlugRuntime::new(
+            plug_settings,
+            cfg.speaker_plug_file,
+            transport,
+            internal_tx.clone(),
+        ),
+        synced: false,
+        internal: internal_tx,
+        last_error: None,
         preset_names,
         store,
         events: events.clone(),
         to_device: dev_cmd_tx,
         _device_keepalive: dev_ev_tx.clone(),
     };
-    let task = tokio::spawn(engine.run(req_rx, dev_ev_rx));
+    // What a new client gets first is the baseline: only changes are broadcast after it.
+    engine.remember_baseline_events();
+    let task = tokio::spawn(engine.run(req_rx, dev_ev_rx, internal_rx));
     let handle = EngineHandle {
         tx: req_tx,
         events,
@@ -288,6 +451,32 @@ pub async fn start(cfg: EngineConfig) -> (EngineHandle, DeviceLink, JoinHandle<(
         events: dev_ev_tx,
     };
     (handle, link, task)
+}
+
+/// Saved settings win over `config.toml`; invalid ones are dropped with a warning.
+async fn initial_plug_settings(
+    file: &Path,
+    from_config: SpeakerPlugSettings,
+) -> SpeakerPlugSettings {
+    let saved = match plug::load_settings(file).await {
+        Ok(s) => s,
+        // A file we cannot read must not silently bring back another plug: disabled.
+        Err(e) => {
+            tracing::warn!(error = %e, "speaker plug settings not loaded, plug disabled");
+            return SpeakerPlugSettings::default();
+        }
+    };
+    let (settings, origin) = match saved {
+        Some(s) => (s, "speaker-plug.json"),
+        None => (from_config, "config.toml"),
+    };
+    match settings.validate() {
+        Ok(()) => settings,
+        Err(e) => {
+            tracing::warn!(error = %e, origin, "invalid speaker plug settings, plug disabled");
+            SpeakerPlugSettings::default()
+        }
+    }
 }
 
 struct Engine {
@@ -303,6 +492,16 @@ struct Engine {
     /// Web client that started the running room test.
     measure_owner: Option<Origin>,
     labels_file: PathBuf,
+    /// Monitor / Phones fades, remembered levels, Main's plug sequence.
+    power: sequence::PowerState,
+    /// Speaker plug settings, state and transport.
+    plug: sequence::PlugRuntime,
+    /// Results of the tasks the engine spawns (plug requests).
+    internal: mpsc::UnboundedSender<Internal>,
+    /// The state was read from the card since the link came up.
+    synced: bool,
+    /// Last rejection `reply_error` reported (read by the HTTP API path).
+    last_error: Option<String>,
     /// Cached preset list (no disk I/O on every client connect, audit #12).
     preset_names: Vec<String>,
     store: PresetStore,
@@ -317,13 +516,21 @@ impl Engine {
         mut self,
         mut requests: mpsc::Receiver<Request>,
         mut device: mpsc::Receiver<DeviceEvent>,
+        mut internal: mpsc::UnboundedReceiver<Internal>,
     ) {
         loop {
+            let deadline = self.next_deadline();
             tokio::select! {
                 req = requests.recv() => match req {
                     Some(Request::Command { origin, command }) => self.on_command(origin, command).await,
                     Some(Request::Initial(reply)) => {
                         let _ = reply.send(self.initial_events().await);
+                    }
+                    Some(Request::Summary(reply)) => {
+                        let _ = reply.send(self.summary());
+                    }
+                    Some(Request::Api { command, reply }) => {
+                        let _ = reply.send(self.on_api(command).await);
                     }
                     Some(Request::MeasureAttach(tx)) => self.measure_tx = Some(tx),
                     Some(Request::MeasureStatus(status)) => {
@@ -344,7 +551,10 @@ impl Engine {
                     None => break,
                 },
                 Some(ev) = device.recv() => self.on_device(ev),
+                Some(msg) = internal.recv() => self.on_internal(msg).await,
+                () = wait_until(deadline) => self.on_timer().await,
             }
+            self.after_step().await;
         }
         tracing::debug!("engine stopped");
     }
@@ -358,8 +568,9 @@ impl Engine {
         });
     }
 
-    fn reply_error(&self, origin: Origin, message: String) {
+    fn reply_error(&mut self, origin: Origin, message: String) {
         tracing::debug!(?origin, %message, "request rejected");
+        self.last_error = Some(message.clone());
         self.emit(origin, Target::Only(origin), ServerEvent::Error { message });
     }
 
@@ -379,6 +590,8 @@ impl Engine {
             },
             ServerEvent::Measure(self.measure.clone()),
         ];
+        events.push(self.power_event());
+        events.push(self.plug_event());
         if !self.patch.is_empty() {
             events.push(ServerEvent::Patch {
                 sources: self.patch.clone(),
@@ -514,8 +727,19 @@ impl Engine {
         match command {
             Command::MeasureStart => self.on_measure(origin, MeasureRequest::Start),
             Command::MeasureStop => self.on_measure(origin, MeasureRequest::Stop),
+            Command::Power { channel, on } => self.on_power(channel, on),
+            Command::SetSpeakerPlug { settings } => self.on_set_speaker_plug(origin, settings),
+            Command::TestSpeakerPlug { on } => self.on_test_speaker_plug(origin, on),
             Command::Set(param) => {
-                match crate::state::check_writable(&param).and_then(|()| self.state.apply(&param)) {
+                let result =
+                    crate::state::check_writable(&param).and_then(|()| self.state.apply(&param));
+                // A volume set by a client (not by the fade) takes control of the knob.
+                if result.is_ok() {
+                    if let Some(channel) = volume_channel(&param) {
+                        self.user_moved(channel);
+                    }
+                }
+                match result {
                     Ok(Some(effective)) => {
                         self.forward(effective);
                         self.emit(
@@ -620,9 +844,14 @@ impl Engine {
                 }
             }
             DeviceEvent::Synced(params) => {
+                self.synced = true;
                 for p in &params {
-                    if let Err(e) = self.state.apply(p) {
-                        tracing::warn!(error = %e, ?p, "hardware param rejected during sync");
+                    match self.state.apply(p) {
+                        Ok(Some(eff)) => self.hardware_moved(&eff),
+                        Ok(None) => {}
+                        Err(e) => {
+                            tracing::warn!(error = %e, ?p, "hardware param rejected during sync");
+                        }
                     }
                 }
                 self.emit(origin, Target::All, self.snapshot());
@@ -639,6 +868,9 @@ impl Engine {
                         }
                     })
                     .collect();
+                for p in &effective {
+                    self.hardware_moved(p);
+                }
                 if !effective.is_empty() {
                     self.emit(
                         origin,
@@ -663,6 +895,9 @@ impl Engine {
             DeviceEvent::Status(connection) => {
                 if self.session.connection != connection {
                     self.session.connection = connection;
+                    if connection != ConnectionStatus::Online {
+                        self.link_lost();
+                    }
                     self.emit(origin, Target::All, ServerEvent::Status { connection });
                     // Link lost (reconnecting) or demo mode: the patch read
                     // from the previous session may not describe the next
@@ -691,6 +926,23 @@ impl Engine {
     }
 }
 
+/// Sleep until `deadline` (never, when there is none).
+async fn wait_until(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(d) => tokio::time::sleep_until(d).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// The power channel a volume param belongs to.
+fn volume_channel(param: &Param) -> Option<PowerChannel> {
+    match param {
+        Param::MainVol { .. } => Some(PowerChannel::Main),
+        Param::PhonesVol { .. } => Some(PowerChannel::Phones),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -709,11 +961,7 @@ mod tests {
 
     async fn setup(tag: &str) -> (EngineHandle, DeviceLink, PathBuf) {
         let dir = tmp(tag);
-        let cfg = EngineConfig {
-            topology: Topology::default(),
-            presets_dir: dir.join("presets"),
-            labels_file: dir.join("labels.json"),
-        };
+        let cfg = EngineConfig::for_dir(Topology::default(), &dir);
         let (h, l, _task) = start(cfg).await;
         (h, l, dir)
     }
@@ -1070,8 +1318,8 @@ mod tests {
         );
 
         let init = h.initial_events().await.unwrap();
-        // Snapshot, labels, presets, room-test state.
-        assert_eq!(init.len(), 4);
+        // Snapshot, labels, presets, room-test state, power, speaker plug.
+        assert_eq!(init.len(), 6);
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
@@ -1096,9 +1344,9 @@ mod tests {
             .await
             .unwrap();
         let init = h.initial_events().await.unwrap();
-        assert_eq!(init.len(), 5);
+        assert_eq!(init.len(), 7);
         assert_eq!(
-            init[4],
+            init[6],
             ServerEvent::Patch {
                 sources: table.clone()
             }

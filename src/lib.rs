@@ -10,6 +10,8 @@
 //! - [`web`]     — JSON WebSocket contract and the Axum server.
 //! - [`engine`]  — actor owning `MotuState`; command/event bus between all sides.
 //! - [`measure`] — room test: noise from the user's MPD, mixer snapshot/restore.
+//! - [`power`]   — server-side Monitor/Phones on/off: fade curve and remembered level.
+//! - [`plug`]    — speaker plug: URLs, fence, hand-written HTTP GET.
 //! - [`presets`] — preset and `labels.json` persistence.
 //! - [`zeroconf`] — mDNS announcement of the web UI.
 
@@ -22,6 +24,8 @@ pub mod engine;
 pub mod measure;
 pub mod motu;
 pub mod osc;
+pub mod plug;
+pub mod power;
 pub mod presets;
 pub mod state;
 pub mod web;

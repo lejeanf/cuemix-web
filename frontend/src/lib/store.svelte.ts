@@ -2,7 +2,7 @@
 // edits with a per-parameter 25 ms send throttle.
 import { meterBank } from './meters';
 import { hasMk5Meters, mk5MeterLevels } from './meterMap';
-import type { ChannelLabel, Command, DeviceInfo, EqBand, MeasureInfo, Param, ServerEvent } from './protocol';
+import type { ChannelLabel, Command, DeviceInfo, EqBand, MeasureInfo, Param, PowerChannel, ServerEvent, SpeakerPlugSettings } from './protocol';
 import { DSP_LIMITS } from './protocol';
 import { applyEvent, applyParam, initialClientState, type ClientState } from './reducer';
 import { ParamSender } from './sender';
@@ -85,6 +85,8 @@ class Store {
   }
   /** Room measurement state from the server (`unavailable` until it says otherwise). */
   measure: MeasureInfo = $state({ state: 'unavailable', source: [] });
+  /** The speaker plug settings panel is open. */
+  plugOpen = $state(false);
   /** The room test panel is open. */
   roomOpen = $state(false);
   /** Main output EQ bands (slot 0) from before the last applied room correction, for Undo. */
@@ -335,7 +337,7 @@ class Store {
       return;
     }
     applyEvent(this.c, ev);
-    if (ev.event === 'error') {
+    if (ev.event === 'error' || ev.event === 'notice') {
       const id = this.c.toastSeq;
       setTimeout(() => this.dismissToast(id), 5000);
     }
@@ -393,6 +395,19 @@ class Store {
   }
   listPresets(): void {
     this.sendRaw({ cmd: 'list_presets' });
+  }
+  /** Switch Monitor or Phones on/off; the server fades and reports back with a `power` event. */
+  power(channel: PowerChannel, on: boolean): void {
+    if (!this.ready) return;
+    this.sendRaw({ cmd: 'power', channel, on });
+  }
+  setSpeakerPlug(settings: SpeakerPlugSettings): boolean {
+    return this.sendRaw({ cmd: 'set_speaker_plug', settings });
+  }
+  /** Fires the plug's On or Off URL from the *saved* settings. */
+  testSpeakerPlug(on: boolean): boolean {
+    this.c.plugResult = null;
+    return this.sendRaw({ cmd: 'test_speaker_plug', on });
   }
   setLabel(ch: number, label: ChannelLabel | null): void {
     if (label) this.c.labels.channels[String(ch)] = label;

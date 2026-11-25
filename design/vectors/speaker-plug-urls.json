@@ -1,0 +1,31 @@
+{
+  "comment": "Speaker plug URL vectors, shared by cargo test and vitest (docs/IOS-PLAN.md section 5.2b). Hosts are documentation addresses only.",
+  "valid": [
+    { "kind": "shelly_rpc", "host": "192.0.2.10", "switch_id": 0, "on": "http://192.0.2.10/rpc/Switch.Set?id=0&on=true", "off": "http://192.0.2.10/rpc/Switch.Set?id=0&on=false" },
+    { "kind": "shelly_rpc", "host": "plug.example:8080", "switch_id": 2, "on": "http://plug.example:8080/rpc/Switch.Set?id=2&on=true", "off": "http://plug.example:8080/rpc/Switch.Set?id=2&on=false" },
+    { "kind": "shelly_gen1", "host": "192.0.2.11", "switch_id": 0, "on": "http://192.0.2.11/relay/0?turn=on", "off": "http://192.0.2.11/relay/0?turn=off" },
+    { "kind": "tasmota", "host": "192.0.2.12", "switch_id": 0, "on": "http://192.0.2.12/cm?cmnd=Power%20On", "off": "http://192.0.2.12/cm?cmnd=Power%20Off" },
+    { "kind": "tasmota", "host": "192.0.2.12", "switch_id": 1, "on": "http://192.0.2.12/cm?cmnd=Power2%20On", "off": "http://192.0.2.12/cm?cmnd=Power2%20Off" },
+    { "kind": "shelly_rpc", "host": "[2001:db8::1]", "switch_id": 0, "on": "http://[2001:db8::1]/rpc/Switch.Set?id=0&on=true", "off": "http://[2001:db8::1]/rpc/Switch.Set?id=0&on=false" },
+    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/on", "off_url": "http://192.0.2.13/off", "on": "http://192.0.2.13/on", "off": "http://192.0.2.13/off" }
+  ],
+  "invalid": [
+    { "kind": "shelly_rpc", "host": "", "switch_id": 0, "why": "empty host" },
+    { "kind": "shelly_rpc", "host": "http://192.0.2.10", "switch_id": 0, "why": "scheme in host" },
+    { "kind": "shelly_rpc", "host": "192.0.2.10/rpc", "switch_id": 0, "why": "path in host" },
+    { "kind": "shelly_rpc", "host": "user@192.0.2.10", "switch_id": 0, "why": "userinfo" },
+    { "kind": "shelly_rpc", "host": "192.0.2.10 ", "switch_id": 0, "why": "space" },
+    { "kind": "shelly_rpc", "host": "192.0.2.10", "switch_id": 16, "why": "switch id above 15" },
+    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "https://192.0.2.13/on", "off_url": "http://192.0.2.13/off", "why": "custom must be http://" },
+    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "", "off_url": "http://192.0.2.13/off", "why": "empty custom url" },
+    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://user:pw@192.0.2.13/on", "off_url": "http://192.0.2.13/off", "why": "login in custom url" },
+    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/on", "off_url": "http://192.0.2.13/off#frag", "why": "fragment in custom url" },
+    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://[zz/on", "off_url": "http://192.0.2.13/off", "why": "bad authority" },
+    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13:0/on", "off_url": "http://192.0.2.13/off", "why": "port 0" },
+    { "kind": "shelly_rpc", "host": "192.0.2.10:0", "switch_id": 0, "why": "port 0 in host" },
+    { "kind": "shelly_rpc", "host": "192.0.2.10:65536", "switch_id": 0, "why": "port above 65535" },
+    { "kind": "shelly_rpc", "host": "192.0.2.10\r\nX-Evil: 1", "switch_id": 0, "why": "CR/LF in host" },
+    { "kind": "shelly_rpc", "host": "192.0.2.10\n", "switch_id": 0, "why": "LF in host" },
+    { "kind": "shelly_rpc", "host": "2001:db8::1", "switch_id": 0, "why": "IPv6 host must be bracketed" }
+  ]
+}
