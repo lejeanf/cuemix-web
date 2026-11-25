@@ -1,6 +1,6 @@
 [package]
 name = "cuemix-web"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Standalone web & bidirectional OSC controller for the MOTU UltraLite-mk5"
@@ -22,7 +22,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Runtime
-tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs"] }
+tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs", "io-util"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 # MOTU binary WebSocket client (ws://<MOTU_IP>:1280)
 tokio-tungstenite = "0.30"
@@ -51,6 +51,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
+# Virtual clock for the fade and plug-sequence tests (tokio::time::pause).
+tokio = { version = "1.38", features = ["test-util"] }
 
 [profile.release]
 lto = "thin"

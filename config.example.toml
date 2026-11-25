@@ -39,6 +39,10 @@ offline_demo_fallback = true
 presets_dir = "/var/lib/cuemix-web/presets"
 # Path of the labels JSON file (server-side path).
 labels_file = "/var/lib/cuemix-web/labels.json"
+# Remembered Monitor / Phones levels (what "On" fades back to).
+power_file = "/var/lib/cuemix-web/power.json"
+# Speaker plug settings saved from the Advanced menu (override [speaker_plug] below).
+speaker_plug_file = "/var/lib/cuemix-web/speaker-plug.json"
 
 [web]
 # Use X-Forwarded-For (rightmost entry) for client IPs in logs. Enable only behind
@@ -59,6 +63,24 @@ channel = "stable"
 status_file = "/var/lib/cuemix-web/update-status.json"
 request_file = "/var/lib/cuemix-web/update-request"
 result_file = "/var/lib/cuemix-web/update-result"
+
+# [speaker_plug] — a smart plug that powers the speakers, switched by Monitor on/off:
+# Off fades out, then switches the plug off; On switches the plug on, waits for the
+# speakers to warm up, then fades in. Defaults shown; everything commented out = no plug.
+# The Advanced menu's "Speaker plug" entry edits and tests these and saves them to
+# speaker_plug_file, which then overrides this section. Real addresses belong there or in
+# the git-ignored config.toml, never in a committed file. Only plain http:// on the local
+# network (private, link-local or loopback addresses) is allowed.
+# [speaker_plug]
+# enabled = false
+# kind = "shelly_rpc"     # shelly_rpc (Gen2/Plus/Pro/Gen3/Gen4) | shelly_gen1 | tasmota | custom
+# host = "192.0.2.10"     # IP or name, optional :port; "" for custom
+# switch_id = 0           # 0-15 (Tasmota: Power<id+1>)
+# on_url = ""             # custom only: full http:// URLs
+# off_url = ""
+# warmup_ms = 2000        # wait after switching on, before the fade in (0-10000)
+# off_delay_ms = 300      # wait after the fade out, before switching off (0-5000)
+# timeout_ms = 2000       # per request (500-10000)
 
 [measure]
 # Room test (phone microphone): pink noise is played by your MPD / myMPD server,

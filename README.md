@@ -145,11 +145,11 @@ The embedded Svelte 5 console (dark theme) has four views, each reachable direct
 - **Output**: monitor and phones levels, mono, A/B, talkback, output trims per pair, and the output EQ (curve on the left, bands on the right, presets).
 - **Reverb**: reverb settings, sends (the Reverb mix) and returns.
 
-On a phone the UI opens in a **Simple** view: two large rotary knobs, Monitor (Main) and Phones, each with vertical meters (drag up or right for more; no double-tap reset), a Main on/off button that fades the Main volume out and back in over about a second (back to the level it had, never above it), and preset recall. **Advanced** in the header switches to the full console (which also fits phone and tablet screens); the choice is remembered per browser.
+On a phone the UI opens in a **Simple** view: two large rotary knobs, Monitor (Main) and Phones, each with vertical meters (drag up or right for more; no double-tap reset), a Main on/off button that fades the Main volume out and back in over about a second (the server runs the fade, so every device sees it, and remembers the level it goes back to, never above it), and preset recall. **Advanced** in the header switches to the full console (which also fits phone and tablet screens); the choice is remembered per browser.
 
 ### Add to the iPhone home screen
 
-Open the UI in Safari, tap **Share**, then **Add to Home Screen** (name: Cue Desk). The icon opens the UI full screen like an app, straight in the Simple view. The home-screen app has its own storage, separate from Safari: the view choice and the remembered Main on/off level start empty.
+Open the UI in Safari, tap **Share**, then **Add to Home Screen** (name: Cue Desk). The icon opens the UI full screen like an app, straight in the Simple view. The home-screen app has its own storage, separate from Safari: the view choice starts empty. The remembered Main on/off level lives on the server and is shared by every device.
 
 URL flags (never saved): `?simple` forces the Simple view for that page load; `?embed` (for a native app's web view) opens the Advanced view and hides the Simple/Advanced toggle and the connection dot, and `?embed&simple` opens Simple. When you unlock the phone or switch back to the page, it reconnects at once if the connection was lost; if it still looks connected but no message arrives within 2 seconds (online or demo), it drops that connection and reconnects.
 

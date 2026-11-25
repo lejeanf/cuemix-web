@@ -29,12 +29,8 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 
 async fn rig(tag: &str, targets: Vec<SocketAddr>) -> Rig {
     let dir = tmp(tag);
-    let (engine, link, _task) = engine::start(EngineConfig {
-        topology: Topology::default(),
-        presets_dir: dir.join("presets"),
-        labels_file: dir.join("labels.json"),
-    })
-    .await;
+    let (engine, link, _task) =
+        engine::start(EngineConfig::for_dir(Topology::default(), &dir)).await;
     let bridge = OscBridge::bind("127.0.0.1:0".parse().unwrap(), targets)
         .await
         .unwrap();
@@ -397,4 +393,67 @@ async fn l_random_datagrams_do_not_break_bridge() {
             break;
         }
     }
+}
+
+fn int_of(m: &OscMessage) -> Option<i32> {
+    match m.args.first() {
+        Some(OscType::Int(i)) => Some(*i),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn power_over_osc_fades_and_gives_feedback_and_dump() {
+    let r = rig("power", vec![]).await;
+    let (a, b) = (sock().await, sock().await);
+    // A joins: the full dump carries the on/off state of both channels (both on at start).
+    send(&a, r.bridge, msg("/controlroom/mono", OscType::Int(0))).await;
+    let dump = collect(&a, Duration::from_millis(500)).await;
+    let state =
+        |v: &[OscMessage], addr: &str| v.iter().rev().find(|m| m.addr == addr).and_then(int_of);
+    assert_eq!(state(&dump, "/mix/main/power"), Some(1), "{dump:?}");
+    assert_eq!(state(&dump, "/controlroom/phones/power"), Some(1));
+
+    // B registers too (its own dump is rate-limited: wait for it).
+    send(&b, r.bridge, msg("/controlroom/mono", OscType::Int(0))).await;
+    let _ = collect(&b, Duration::from_millis(1500)).await;
+
+    // A turns Main off: the level goes down step by step, both peers see the feedback.
+    send(&a, r.bridge, msg("/mix/main/power", OscType::Int(0))).await;
+    let got_b = collect(&b, Duration::from_millis(500)).await;
+    assert_eq!(state(&got_b, "/mix/main/power"), Some(0), "{got_b:?}");
+    assert_eq!(
+        state(&got_b, "/controlroom/phones/power"),
+        None,
+        "only what changed is sent"
+    );
+    let levels: Vec<f32> = got_b
+        .iter()
+        .filter(|m| m.addr == "/mix/main/vol")
+        .map(float_of)
+        .collect();
+    assert!(levels.len() > 5, "{levels:?}");
+    let min_pos = cuemix_web::motu::fader::trim_db_to_pos(cuemix_web::state::TRIM_MIN_DB) as f32;
+    assert_eq!(levels.last(), Some(&min_pos), "ends at the minimum");
+    assert!(levels.windows(2).all(|w| w[1] <= w[0]));
+    // The peer that asked gets the same feedback (the fade is the server's, not its own drag).
+    let got_a = collect(&a, Duration::from_millis(200)).await;
+    assert_eq!(state(&got_a, "/mix/main/power"), Some(0), "{got_a:?}");
+
+    // Phones off, then Main back on (it fades up to the 0 dB it was at).
+    send(
+        &b,
+        r.bridge,
+        msg("/controlroom/phones/power", OscType::Float(0.0)),
+    )
+    .await;
+    let got_a = collect(&a, Duration::from_millis(500)).await;
+    assert_eq!(
+        state(&got_a, "/controlroom/phones/power"),
+        Some(0),
+        "{got_a:?}"
+    );
+    send(&b, r.bridge, msg("/mix/main/power", OscType::Bool(true))).await;
+    let got_a = collect(&a, Duration::from_millis(500)).await;
+    assert_eq!(state(&got_a, "/mix/main/power"), Some(1), "{got_a:?}");
 }

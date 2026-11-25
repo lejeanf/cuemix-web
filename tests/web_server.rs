@@ -35,12 +35,8 @@ async fn harness(tag: &str) -> Result<Harness, Box<dyn std::error::Error>> {
         .duration_since(std::time::UNIX_EPOCH)?
         .as_nanos();
     let dir = std::env::temp_dir().join(format!("cuemix-web-{tag}-{}-{nanos}", std::process::id()));
-    let (handle, link, _task) = engine::start(EngineConfig {
-        topology: Topology::default(),
-        presets_dir: dir.join("presets"),
-        labels_file: dir.join("labels.json"),
-    })
-    .await;
+    let (handle, link, _task) =
+        engine::start(EngineConfig::for_dir(Topology::default(), &dir)).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     let (trigger, shutdown) = shutdown_channel();
@@ -106,7 +102,8 @@ async fn expect_silence(ws: &mut Ws) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn drain_initial(ws: &mut Ws) -> Result<(), Box<dyn std::error::Error>> {
-    for _ in 0..4 {
+    // Snapshot, labels, presets, measure, power, speaker plug.
+    for _ in 0..6 {
         next_json(ws).await?;
     }
     Ok(())
@@ -130,11 +127,27 @@ impl HttpResp {
 }
 
 async fn http_get(addr: SocketAddr, path: &str) -> Result<HttpResp, Box<dyn std::error::Error>> {
+    http_request(addr, "GET", path, &[], None).await
+}
+
+async fn http_request(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> Result<HttpResp, Box<dyn std::error::Error>> {
     let mut s = TcpStream::connect(addr).await?;
-    s.write_all(
-        format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes(),
-    )
-    .await?;
+    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n");
+    for (k, v) in headers {
+        req.push_str(&format!("{k}: {v}\r\n"));
+    }
+    if let Some(b) = body {
+        req.push_str(&format!("Content-Length: {}\r\n", b.len()));
+    }
+    req.push_str("\r\n");
+    req.push_str(body.unwrap_or_default());
+    s.write_all(req.as_bytes()).await?;
     let mut raw = Vec::new();
     tokio::time::timeout(T, s.read_to_end(&mut raw)).await??;
     let split = raw
@@ -176,6 +189,18 @@ async fn ws_connect_receives_snapshot_labels_presets_in_order(
     let m = next_json(&mut ws).await?;
     assert_eq!(m["event"], "measure");
     assert_eq!(m["state"], "unavailable", "no MPD configured here");
+    let p = next_json(&mut ws).await?;
+    assert_eq!(p["event"], "power");
+    assert_eq!(p["main"]["fading"], Value::Null);
+    assert_eq!(p["main"]["plug"], Value::Null, "no plug set up");
+    assert_eq!(p["phones"]["plug"], Value::Null);
+    let sp = next_json(&mut ws).await?;
+    assert_eq!(sp["event"], "speaker_plug");
+    assert_eq!(sp["settings"]["enabled"], false);
+    assert_eq!(sp["settings"]["kind"], "shelly_rpc");
+    assert_eq!(sp["settings"]["warmup_ms"], 2000);
+    assert_eq!(sp["urls"]["on"], "");
+    assert_eq!(sp["state"], "unknown");
     Ok(())
 }
 
@@ -293,6 +318,7 @@ async fn http_static_and_health() -> Result<(), Box<dyn std::error::Error>> {
     let v: Value = serde_json::from_slice(&health.body)?;
     assert_eq!(v["status"], "ok");
     assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(v["api"], 1, "the short HTTP API version");
 
     // Find a real asset referenced by index.html.
     let html = String::from_utf8_lossy(&root.body).to_string();
@@ -364,5 +390,272 @@ async fn ws_origin_policy() -> Result<(), Box<dyn std::error::Error>> {
         connect_with_origin(&h, Some("http://127.0.0.1/evil")).await?,
         403
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn api_summary_reports_levels_presets_and_motu_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("summary").await?;
+    let r = http_get(h.addr, "/api/v1/summary").await?;
+    assert_eq!(r.status, 200);
+    assert_eq!(r.header("cache-control").as_deref(), Some("no-store"));
+    let v: Value = serde_json::from_slice(&r.body)?;
+    assert_eq!(v["api"], 1);
+    assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+    for ch in ["main", "phones"] {
+        assert!(v[ch]["db"].is_number(), "{v}");
+        assert_eq!(v[ch]["on"], true);
+        assert_eq!(v[ch]["fading"], Value::Null);
+        assert_eq!(v[ch]["plug"], Value::Null);
+    }
+    assert_eq!(v["preset"]["active"], Value::Null);
+    assert_eq!(v["preset"]["modified"], false);
+    assert_eq!(v["presets"], serde_json::json!([]));
+    assert_eq!(v["motu"]["status"], "demo");
+    assert_eq!(v["motu"]["model"], Value::Null);
+    Ok(())
+}
+
+async fn post(
+    h: &Harness,
+    body: &str,
+    headers: &[(&str, &str)],
+) -> Result<(u16, Value), Box<dyn std::error::Error>> {
+    let r = http_request(h.addr, "POST", "/api/v1/command", headers, Some(body)).await?;
+    let v = serde_json::from_slice(&r.body).unwrap_or(Value::Null);
+    Ok((r.status, v))
+}
+
+#[tokio::test]
+async fn api_command_runs_the_allowed_commands_and_broadcasts(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("api-ok").await?;
+    let mut ws = connect(&h).await?;
+    drain_initial(&mut ws).await?;
+
+    let (status, v) = post(&h, r#"{"cmd":"set","param":"main_vol","db":-12}"#, &[]).await?;
+    assert_eq!((status, &v["ok"]), (200, &Value::Bool(true)), "{v}");
+    let ev = next_json(&mut ws).await?;
+    assert_eq!(ev["event"], "changed");
+    assert_eq!(ev["params"][0]["param"], "main_vol");
+    assert_eq!(ev["params"][0]["db"], -12.0);
+    let s: Value = serde_json::from_slice(&http_get(h.addr, "/api/v1/summary").await?.body)?;
+    assert_eq!(s["main"]["db"], -12.0);
+
+    let (status, _) = post(&h, r#"{"cmd":"set","param":"phones_vol","db":-30}"#, &[]).await?;
+    assert_eq!(status, 200);
+    assert_eq!(next_json(&mut ws).await?["event"], "changed");
+
+    // Power: the fade is visible to every client, step by step, and ends with the power event.
+    let (status, v) = post(&h, r#"{"cmd":"power","channel":"main","on":false}"#, &[]).await?;
+    assert_eq!((status, &v["ok"]), (200, &Value::Bool(true)));
+    let mut saw_fading = false;
+    let mut last_db = None;
+    loop {
+        let ev = next_json(&mut ws).await?;
+        match ev["event"].as_str() {
+            Some("changed") if ev["params"][0]["param"] == "main_vol" => {
+                last_db = ev["params"][0]["db"].as_f64();
+            }
+            Some("power") if ev["main"]["fading"] == "out" => saw_fading = true,
+            Some("power") if ev["main"]["on"] == false && ev["main"]["fading"].is_null() => break,
+            _ => {}
+        }
+    }
+    assert!(saw_fading);
+    assert_eq!(last_db, Some(-100.0));
+    Ok(())
+}
+
+#[tokio::test]
+async fn api_command_refuses_everything_else_and_reports_failures(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("api-refuse").await?;
+    for body in [
+        r#"{"cmd":"measure_start"}"#,
+        r#"{"cmd":"measure_stop"}"#,
+        r#"{"cmd":"set","param":"dim","on":true}"#,
+        r#"{"cmd":"set","param":"phantom","ch":0,"on":true}"#,
+        r#"{"cmd":"save_preset","name":"x"}"#,
+        r#"{"cmd":"list_presets"}"#,
+        r#"{"cmd":"test_speaker_plug","on":true}"#,
+        r#"{"cmd":"set_speaker_plug","settings":{}}"#,
+        r#"{"cmd":"set_label","ch":0,"label":null}"#,
+    ] {
+        let (status, v) = post(&h, body, &[]).await?;
+        assert_eq!(status, 400, "{body}");
+        assert_eq!(v["ok"], false, "{body}");
+        assert!(
+            v["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("not available")),
+            "{v}"
+        );
+    }
+    // Not even JSON, or not a command.
+    for body in [
+        "",
+        "{nope",
+        r#"{"cmd":"nope"}"#,
+        r#"{"cmd":"power","channel":"x","on":true}"#,
+    ] {
+        let (status, v) = post(&h, body, &[]).await?;
+        assert_eq!(status, 400, "{body:?}");
+        assert!(
+            v["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("invalid command")),
+            "{v}"
+        );
+    }
+    // The real outcome: an unknown preset is a 404 with the reason.
+    let (status, v) = post(&h, r#"{"cmd":"load_preset","name":"missing"}"#, &[]).await?;
+    assert_eq!(status, 404);
+    assert_eq!(v["ok"], false);
+    assert!(v["error"].is_string());
+    // An invalid name is the caller's mistake too.
+    let (status, _) = post(&h, r#"{"cmd":"load_preset","name":"../x"}"#, &[]).await?;
+    assert_eq!(status, 400);
+    // Too large.
+    let big = format!(
+        r#"{{"cmd":"load_preset","name":"{}"}}"#,
+        "a".repeat(32 * 1024)
+    );
+    let (status, _) = post(&h, &big, &[]).await?;
+    assert_eq!(status, 413);
+    Ok(())
+}
+
+#[tokio::test]
+async fn api_loads_an_existing_preset() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("api-preset").await?;
+    let mut ws = connect(&h).await?;
+    drain_initial(&mut ws).await?;
+    ws.send(Message::text(r#"{"cmd":"save_preset","name":"base"}"#))
+        .await?;
+    next_json(&mut ws).await?; // session
+    next_json(&mut ws).await?; // presets
+    let (status, v) = post(&h, r#"{"cmd":"load_preset","name":"base"}"#, &[]).await?;
+    assert_eq!((status, &v["ok"]), (200, &Value::Bool(true)), "{v}");
+    assert_eq!(next_json(&mut ws).await?["event"], "snapshot");
+    let s: Value = serde_json::from_slice(&http_get(h.addr, "/api/v1/summary").await?.body)?;
+    assert_eq!(s["preset"]["active"], "base");
+    assert_eq!(s["presets"], serde_json::json!(["base"]));
+    Ok(())
+}
+
+#[tokio::test]
+async fn api_applies_the_same_origin_rule_as_ws() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("api-origin").await?;
+    let cmd = r#"{"cmd":"set","param":"main_vol","db":-3}"#;
+    // No Origin (an app), the same origin, and a configured one: accepted.
+    for origin in [
+        None,
+        Some("http://localhost"),
+        Some("http://mixer.example.com:8443"),
+    ] {
+        let headers: Vec<(&str, &str)> = origin.map(|o| ("Origin", o)).into_iter().collect();
+        assert_eq!(post(&h, cmd, &headers).await?.0, 200, "{origin:?}");
+        let r = http_request(h.addr, "GET", "/api/v1/summary", &headers, None).await?;
+        assert_eq!(r.status, 200, "{origin:?}");
+    }
+    // A page from another site: refused, and nothing happens.
+    for origin in ["http://evil.example", "null", "https://localhost:9999"] {
+        let (status, v) = post(
+            &h,
+            r#"{"cmd":"power","channel":"main","on":false}"#,
+            &[("Origin", origin)],
+        )
+        .await?;
+        assert_eq!(status, 403, "{origin}");
+        assert_eq!(v["ok"], false);
+        let r = http_request(
+            h.addr,
+            "GET",
+            "/api/v1/summary",
+            &[("Origin", origin)],
+            None,
+        )
+        .await?;
+        assert_eq!(r.status, 403, "{origin}");
+    }
+    let s: Value = serde_json::from_slice(&http_get(h.addr, "/api/v1/summary").await?.body)?;
+    assert_eq!(
+        s["main"]["on"], true,
+        "the refused power command did nothing"
+    );
+    assert_eq!(s["main"]["db"], -3.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn ws_power_and_speaker_plug_commands() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("ws-power").await?;
+    let mut a = connect(&h).await?;
+    let mut b = connect(&h).await?;
+    drain_initial(&mut a).await?;
+    drain_initial(&mut b).await?;
+    // The sender sees the knob move too (fade steps are server changes).
+    a.send(Message::text(
+        r#"{"cmd":"power","channel":"phones","on":false}"#,
+    ))
+    .await?;
+    let mut steps_a = 0;
+    loop {
+        let ev = next_json(&mut a).await?;
+        if ev["event"] == "changed" {
+            steps_a += 1;
+        }
+        if ev["event"] == "power" && ev["phones"]["on"] == false && ev["phones"]["fading"].is_null()
+        {
+            break;
+        }
+    }
+    assert!(steps_a > 3);
+    // Settings the fence refuses come back as an error to the sender only.
+    a.send(Message::text(
+        r#"{"cmd":"set_speaker_plug","settings":{"enabled":true,"kind":"shelly_rpc","host":"8.8.8.8"}}"#,
+    ))
+    .await?;
+    loop {
+        let ev = next_json(&mut a).await?;
+        if ev["event"] == "error" {
+            assert!(
+                ev["message"]
+                    .as_str()
+                    .is_some_and(|m| m.contains("not on the local network")),
+                "{ev}"
+            );
+            break;
+        }
+    }
+    // A local one is saved and everybody gets the event with its URLs.
+    a.send(Message::text(
+        r#"{"cmd":"set_speaker_plug","settings":{"enabled":true,"kind":"tasmota","host":"127.0.0.1:9","switch_id":1}}"#,
+    ))
+    .await?;
+    loop {
+        let ev = next_json(&mut b).await?;
+        if ev["event"] == "speaker_plug" && ev["settings"]["enabled"] == true {
+            assert_eq!(ev["urls"]["on"], "http://127.0.0.1:9/cm?cmnd=Power2%20On");
+            assert_eq!(ev["state"], "unknown");
+            break;
+        }
+    }
+    // Test: nothing listens on port 9, so the answer is a clean failure, to the requester only.
+    a.send(Message::text(r#"{"cmd":"test_speaker_plug","on":true}"#))
+        .await?;
+    loop {
+        let ev = next_json(&mut a).await?;
+        if ev["event"] == "speaker_plug_result" {
+            assert_eq!(
+                (&ev["on"], &ev["ok"]),
+                (&Value::Bool(true), &Value::Bool(false))
+            );
+            assert!(ev["message"].is_string());
+            break;
+        }
+    }
     Ok(())
 }

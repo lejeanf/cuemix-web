@@ -20,6 +20,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::plug::{PlugState, PlugUrls, SpeakerPlugSettings};
+use crate::power::{ChannelPower, PowerChannel};
+
 use crate::motu::client::ConnectionStatus;
 
 /// Hardware dimensions. Values for the UltraLite-mk5 are **provisional** until
@@ -843,6 +846,20 @@ pub enum Command {
     MeasureStart,
     /// End the room test early (idempotent).
     MeasureStop,
+    /// Monitor / Phones on or off: a fade run by the engine (and, for Main, the speaker
+    /// plug when one is set up), see `crate::power`.
+    Power {
+        channel: PowerChannel,
+        on: bool,
+    },
+    /// Validate, save and broadcast the speaker plug settings.
+    SetSpeakerPlug {
+        settings: SpeakerPlugSettings,
+    },
+    /// Send one on/off request to the saved plug; answered by `SpeakerPlugResult`.
+    TestSpeakerPlug {
+        on: bool,
+    },
 }
 
 /// Everything the core broadcasts.
@@ -869,7 +886,7 @@ pub enum ServerEvent {
     Meters { levels: Vec<f32> },
     /// Raw, undecoded meter frame from the MOTU (property 6000, one byte per
     /// meter point), for the meter probe used to map the layout. Rate-limited
-    /// by the device client (~15 Hz).
+    /// by the device client (~30 Hz, `METER_RAW_INTERVAL` = 33 ms).
     MeterRaw { raw: Vec<u8> },
     /// Output patch read from the MOTU (property 5010, read-only): index =
     /// destination, value = patch-bus source point (same numbering as the
@@ -878,8 +895,32 @@ pub enum ServerEvent {
     Patch { sources: Vec<u8> },
     /// Room-test state (sent on connect and at every change).
     Measure(MeasureStatus),
+    /// On/off and fading state of Monitor and Phones (on connect and on every change; not part
+    /// of the device state, so it never touches the "Modified" flag).
+    Power {
+        main: ChannelPower,
+        phones: ChannelPower,
+    },
+    /// Speaker plug settings, the URLs they build and the last known plug state.
+    SpeakerPlug {
+        settings: SpeakerPlugSettings,
+        urls: PlugUrls,
+        state: PlugState,
+    },
+    /// Answer to `TestSpeakerPlug`, to the requesting client only.
+    SpeakerPlugResult { on: bool, ok: bool, message: String },
+    /// Something the user should know about (broadcast).
+    Notice { level: NoticeLevel, message: String },
     /// Request rejected; delivered only to the requesting client.
     Error { message: String },
+}
+
+/// Severity of a [`ServerEvent::Notice`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoticeLevel {
+    Info,
+    Warning,
 }
 
 /// Where the room test stands (`ServerEvent::Measure`).

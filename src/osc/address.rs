@@ -15,6 +15,7 @@ use rosc::{OscMessage, OscType};
 use thiserror::Error;
 
 use crate::motu::fader;
+use crate::power::{ChannelPower, PowerChannel};
 use crate::state::{ClockSource, Command, OpticalMode, Param, SampleRate, TRIM_MIN_DB};
 
 #[derive(Debug, Error, PartialEq)]
@@ -181,6 +182,18 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
         ["mix", "main", "vol"] => Param::MainVol {
             db: fader::trim_pos_to_db(arg_f64(addr, args)?, TRIM_MIN_DB),
         },
+        ["mix", "main", "power"] => {
+            return Ok(Command::Power {
+                channel: PowerChannel::Main,
+                on: arg_bool(addr, args)?,
+            })
+        }
+        ["controlroom", "phones", "power"] => {
+            return Ok(Command::Power {
+                channel: PowerChannel::Phones,
+                on: arg_bool(addr, args)?,
+            })
+        }
         ["mix", bus, "ch", ch, leaf] => {
             let (bus, ch) = (index_u8(bus, addr)?, index_u16(ch, addr)?);
             match *leaf {
@@ -368,6 +381,26 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
         _ => return Err(unknown()),
     };
     Ok(Command::Set(param))
+}
+
+/// OSC address of a channel's on/off.
+pub fn power_address(channel: PowerChannel) -> &'static str {
+    match channel {
+        PowerChannel::Main => "/mix/main/power",
+        PowerChannel::Phones => "/controlroom/phones/power",
+    }
+}
+
+/// Feedback of the on/off state: `int` 0/1, where the channel is heading (so a toggle flips
+/// when a fade starts, not when it ends).
+pub fn power_feedback(main: &ChannelPower, phones: &ChannelPower) -> Vec<OscMessage> {
+    [(PowerChannel::Main, main), (PowerChannel::Phones, phones)]
+        .into_iter()
+        .map(|(channel, p)| OscMessage {
+            addr: power_address(channel).to_owned(),
+            args: vec![OscType::Int(i32::from(p.intent()))],
+        })
+        .collect()
 }
 
 /// Encode an effective [`Param`] as OSC feedback (1-based addresses).
@@ -653,6 +686,69 @@ mod tests {
         // NaN / inf are rejected, never turned into silence.
         assert!(matches!(vol(f32::NAN), Err(OscError::ArgType(_))));
         assert!(matches!(main(f32::INFINITY), Err(OscError::ArgType(_))));
+    }
+
+    #[test]
+    fn power_addresses_parse_and_give_feedback() {
+        use crate::power::FadeDir;
+        let power = |a: &str, arg| parse(&msg(a, arg));
+        assert_eq!(
+            power("/mix/main/power", OscType::Int(1)),
+            Ok(Command::Power {
+                channel: PowerChannel::Main,
+                on: true
+            })
+        );
+        assert_eq!(
+            power("/mix/main/power", OscType::Float(0.0)),
+            Ok(Command::Power {
+                channel: PowerChannel::Main,
+                on: false
+            })
+        );
+        assert_eq!(
+            power("/controlroom/phones/power", OscType::Bool(true)),
+            Ok(Command::Power {
+                channel: PowerChannel::Phones,
+                on: true
+            })
+        );
+        assert!(matches!(
+            power("/mix/main/power", OscType::String("on".into())),
+            Err(OscError::ArgType(_))
+        ));
+        assert!(matches!(
+            parse(&OscMessage {
+                addr: "/mix/main/power".into(),
+                args: vec![]
+            }),
+            Err(OscError::Arity(_))
+        ));
+        // Feedback follows where each channel is heading, as 0/1 ints.
+        let main = ChannelPower {
+            on: true,
+            fading: Some(FadeDir::Out),
+            plug: None,
+        };
+        let phones = ChannelPower {
+            on: false,
+            fading: Some(FadeDir::In),
+            plug: None,
+        };
+        let fb = power_feedback(&main, &phones);
+        assert_eq!(fb.len(), 2);
+        assert_eq!(
+            (fb[0].addr.as_str(), fb[0].args.as_slice()),
+            ("/mix/main/power", &[OscType::Int(0)][..])
+        );
+        assert_eq!(
+            (fb[1].addr.as_str(), fb[1].args.as_slice()),
+            ("/controlroom/phones/power", &[OscType::Int(1)][..])
+        );
+        // What is sent can be parsed back by the same table.
+        for m in &fb {
+            assert!(matches!(parse(m), Ok(Command::Power { .. })));
+        }
     }
 
     #[test]

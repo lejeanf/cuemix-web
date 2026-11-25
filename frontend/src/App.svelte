@@ -12,6 +12,7 @@
   import Probe from './components/Probe.svelte';
   import Remote from './components/Remote.svelte';
   import RoomTest from './components/RoomTest.svelte';
+  import SpeakerPlug from './components/SpeakerPlug.svelte';
 
   onMount(() => {
     store.start();
@@ -71,9 +72,13 @@
     <RoomTest />
   {/if}
 
+  {#if store.plugOpen}
+    <SpeakerPlug />
+  {/if}
+
   <div class="toasts" aria-live="polite">
     {#each store.c.toasts as t (t.id)}
-      <button class="toast" onclick={() => store.dismissToast(t.id)}>{t.message}</button>
+      <button class="toast" class:warning={t.level === 'warning'} class:info={t.level === 'info'} onclick={() => store.dismissToast(t.id)}>{t.message}</button>
     {/each}
   </div>
 </div>
@@ -139,5 +144,15 @@
     border: 1px solid var(--red);
     border-radius: var(--radius);
     cursor: pointer;
+  }
+  .toast.warning {
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    border-color: var(--amber);
+  }
+  .toast.info {
+    background: var(--card);
+    color: var(--text);
+    border-color: var(--border);
   }
 </style>

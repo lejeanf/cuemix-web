@@ -10,7 +10,9 @@
   let { children }: { children?: Snippet } = $props();
 
   let root: HTMLElement;
-  let open = $state<'' | 'presets' | 'clock'>('');
+  let moreBtn = $state<HTMLButtonElement>();
+  let menuEl = $state<HTMLElement>();
+  let open = $state<'' | 'presets' | 'clock' | 'menu'>('');
   let newName = $state('');
 
   const session = $derived(store.c.session);
@@ -33,15 +35,19 @@
   }
   $effect(() => () => clearTimeout(statusTimer));
 
-  function toggle(which: 'presets' | 'clock') {
+  function toggle(which: 'presets' | 'clock' | 'menu') {
     open = open === which ? '' : which;
+    if (open === 'menu') queueMicrotask(() => menuEl?.querySelector<HTMLElement>('[role=menuitem]')?.focus());
     if (open === 'presets') store.listPresets();
   }
   function outside(e: PointerEvent) {
     if (open && root && !root.contains(e.target as Node)) open = '';
   }
   function key(e: KeyboardEvent) {
-    if (e.key === 'Escape') open = '';
+    if (e.key === 'Escape') {
+      if (open === 'menu') moreBtn?.focus();
+      open = '';
+    }
   }
   function setRate(rate: SampleRate) {
     store.set({ param: 'sample_rate', rate }, true);
@@ -157,6 +163,15 @@
       </div>
     {/if}
   </div>
+  <div class="pw">
+    <button class="btn more" data-more-menu bind:this={moreBtn} aria-haspopup="menu" aria-expanded={open === 'menu'} aria-label={S.menu} title={S.menu} onclick={() => toggle('menu')}>⋯</button>
+    {#if open === 'menu'}
+      <!-- More items go here as further <button role="menuitem"> entries. -->
+      <div class="pop menu" role="menu" aria-label={S.menu} bind:this={menuEl}>
+        <button class="item" role="menuitem" onclick={() => { open = ''; store.plugOpen = true; }}>{S.plugMenuItem}</button>
+      </div>
+    {/if}
+  </div>
   {/if}
 
   {#if !store.embed}
@@ -214,6 +229,31 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     cursor: pointer;
+  }
+  .btn.more {
+    min-width: 34px;
+    padding: 0 8px;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .pop.menu {
+    min-width: 160px;
+    padding: 4px;
+    gap: 2px;
+  }
+  .item {
+    min-height: 44px;
+    padding: 0 10px;
+    text-align: left;
+    background: none;
+    border: 0;
+    border-radius: 4px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .item:hover,
+  .item:focus-visible {
+    background: var(--bg-alt);
   }
   .btn.sm {
     min-height: 30px;

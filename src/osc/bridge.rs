@@ -18,6 +18,7 @@ use tokio::time::Instant;
 
 use crate::engine::{EngineHandle, Envelope, Origin, Shutdown};
 use crate::osc::address;
+use crate::power::ChannelPower;
 use crate::state::{Param, ServerEvent};
 
 /// Largest UDP datagram we accept.
@@ -151,6 +152,8 @@ struct Link {
     peers: Peers,
     dumps: DumpQueue,
     enrol: EnrolLimiter,
+    /// Last Monitor / Phones on/off state seen (feedback is sent for what changed from it).
+    power: Option<(ChannelPower, ChannelPower)>,
 }
 
 #[derive(Debug)]
@@ -181,6 +184,9 @@ impl OscBridge {
         // Subscribe before anything else so no event is missed.
         let mut events = engine.subscribe();
         let mut link = Link::default();
+        if let Ok(initial) = engine.initial_events().await {
+            link.power = initial.iter().find_map(power_of);
+        }
         let mut buf = vec![0u8; MAX_PACKET];
         let mut tick = tokio::time::interval(Duration::from_secs(30));
         tracing::info!(addr = ?self.socket.local_addr().ok(), "OSC bridge listening");
@@ -202,10 +208,11 @@ impl OscBridge {
                     }
                 },
                 ev = events.recv() => match ev {
-                    Ok(env) => self.on_event(env, &link.peers).await,
+                    Ok(env) => self.on_event(env, &link.peers, &mut link.power).await,
                     Err(RecvError::Lagged(n)) => {
                         tracing::debug!(skipped = n, "OSC bridge lagged, resyncing");
-                        if let Some(dump) = Self::dump(&engine).await {
+                        if let Some((dump, power)) = Self::dump(&engine).await {
+                            link.power = power.or(link.power);
                             for to in self.recipients(&link.peers, None) {
                                 self.send_all(&dump, to).await;
                             }
@@ -216,7 +223,8 @@ impl OscBridge {
                 () = wait_until(link.dumps.deadline()) => {
                     let now = Instant::now();
                     if let Some(to) = link.dumps.next_due(now, &link.peers) {
-                        if let Some(dump) = Self::dump(&engine).await {
+                        if let Some((dump, power)) = Self::dump(&engine).await {
+                            link.power = power.or(link.power);
                             self.send_all(&dump, to).await;
                         }
                     }
@@ -273,7 +281,8 @@ impl OscBridge {
             false
         };
         if enrolled && (sync || !known) && link.dumps.request(peer, now) {
-            if let Some(dump) = Self::dump(engine).await {
+            if let Some((dump, power)) = Self::dump(engine).await {
+                link.power = power.or(link.power);
                 self.send_all(&dump, peer).await;
             }
         }
@@ -285,7 +294,12 @@ impl OscBridge {
         true
     }
 
-    async fn on_event(&self, env: Envelope, peers: &Peers) {
+    async fn on_event(
+        &self,
+        env: Envelope,
+        peers: &Peers,
+        power: &mut Option<(ChannelPower, ChannelPower)>,
+    ) {
         let origin_peer = match env.origin {
             Origin::Osc(a) => Some(a),
             _ => None,
@@ -299,9 +313,32 @@ impl OscBridge {
                 }
             }
             ServerEvent::Snapshot { state, .. } => {
-                let datagrams = dump_datagrams(&state.all_params());
+                let datagrams = dump_datagrams(&state.all_params(), power.as_ref());
                 for to in self.recipients(peers, None) {
                     self.send_all(&datagrams, to).await;
+                }
+            }
+            ServerEvent::Power { main, phones } => {
+                let now = (main, phones);
+                let all = address::power_feedback(&main, &phones);
+                // Only the channels whose on/off changed (all of them the first time).
+                let msgs: Vec<OscMessage> = all
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(i, _)| {
+                        power.is_none_or(|(m, p)| {
+                            let (before, after) = if *i == 0 { (m, main) } else { (p, phones) };
+                            before.intent() != after.intent()
+                        })
+                    })
+                    .map(|(_, m)| m)
+                    .collect();
+                *power = Some(now);
+                if !msgs.is_empty() {
+                    let datagrams = encode_chunks(&msgs);
+                    for to in self.recipients(peers, None) {
+                        self.send_all(&datagrams, to).await;
+                    }
                 }
             }
             ServerEvent::Error { message } if origin_peer.is_some() => {
@@ -332,17 +369,35 @@ impl OscBridge {
     }
 
     /// Full state dump as ready-to-send datagrams.
-    async fn dump(engine: &EngineHandle) -> Option<Vec<Vec<u8>>> {
+    async fn dump(engine: &EngineHandle) -> Option<DumpData> {
         let events = engine.initial_events().await.ok()?;
+        let power = events.iter().find_map(power_of);
         events.into_iter().find_map(|e| match e {
-            ServerEvent::Snapshot { state, .. } => Some(dump_datagrams(&state.all_params())),
+            ServerEvent::Snapshot { state, .. } => {
+                Some((dump_datagrams(&state.all_params(), power.as_ref()), power))
+            }
             _ => None,
         })
     }
 }
 
-fn dump_datagrams(params: &[Param]) -> Vec<Vec<u8>> {
-    let msgs: Vec<OscMessage> = params.iter().filter_map(address::feedback).collect();
+/// A full dump and the on/off state it carried (the bridge's feedback baseline).
+type DumpData = (Vec<Vec<u8>>, Option<(ChannelPower, ChannelPower)>);
+
+/// The on/off state carried by a `Power` event.
+fn power_of(event: &ServerEvent) -> Option<(ChannelPower, ChannelPower)> {
+    match event {
+        ServerEvent::Power { main, phones } => Some((*main, *phones)),
+        _ => None,
+    }
+}
+
+/// A full dump: every addressable param, then the Monitor / Phones on/off state.
+fn dump_datagrams(params: &[Param], power: Option<&(ChannelPower, ChannelPower)>) -> Vec<Vec<u8>> {
+    let mut msgs: Vec<OscMessage> = params.iter().filter_map(address::feedback).collect();
+    if let Some((main, phones)) = power {
+        msgs.extend(address::power_feedback(main, phones));
+    }
     encode_chunks(&msgs)
 }
 
@@ -484,7 +539,7 @@ mod tests {
     #[test]
     fn chunks_respect_datagram_limit() {
         let params = crate::state::MotuState::default().all_params();
-        let dgrams = dump_datagrams(&params);
+        let dgrams = dump_datagrams(&params, None);
         assert!(dgrams.len() > 1);
         assert!(dgrams.iter().all(|d| d.len() <= MAX_DATAGRAM));
         let mut n = 0;

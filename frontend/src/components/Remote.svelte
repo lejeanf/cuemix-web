@@ -1,12 +1,10 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
   import { store } from '../lib/store.svelte';
   import { S } from '../lib/strings';
   import { TRIM_MIN_DB } from '../lib/protocol';
   import { formatDb } from '../lib/fader';
   import { METER_SLOT } from '../lib/meterMap';
-  import { FADE_STORAGE_KEY, PHONES_STORAGE_KEY } from '../lib/fade';
-  import { ChannelFade } from '../lib/channelFade.svelte';
+  import { powerView, type PowerView } from '../lib/power';
   import Knob from './Knob.svelte';
   import Meter from './Meter.svelte';
 
@@ -37,32 +35,15 @@
   const setVol = (which: 'main_vol' | 'phones_vol', v: number, final: boolean) =>
     store.set({ param: which, db: Math.round(v) }, final);
 
-  // On/off per channel: one controller each (fade, remembered level, abort rules).
-  const mainFade = new ChannelFade({
-    key: FADE_STORAGE_KEY,
-    read: () => store.state?.main.db,
-    write: (v, f) => setVol('main_vol', v, f),
-    ready: () => store.ready,
-    cancel: () => store.cancelPending({ param: 'main_vol', db: 0 }),
-  });
-  const phonesFade = new ChannelFade({
-    key: PHONES_STORAGE_KEY,
-    read: () => store.state?.control_room.phones_db,
-    write: (v, f) => setVol('phones_vol', v, f),
-    ready: () => store.ready,
-    cancel: () => store.cancelPending({ param: 'phones_vol', db: 0 }),
-  });
-  const powerLabel = (f: ChannelFade) =>
-    f.fading === 'out' ? S.fadingOut : f.fading === 'in' ? S.fadingIn : f.on ? S.powerOn : S.powerOff;
+  // On/off per channel: the server fades and remembers the level; we show what it reports.
+  const mainPower = $derived(powerView(store.c.power, 'main', main));
+  const phonesPower = $derived(powerView(store.c.power, 'phones', phones));
+  const powerLabel = (v: PowerView) =>
+    v.fading === 'out' ? S.fadingOut : v.plug === 'warming' ? S.plug.warmingUp : v.fading === 'in' ? S.fadingIn : v.on ? S.powerOn : S.powerOff;
 
   // The whole card is the drag surface of its knob.
   let mainCard = $state<HTMLElement | null>(null);
   let phonesCard = $state<HTMLElement | null>(null);
-
-  onDestroy(() => {
-    mainFade.stop();
-    phonesFade.stop();
-  });
 
   $effect(() => {
     if (store.ready) store.listPresets();
@@ -70,16 +51,16 @@
 </script>
 
 
-{#snippet power(fade: ChannelFade, kind: 'monitor' | 'phones')}
+{#snippet power(v: PowerView, kind: 'monitor' | 'phones')}
   <button
     class="power"
-    class:on={fade.on}
-    class:busy={fade.fading !== null}
-    aria-pressed={fade.on}
-    aria-label={kind === 'monitor' ? S.monitorPower : S.phonesPower}
-    aria-busy={fade.fading !== null}
+    class:on={v.on}
+    class:busy={v.fading !== null}
+    aria-pressed={v.on}
+    aria-label={kind === 'monitor' ? (v.plug ? `${S.monitorPower}, ${S.plugState[v.plug]}` : S.monitorPower) : S.phonesPower}
+    aria-busy={v.fading !== null}
     disabled={off}
-    onclick={() => fade.toggle()}
+    onclick={() => store.power(kind === 'monitor' ? 'main' : 'phones', !v.on)}
   >
     <svg viewBox="0 0 24 24" aria-hidden="true">
       {#if kind === 'monitor'}
@@ -92,7 +73,10 @@
         <rect x="17" y="14" width="4" height="7" rx="1.5" />
       {/if}
     </svg>
-    <span>{powerLabel(fade)}</span>
+    <span>{powerLabel(v)}</span>
+    {#if v.plug}
+      <span class="plug {v.plug}" role="img" aria-label={S.plugState[v.plug]} title={S.plugState[v.plug]}></span>
+    {/if}
   </button>
 {/snippet}
 
@@ -112,15 +96,14 @@
           format={dbText}
           disabled={off}
           surface={mainCard}
-          onstart={mainFade.stop}
-          onchange={(v, f) => mainFade.user(v, f)}
+          onchange={(v, f) => setVol('main_vol', v, f)}
         />
         <div class="km" style:height="{size}px" aria-hidden="true">
           <Meter index={METER_SLOT.output(0)} label="Main L meter" />
           <Meter index={METER_SLOT.output(1)} label="Main R meter" />
         </div>
       </div>
-      {@render power(mainFade, 'monitor')}
+      {@render power(mainPower, 'monitor')}
     </section>
     <section class="card" aria-label="{S.phones} volume" bind:this={phonesCard}>
       <div class="blk">
@@ -136,15 +119,14 @@
           format={dbText}
           disabled={off}
           surface={phonesCard}
-          onstart={phonesFade.stop}
-          onchange={(v, f) => phonesFade.user(v, f)}
+          onchange={(v, f) => setVol('phones_vol', v, f)}
         />
         <div class="km" style:height="{size}px" aria-hidden="true">
           <Meter index={METER_SLOT.output(10)} label="Phones L meter" />
           <Meter index={METER_SLOT.output(11)} label="Phones R meter" />
         </div>
       </div>
-      {@render power(phonesFade, 'phones')}
+      {@render power(phonesPower, 'phones')}
     </section>
   </div>
 
@@ -257,6 +239,46 @@
   }
   .power.busy {
     opacity: 0.85;
+  }
+  .power {
+    position: relative;
+  }
+  /* Speaker plug state: a small dot in the corner of the Monitor button. */
+  .plug {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1px solid var(--text-dim);
+    box-sizing: border-box;
+  }
+  .plug.on {
+    background: var(--meter-green);
+    border-color: var(--meter-green);
+  }
+  .plug.warming {
+    background: var(--amber);
+    border-color: var(--amber);
+    animation: plugpulse 0.9s ease-in-out infinite alternate;
+  }
+  .plug.error {
+    background: var(--red);
+    border-color: var(--red);
+  }
+  .plug.unknown {
+    border-style: dotted;
+  }
+  @keyframes plugpulse {
+    to {
+      opacity: 0.25;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .plug.warming {
+      animation: none;
+    }
   }
   .preset {
     display: flex;

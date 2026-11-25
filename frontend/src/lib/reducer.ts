@@ -1,11 +1,20 @@
 // Client reducer: applies server events (and optimistic local edits) to the
 // client state. It mutates `s` in place (so Svelte's deep $state proxy keeps
 // fine-grained reactivity) and returns it.
-import type { EqBand, Labels, MotuState, Param, ServerEvent, SessionInfo } from './protocol';
+import type { EqBand, Labels, MotuState, Param, PlugResult, PlugState, PowerInfo, ServerEvent, SessionInfo, SpeakerPlugSettings } from './protocol';
 
 export interface Toast {
   id: number;
   message: string;
+  /** Absent = error. */
+  level?: 'warning' | 'info';
+}
+
+/** The speaker plug as the server last reported it. */
+export interface PlugInfo {
+  settings: SpeakerPlugSettings;
+  urls: { on: string; off: string };
+  state: PlugState;
 }
 
 export interface ClientState {
@@ -16,6 +25,13 @@ export interface ClientState {
   meters: number[];
   toasts: Toast[];
   toastSeq: number;
+  /** On/off and fade state of Monitor and Phones (null until the server sends it). */
+  power: PowerInfo | null;
+  plug: PlugInfo | null;
+  /** Last answer to a plug test, for the settings panel. */
+  plugResult: PlugResult | null;
+  /** Last `error` event, so a panel can show the reply to its own command inline. */
+  lastError: { seq: number; message: string } | null;
 }
 
 export function initialClientState(): ClientState {
@@ -27,6 +43,10 @@ export function initialClientState(): ClientState {
     meters: [],
     toasts: [],
     toastSeq: 0,
+    power: null,
+    plug: null,
+    plugResult: null,
+    lastError: null,
   };
 }
 
@@ -264,6 +284,19 @@ export function applyEvent(s: ClientState, ev: ServerEvent): ClientState {
       break;
     case 'error':
       s.toasts.push({ id: ++s.toastSeq, message: ev.message });
+      s.lastError = { seq: s.toastSeq, message: ev.message };
+      break;
+    case 'power':
+      s.power = { main: { ...ev.main }, phones: { ...ev.phones } };
+      break;
+    case 'speaker_plug':
+      s.plug = { settings: { ...ev.settings }, urls: { ...ev.urls }, state: ev.state };
+      break;
+    case 'speaker_plug_result':
+      s.plugResult = { on: ev.on, ok: ev.ok, message: ev.message };
+      break;
+    case 'notice':
+      s.toasts.push({ id: ++s.toastSeq, message: ev.message, level: ev.level });
       break;
   }
   return s;

@@ -116,7 +116,7 @@ Partiellement observé (dump de connexion d'un UltraLite-mk5, firmware 2.0.8, mu
 
 Vérifié au probe : souffle de Mic 1 / Mic 2 (37/50/80/90, 32/40?/51/81/91), entrée optique (24-31), Line 7-8 câblées (33-34, 60-61, 86-87), Main (46-47). Les points 78-79 suivent le mix Main mais ne sont pas identifiés.
 
-Pour vérifier une autre carte, cuemix-web transmet la trame brute (`ServerEvent::MeterRaw`, ≈ 15/s) à la vue de diagnostic **Meter probe** (`/?probe`) : on règle une référence en silence, on joue un signal sur une entrée/sortie connue, la vue surligne les points qui ont bougé et copie un instantané JSON. `ServerEvent::Meters` (niveaux linéaires par point) reste vide tant que la table n'est pas établie.
+Pour vérifier une autre carte, cuemix-web transmet la trame brute (`ServerEvent::MeterRaw`, ≈ 30/s) à la vue de diagnostic **Meter probe** (`/?probe`) : on règle une référence en silence, on joue un signal sur une entrée/sortie connue, la vue surligne les points qui ont bougé et copie un instantané JSON. `ServerEvent::Meters` (niveaux linéaires par point) reste vide tant que la table n'est pas établie.
 
 ## Inconnus à lever sur matériel
 

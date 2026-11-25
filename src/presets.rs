@@ -149,7 +149,7 @@ pub async fn save_labels(path: &Path, labels: &Labels) -> Result<()> {
 }
 
 /// Write to `<path>.tmp` then rename, so a crash never leaves a half file.
-async fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) async fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     use tokio::io::AsyncWriteExt;
     let tmp = path.with_extension("json.tmp");
     let mut file = tokio::fs::File::create(&tmp)
