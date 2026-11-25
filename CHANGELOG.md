@@ -12,6 +12,10 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+On/off moves to the server, and Monitor can switch a speaker plug.
+
 ### Added
 - **Speaker plug.** Monitor (Main) on/off can switch a smart plug that powers the
   speakers, in a safe order: **Off** fades out, waits 0.3 s, then switches the
