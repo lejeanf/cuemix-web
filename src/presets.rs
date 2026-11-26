@@ -151,7 +151,17 @@ pub async fn save_labels(path: &Path, labels: &Labels) -> Result<()> {
 /// Write to `<path>.tmp` then rename, so a crash never leaves a half file.
 pub(crate) async fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     use tokio::io::AsyncWriteExt;
-    let tmp = path.with_extension("json.tmp");
+    // A name of its own per call: two writers of the same file never share a temporary one.
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!(
+        ".{name}.{}.{}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let mut file = tokio::fs::File::create(&tmp)
         .await
         .with_context(|| format!("cannot create {}", tmp.display()))?;

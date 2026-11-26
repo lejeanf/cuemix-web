@@ -12,6 +12,8 @@ deploy/proxmox.env
 data/labels.json
 data/power.json
 data/speaker-plug.json
+data/osc.json
+data/update-prefs.json
 data/presets/*.json
 !data/presets/default.json
 

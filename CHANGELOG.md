@@ -12,6 +12,46 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-26
+
+OSC and version settings in the Advanced menu, and open tabs follow updates.
+
+### Added
+- **⋯ → OSC…**: edit the controllers that receive OSC feedback (up to 8,
+  e.g. TouchOSC on a tablet) and the server's OSC listen address and port.
+  Changes apply live; a listen address that does not work keeps the old one
+  and shows the error. Controllers must be on the home network. A controller
+  name that does not resolve at start-up (device asleep) is retried every
+  minute. Saved in `osc.json`, which overrides `[network]` in `config.toml`.
+- **⋯ → Version…**: the published releases, with Install on each one.
+  Installing an older release asks first (settings added later, like the
+  speaker plug, stop working until you update again); nothing older than
+  v0.5.0 is offered. A **Show pre-releases** switch decides what the UI
+  offers and what the update notice announces. Installs keep the same checks
+  (sha256, health check, automatic rollback); one install request per 30 s.
+- An open tab reloads itself once when the server runs a different version
+  (never while a settings panel is open), so the page always matches the
+  server.
+
+### Changed
+- Updates: the root updater writes its files through a root-only directory
+  (`/var/lib/cuemix-update`) and treats the web's install request as
+  untrusted input (64 bytes, strict tag check, no symlinks or FIFOs). The
+  web's pre-release switch never changes what a shell `cuemix-update` run
+  installs.
+- The ⋯ menu, Speaker plug panel and the new panels share one dialog:
+  Escape and a click outside no longer discard unsaved edits; the rest of
+  the page is inert while a panel is open.
+
+### Compatibility
+- No change to presets. New optional `[storage]` keys `osc_file` and
+  `update_prefs_file` (defaults in `/var/lib/cuemix-web/`).
+- **Per-version install needs the new root updater once.** The in-app
+  updater only replaces the program. On Proxmox, run
+  `sudo deploy/proxmox-setup.sh --update` on the host from a 0.7.0 checkout
+  (or plain Linux: `sudo deploy/linux-setup.sh --refresh-updater`). Until
+  then the Version panel offers only "Install latest" and says why.
+
 ## [0.6.0] - 2026-11-25
 
 On/off moves to the server, and Monitor can switch a speaker plug.

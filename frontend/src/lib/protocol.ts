@@ -227,7 +227,8 @@ export type Command =
   | { cmd: 'measure_stop' }
   | { cmd: 'power'; channel: PowerChannel; on: boolean }
   | { cmd: 'set_speaker_plug'; settings: SpeakerPlugSettings }
-  | { cmd: 'test_speaker_plug'; on: boolean };
+  | { cmd: 'test_speaker_plug'; on: boolean }
+  | { cmd: 'set_osc_settings'; settings: OscSettings };
 
 /** Server → client. On connect: `snapshot`, then `labels`, then `presets`. */
 export type ServerEvent =
@@ -247,6 +248,7 @@ export type ServerEvent =
   | ({ event: 'power' } & PowerInfo)
   | { event: 'speaker_plug'; settings: SpeakerPlugSettings; urls: { on: string; off: string }; state: PlugState }
   | { event: 'speaker_plug_result'; on: boolean; ok: boolean; message: string }
+  | { event: 'osc_settings'; settings: OscSettings; listening: boolean; error: string | null }
   | { event: 'notice'; level: 'warning' | 'info'; message: string };
 
 // ---------------------------------------------------------------- power ---
@@ -283,6 +285,14 @@ export interface SpeakerPlugSettings {
   off_delay_ms: number;
   /** 500..=10000 */
   timeout_ms: number;
+}
+
+/** OSC remote control: where the server listens and which devices get feedback. */
+export interface OscSettings {
+  /** "host:port" */
+  listen: string;
+  /** 0..=8 entries, "host:port" */
+  targets: string[];
 }
 
 export interface PlugResult {

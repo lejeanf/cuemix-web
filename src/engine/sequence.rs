@@ -712,6 +712,8 @@ impl Engine {
                     };
                 }
             }
+            Internal::OscApplied { origin, done } => self.on_osc_applied(origin, done).await,
+            Internal::OscTick => self.on_osc_tick(),
             Internal::Checked {
                 origin,
                 settings,

@@ -29,6 +29,7 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::Serialize;
 use thiserror::Error;
@@ -37,6 +38,8 @@ use tokio::task::JoinHandle;
 
 use crate::motu::client::ConnectionStatus;
 use crate::motu::props;
+use crate::osc::bridge::OscApply;
+use crate::osc::settings::OscSettings;
 use crate::plug::{self, PlugState, PlugTransport, SpeakerPlugSettings};
 use crate::power::{self, FadeDir, PowerChannel, Remembered};
 use crate::presets::{self, PresetStore};
@@ -45,6 +48,7 @@ use crate::state::{
     ServerEvent, SessionInfo, Topology,
 };
 
+mod osc;
 mod sequence;
 
 /// Version of the short HTTP API (`/api/v1/*`), reported by `/api/health` as `api`.
@@ -169,6 +173,8 @@ enum Request {
     Initial(oneshot::Sender<Vec<ServerEvent>>),
     /// From `measure`: register its control channel.
     MeasureAttach(mpsc::Sender<MeasureRequest>),
+    /// From the OSC bridge: register the channel `OscApply` goes to.
+    OscAttach(mpsc::Sender<OscApply>),
     /// From `measure`: the room-test state changed.
     MeasureStatus(MeasureStatus),
     /// A Web client disconnected.
@@ -278,6 +284,14 @@ impl EngineHandle {
             .map_err(|_| EngineClosed)
     }
 
+    /// OSC bridge: register the channel live settings changes go to.
+    pub async fn osc_attach(&self, tx: mpsc::Sender<OscApply>) -> Result<(), EngineClosed> {
+        self.tx
+            .send(Request::OscAttach(tx))
+            .await
+            .map_err(|_| EngineClosed)
+    }
+
     /// Room test: publish its state to every client (and to later connects).
     pub async fn measure_status(&self, status: MeasureStatus) -> Result<(), EngineClosed> {
         self.tx
@@ -334,6 +348,16 @@ pub struct EngineConfig {
     pub speaker_plug_file: PathBuf,
     /// Speaker plug defaults (`[speaker_plug]` in `config.toml`).
     pub speaker_plug: SpeakerPlugSettings,
+    /// OSC settings saved from the UI (written when they change).
+    pub osc_file: PathBuf,
+    /// OSC settings in force at startup (what the bridge was bound with).
+    pub osc: OscSettings,
+    /// Why the saved OSC settings were not used, if so.
+    pub osc_error: Option<String>,
+    /// Target names of `osc` that did not resolve at startup (retried every minute).
+    pub osc_unresolved: Vec<String>,
+    /// How often unresolved target names are tried again.
+    pub osc_retry_every: Duration,
 }
 
 impl EngineConfig {
@@ -346,6 +370,11 @@ impl EngineConfig {
             power_file: dir.join("power.json"),
             speaker_plug_file: dir.join("speaker-plug.json"),
             speaker_plug: SpeakerPlugSettings::default(),
+            osc_file: dir.join("osc.json"),
+            osc: OscSettings::default(),
+            osc_error: None,
+            osc_unresolved: Vec::new(),
+            osc_retry_every: Duration::from_secs(60),
         }
     }
 }
@@ -373,6 +402,14 @@ enum Internal {
         /// Order of the `set_speaker_plug` requests.
         ticket: u64,
     },
+    /// The bridge applied (or refused) `set_osc_settings`, or a retry of unresolved targets
+    /// (`Origin::System`).
+    OscApplied {
+        origin: Origin,
+        done: Result<osc::OscDone, String>,
+    },
+    /// Once a minute: try the target names that did not resolve yet.
+    OscTick,
 }
 
 /// Spawn the engine task.
@@ -428,6 +465,13 @@ pub async fn start_with(
             cfg.speaker_plug_file,
             transport,
             internal_tx.clone(),
+        ),
+        osc: osc::OscRuntime::new(
+            cfg.osc,
+            cfg.osc_file,
+            cfg.osc_error,
+            cfg.osc_unresolved,
+            cfg.osc_retry_every,
         ),
         synced: false,
         internal: internal_tx,
@@ -496,6 +540,8 @@ struct Engine {
     power: sequence::PowerState,
     /// Speaker plug settings, state and transport.
     plug: sequence::PlugRuntime,
+    /// OSC settings and the link to the bridge.
+    osc: osc::OscRuntime,
     /// Results of the tasks the engine spawns (plug requests).
     internal: mpsc::UnboundedSender<Internal>,
     /// The state was read from the card since the link came up.
@@ -533,6 +579,7 @@ impl Engine {
                         let _ = reply.send(self.on_api(command).await);
                     }
                     Some(Request::MeasureAttach(tx)) => self.measure_tx = Some(tx),
+                    Some(Request::OscAttach(tx)) => self.on_osc_attach(tx),
                     Some(Request::MeasureStatus(status)) => {
                         if matches!(status.state, MeasureState::Idle | MeasureState::Unavailable) {
                             self.measure_owner = None;
@@ -592,6 +639,7 @@ impl Engine {
         ];
         events.push(self.power_event());
         events.push(self.plug_event());
+        events.push(self.osc_event());
         if !self.patch.is_empty() {
             events.push(ServerEvent::Patch {
                 sources: self.patch.clone(),
@@ -730,6 +778,7 @@ impl Engine {
             Command::Power { channel, on } => self.on_power(channel, on),
             Command::SetSpeakerPlug { settings } => self.on_set_speaker_plug(origin, settings),
             Command::TestSpeakerPlug { on } => self.on_test_speaker_plug(origin, on),
+            Command::SetOscSettings { settings } => self.on_set_osc_settings(origin, settings),
             Command::Set(param) => {
                 let result =
                     crate::state::check_writable(&param).and_then(|()| self.state.apply(&param));
@@ -946,7 +995,6 @@ fn volume_channel(param: &Param) -> Option<PowerChannel> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     fn tmp(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -1318,8 +1366,8 @@ mod tests {
         );
 
         let init = h.initial_events().await.unwrap();
-        // Snapshot, labels, presets, room-test state, power, speaker plug.
-        assert_eq!(init.len(), 6);
+        // Snapshot, labels, presets, room-test state, power, speaker plug, OSC settings.
+        assert_eq!(init.len(), 7);
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
@@ -1344,9 +1392,9 @@ mod tests {
             .await
             .unwrap();
         let init = h.initial_events().await.unwrap();
-        assert_eq!(init.len(), 7);
+        assert_eq!(init.len(), 8);
         assert_eq!(
-            init[6],
+            init[7],
             ServerEvent::Patch {
                 sources: table.clone()
             }

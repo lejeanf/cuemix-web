@@ -7,7 +7,7 @@
 
 | | |
 |---|---|
-| Version du contrat | `0.3.0` + non publié (0.6.0 : `power`, prise enceintes, `/api/v1`, D29) : DSP / réverbe / horloge à la forme du matériel, lus sur la MOTU (présets schema v2, D19–D23) |
+| Version du contrat | `0.3.0` + non publié (0.6.0 : `power`, prise enceintes, `/api/v1`, D29 ; 0.7.0 : réglages OSC en direct `set_osc_settings` / `osc_settings`, choix de version à installer, D30) : DSP / réverbe / horloge à la forme du matériel, lus sur la MOTU (présets schema v2, D19–D23) |
 | MSRV | Rust `1.85`, édition 2021 (relevée depuis 1.80, décision D18) |
 | Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` (embarqué via `rust-embed`) |
 
@@ -69,13 +69,15 @@ changements venant du matériel sont appliqués et diffusés, **jamais renvoyés
 | `src/motu/client.rs` | Client WS, `PropCodec`, sync Option A, backoff 1→10 s, mode démo | ✅ |
 | `src/motu/discovery.rs` | IP explicite → mDNS (provisoire) → ARP + sonde TCP | 🟡 (§8) |
 | `src/osc/address.rs` | Table OSC ⇄ `Command`, conversions 0..1 ⇄ unités natives | ✅ |
-| `src/osc/bridge.rs` | UDP `rosc`, pairs (TTL 10 min, max 64), bundles ≤ 8 KiB | ✅ |
+| `src/osc/bridge.rs` | UDP `rosc`, pairs (TTL 10 min, max 64), bundles ≤ 8 KiB ; **changement de réglages en direct** (`OscApply` : nouveau socket lié d'abord, l'ancien gardé en cas d'échec ; dump complet aux cibles ajoutées) | ✅ |
+| `src/osc/settings.rs` | Réglages OSC enregistrés (`osc.json`) : `OscSettings { listen, targets }`, validation (syntaxe, ports, 8 cibles au plus, barrière sur chaque adresse résolue), lecture/écriture atomique, `start_bridge` (osc.json > `config.toml`) | ✅ |
+| `src/engine/osc.rs` | Réglages OSC côté moteur : état courant, `listening`, `error`, un seul changement à la fois ; événement `osc_settings` | ✅ |
 | `src/web/server.rs` | Axum : `/ws`, `/api/health` (`api`), SPA embarquée, `X-Forwarded-For` | ✅ |
 | `src/web/api.rs` | HTTP court `GET /api/v1/summary`, `POST /api/v1/command` (contrôles, widgets, Raccourcis ; même règle `Origin` que `/ws`) | ✅ |
-| `src/web/update.rs` | `GET /api/update` (lit le statut écrit par le timer root), `POST /api/update/install` (crée seulement le fichier de demande ; en-tête `x-cuemix-update` exigé) | ✅ |
+| `src/web/update.rs` | `GET /api/update` (statut du timer root, liste des versions, `version_pinning`, `show_prerelease`), `POST /api/update` (alias `/api/update/install`) : corps facultatif `{"version":"vX.Y.Z"}` validé (syntaxe **et** présence dans la liste du statut), écrit dans le fichier de demande de façon atomique ; `PUT /api/update/prefs` (`update-prefs.json`) ; en-tête `x-cuemix-update` exigé en écriture | ✅ |
 | `src/measure/` | Test de pièce (D28) : `mod.rs` (tâche pilotée par l'engine : instantané → silence des autres entrées → MPD → attente → restauration exacte, chien de garde), `mpd.rs` (client MPD TCP texte, délais 2 s), `noise.rs` (`GET /api/measure/noise.wav`, bruit rose 90 s en flux) | ✅ |
 | `src/zeroconf.rs` | Annonce mDNS `http://<mdns_hostname>.local:<port>` | ✅ |
-| `tests/` | Mock MOTU + intégration `mock_motu`, `motu_client`, `osc_bridge`, `web_server`, `speaker_plug` (séquence complète contre une vraie prise HTTP sur 127.0.0.1) | ✅ |
+| `tests/` | Mock MOTU + intégration `mock_motu`, `motu_client`, `osc_bridge`, `web_server`, `speaker_plug` (séquence complète contre une vraie prise HTTP sur 127.0.0.1), `osc_settings` (changement de réglages OSC en direct sur de vrais sockets UDP) | ✅ |
 
 Le code Rust vit à la **racine** (`Cargo.toml`, `src/`), conformément à HANDOFF §7.
 
@@ -210,6 +212,18 @@ MotuState
 * `power` et `speaker_plug` sont émis à la connexion (après `measure`) et à chaque changement
   réel (comparés au dernier envoyé, à la fin de chaque tour de boucle) ; ils ne touchent jamais
   `● Modifié`.
+* **Réglages OSC** (0.7.0, D30) : `set_osc_settings` est validé (syntaxe : `listen` `ip:port` avec port 1024–65535 sans multicast, 0 à 8 cibles `ip:port` / `[v6]:port` / `nom:port`),
+  puis une tâche résout les noms et applique la **même barrière que la prise** (`plug::resolve_fenced` : privé, lien-local, bouclage) ;
+  le pont reçoit alors `OscApply` : il lie le **nouveau** socket d'abord (échec : l'ancien continue d'écouter et le demandeur reçoit
+  un `error`) — sauf quand le nouveau est sur le même port et que le système refuse tant que l'ancien est ouvert (`0.0.0.0:8000` → `127.0.0.1:8000`) :
+  l'ancien est alors libéré le temps de l'essai et repris en cas d'échec. Les cibles changent sans nouveau socket ; un dump complet part vers les cibles **ajoutées**
+  (pas vers celles qui restent). Après un nouveau socket, les pairs appris sont oubliés (ils s'inscrivent de nouveau en écrivant au nouveau port). Puis le moteur écrit `osc.json`
+  (atomique) **avant** de diffuser `osc_settings` (qui est donc enregistré quand un client le voit) ; un seul changement à la fois (« another OSC change is in progress »).
+  Les noms de cibles sont résolus à l'application et au démarrage, pas à chaque envoi. Familles : un socket IPv4 n'atteint que des cibles IPv4 ; `[::]` atteint les deux (IPv4 sous forme IPv4-mappée) ; une adresse IPv6 précise n'atteint que de l'IPv6.
+  **Démarrage** : un nom de cible qui ne se résout pas (réseau pas encore monté) n'écarte pas `osc.json` : l'adresse d'écoute et les autres cibles sont gardées, la cause va dans `osc_settings.error`
+  et le nom est réessayé **toutes les 60 s** (tick interne) par le même chemin ; une fois résolu, la cible reçoit un dump et l'erreur disparaît. Une adresse hors barrière n'est jamais réessayée.
+  **Échec en direct** (port pris, adresse refusée, barrière) : le demandeur reçoit `error`, `osc_settings` est rediffusé avec la cause dans `error` ; le prochain changement réussi l'efface.
+  `listening` est faux si le pont n'a plus de vrai socket (l'ancien n'a pu être repris après l'échec d'un déplacement sur le même port, `ApplyOutcome.listening`) ou si sa tâche s'est arrêtée.
 * **Requêtes HTTP courtes** : `Request::Summary` et `Request::Api { command }` ; la seconde exécute
   la commande comme un client mais renvoie le **vrai résultat** (rejet capturé par `reply_error`)
   au lieu d'un événement `error` vers un WebSocket.
@@ -233,9 +247,10 @@ Client → serveur (`Command`, tag `cmd`) :
 {"cmd":"power","channel":"main","on":false}
 {"cmd":"set_speaker_plug","settings":{"enabled":true,"kind":"shelly_rpc","host":"plug.example","switch_id":0,"on_url":"","off_url":"","warmup_ms":2000,"off_delay_ms":300,"timeout_ms":2000}}
 {"cmd":"test_speaker_plug","on":true}
+{"cmd":"set_osc_settings","settings":{"listen":"0.0.0.0:8000","targets":["192.0.2.20:9000","ipad.local:9000"]}}
 ```
 
-Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`, `labels`, `presets`, `measure`, `power`, `speaker_plug` (puis `patch` s'il est connu).
+Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`, `labels`, `presets`, `measure`, `power`, `speaker_plug`, `osc_settings` (puis `patch` s'il est connu).
 
 ```json
 {"event":"snapshot","state":{…},"session":{"active_preset":null,"modified":false,"connection":"demo"}}
@@ -249,6 +264,7 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 {"event":"power","main":{"on":true,"fading":"out","plug":"on"},"phones":{"on":true,"fading":null,"plug":null}}
 {"event":"speaker_plug","settings":{…},"urls":{"on":"http://plug.example/rpc/Switch.Set?id=0&on=true","off":"…&on=false"},"state":"unknown"}
 {"event":"speaker_plug_result","on":true,"ok":false,"message":"no answer (timeout)"}
+{"event":"osc_settings","settings":{"listen":"0.0.0.0:8000","targets":["192.0.2.20:9000"]},"listening":true,"error":null}
 {"event":"notice","level":"warning","message":"Speaker plug did not respond"}
 {"event":"error","message":"…"}
 ```
@@ -261,6 +277,15 @@ permettent pas de les construire), `state` ∈ `off|on|warming|error|unknown`. `
 ne va qu'au client qui a demandé le test (`test_speaker_plug` s'exécute sur les réglages **enregistrés**,
 même désactivés ; un seul test à la fois). `notice` est diffusé à tous. Un `set_speaker_plug` refusé
 (plage, URL, barrière) répond par un `error` au demandeur seul.
+
+`osc_settings` (0.7.0) : `settings` = ce qui est en vigueur ; `listening` = le socket UDP est lié (faux seulement avant que le pont ne s'annonce, par exemple dans les tests) ;
+`error` = `null`, ou le dernier problème : réglages enregistrés non (tous) utilisés au démarrage (fichier illisible, port pris : retour à `config.toml` ; cible non résolue : le reste est gardé), ou échec d'un changement en direct ; effacé par le changement suivant qui réussit. Un
+`set_osc_settings` refusé (syntaxe, barrière, port occupé, « OSC is not running ») répond par un `error` au demandeur seul et ne change rien. Il n'est pas
+disponible par `POST /api/v1/command`. Non transmis en OSC.
+
+Réglages OSC (`OscSettings`) : `listen` (`ip:port`, `0.0.0.0` / `::` / bouclage / une adresse de la machine — le `bind` tranche —, port 1024–65535, ni multicast ni diffusion) et `targets`
+(0 à 8, `ip:port`, `[v6]:port` ou `nom:port`, port 1–65535 ; chaque adresse résolue doit passer la barrière ci-dessous ; les doublons après résolution sont fusionnés). Les IP sont renvoyées
+sous forme canonique, les espaces retirés.
 
 Réglages de la prise (`SpeakerPlugSettings`) :
 
@@ -370,7 +395,7 @@ configurées + pairs, **sauf l'émetteur** ; bundles découpés ≤ 8 KiB. Le fe
 (`/mix/main/power`, `/controlroom/phones/power`) va à **tous** les pairs, émetteur compris (le fondu est
 l'œuvre du serveur, pas un geste du pair), seulement pour les canaux dont l'état a changé, et fait
 partie du dump complet. Non transmis en OSC :
-`presets`, `labels`, `meters`, `meter_raw`, `status`, `session`, `speaker_plug`, `speaker_plug_result`, `notice`, `error`. `meter_raw` (`{"event":"meter_raw","raw":[255,13,…]}`) porte la trame de meters brute du MOTU (propriété 6000, non décodée), ≈ 30/s (`METER_RAW_INTERVAL` = 33 ms), pour la vue de diagnostic *Meter probe* (`/?probe`) qui sert à établir la table des meters.
+`presets`, `labels`, `meters`, `meter_raw`, `status`, `session`, `speaker_plug`, `speaker_plug_result`, `osc_settings`, `notice`, `error`. `meter_raw` (`{"event":"meter_raw","raw":[255,13,…]}`) porte la trame de meters brute du MOTU (propriété 6000, non décodée), ≈ 30/s (`METER_RAW_INTERVAL` = 33 ms), pour la vue de diagnostic *Meter probe* (`/?probe`) qui sert à établir la table des meters.
 
 `patch` (`{"event":"patch","sources":[46,47,…]}`) porte la table de patch 5010 lue sur la carte (index = destination, valeur = point source ; liste vide = inconnue). Le client MOTU l'accumule (`apply_patch_frame`), le moteur la garde (`Engine.patch`, hors `MotuState` et hors présets), la diffuse à chaque changement, la rejoue après les événements initiaux quand elle est connue et la vide en mode démo. Lecture seule : aucun `Command`, aucun encodeur, pas de `check_writable`. Côté web : `store.patch`, tableau « Patch (5010) » du *Meter probe*, et `outputSourcePoint` (`meterMap.ts`) qui fait suivre aux meters de sortie la source réellement patchée dès que `MK5_PATCH_DEST` (indice de destination par sortie, vide tant qu'il n'est pas lu sur la carte) est renseigné.
 
@@ -383,7 +408,14 @@ absent = défauts, invalide = erreur, clés inconnues signalées par un avertiss
 `[storage]` : `presets_dir`, `labels_file`, et (0.6.0) `power_file` (niveaux mémorisés, défaut
 `/var/lib/cuemix-web/power.json`) et `speaker_plug_file` (réglages enregistrés depuis l'interface, défaut
 `/var/lib/cuemix-web/speaker-plug.json`) — dans le volume Docker `cuemix-data` comme `labels.json`,
-git-ignorés (`data/power.json`, `data/speaker-plug.json`).
+git-ignorés (`data/power.json`, `data/speaker-plug.json`). 0.7.0 : `osc_file` (réglages OSC enregistrés depuis l'interface, défaut `/var/lib/cuemix-web/osc.json`,
+`{"listen":"0.0.0.0:8000","targets":[…]}`) et `update_prefs_file` (interrupteur « pré-versions », défaut `/var/lib/cuemix-web/update-prefs.json`,
+`{"show_prerelease":bool}`), git-ignorés aussi (`data/osc.json`, `data/update-prefs.json`).
+
+`osc.json` **remplace** `[network] osc_listen` / `osc_feedback_targets` (et donc `CUEMIX_OSC_LISTEN`) tant qu'il existe ; le supprimer rend la main à `config.toml`.
+Illisible, invalide, hors barrière ou impossible à lier au démarrage : avertissement dans le journal, valeurs de `config.toml` utilisées, raison dans `osc_settings.error`.
+Seul un `config.toml` dont l'adresse ne se lie pas arrête le serveur (comme avant 0.7.0). `update-prefs.json` remplace `[update] channel` pour l'interface seulement (jamais lu par root) ; sans fichier,
+`channel` (`prerelease`, `pre`, `alpha` ou `beta`) donne la valeur par défaut de l'interrupteur.
 
 `[speaker_plug]` (0.6.0) : mêmes champs que `SpeakerPlugSettings` (§3.5) ; défauts `enabled = false`,
 `kind = "shelly_rpc"`, `host = ""`, `switch_id = 0`, `warmup_ms = 2000`, `off_delay_ms = 300`,
@@ -391,6 +423,33 @@ git-ignorés (`data/power.json`, `data/speaker-plug.json`).
 Des réglages invalides au démarrage (fichier ou section) **ou un `speaker-plug.json` illisible** donnent une
 prise **désactivée** (avertissement dans le journal) : on ne revient jamais silencieusement à une autre prise. `config.example.toml` donne un exemple commenté en `192.0.2.10` ; les vraies adresses ne
 vont jamais dans Git.
+
+### 3.8 Mises à jour et choix de version (0.7.0, D30)
+
+Trois acteurs, chacun avec ses droits :
+
+* **Racine, minuterie** : `cuemix-update --check --status-file` (toutes les heures) écrit `update-status.json` — champs historiques (`installed`, `latest`, `tag`, `channel`,
+  `update_available`, `checked_at`, `release_url`) plus `features` (`["pin"]` : cet outil sait installer la version demandée), `releases` (au plus 20, plus récentes d'abord, brouillons exclus :
+  `{"tag","version","prerelease","published_at"}`), `latest_stable` et `latest_pre` (tag ou `null`). La liste vient de `GET /repos/…/releases?per_page=30`, lue **sans `jq`** (awk sur les clés
+  de premier niveau de la sortie indentée de GitHub) ; chaque champ est revalidé avant d'être écrit. Format de liste non reconnu ou API en échec : liste vide, le contrôle n'échoue pas.
+  La racine **ne lit pas** `update-prefs.json` (écrit par l'utilisateur web) : une demande vide installe la plus récente du canal de `config.toml`, comme avant ; l'interrupteur ne change que ce que propose l'interface (le serveur web calcule le badge à partir de `latest_stable` / `latest_pre`, et l'interface envoie toujours un tag explicite).
+  Seules les versions ≥ `v0.5.0` figurent dans `releases` côté racine et web.
+* **Serveur web (non privilégié)** : `GET /api/update` renvoie `installed`, `channel`, `enabled`, `version_pinning` (le statut annonce `features` ∋ `pin`), `show_prerelease`, `update_available`,
+  `latest` (`{tag,version,prerelease}` : le plus récent de *stable*, ou de *stable + pré-version* si `show_prerelease`, comparé par la précédence semver), `latest_stable`, `latest_pre`, `releases`,
+  `status` (brut), `pending`, `pending_version`, `last_result` (`{code,outcome,at,version}`). `POST /api/update` accepte `{"version":"vX.Y.Z"}` : la syntaxe (regex ci-dessous) **et** la présence du tag dans `releases`
+  sont vérifiées, la version installée est refusée, et `version_pinning` doit être vrai (sinon **422**, contrôlé avant la liste : on ne retombe jamais en silence sur « la plus récente ») ; une version < `v0.5.0` est refusée (400, « releases older than v0.5.0… »). Deux installations acceptées à moins de **30 s** : la seconde reçoit **429**. La demande est écrite dans un fichier temporaire (nom unique) puis
+  liée en dur (`link`) sur `update-request` : atomique, et refusée (409) s'il en existe déjà une. Sans corps : fichier vide, ancien comportement. `PUT /api/update/prefs` enregistre l'interrupteur.
+  Les écritures exigent l'en-tête `x-cuemix-update` ; corps ≤ 1 KiB.
+* **Racine, demande** : l'unité `.path` lance `cuemix-update --run-request FILE --result-file FILE --status-file FILE`. Le fichier de demande est une **entrée non fiable** (le service web peut y écrire n'importe quoi,
+  y compris un lien symbolique) : fichier ordinaire de 64 octets au plus, lu **une seule fois** par `timeout 5 dd iflag=nofollow,nonblock bs=65 count=1` (un lien symbolique ou un FIFO échangé entre le contrôle et la lecture ne peut ni être suivi ni bloquer root), vide (la plus récente du canal) ou **un seul tag** (≥ `v0.5.0`) `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$` ; le contenu n'est jamais passé à un
+  shell (un seul argument après `--version`) ni recopié dans les journaux ; tout autre contenu est refusé (code 2) sans rien installer, y compris un répertoire posé à la place du fichier (la suppression échoue sans arrêter l'enveloppe : le résultat est enregistré, et `TriggerLimitIntervalSec` / `TriggerLimitBurst` de l'unité `.path` empêchent une boucle). Le fichier est supprimé dès qu'il est lu. Une version plus ancienne est
+  autorisée (rétrogradation) avec les mêmes garde-fous : sha256, binaire qui annonce la bonne version, contrôle de santé, retour arrière automatique. Le code de sortie va dans `update-result` (`CODE HORODATAGE [TAG]`),
+  puis le statut est rafraîchi. `update-status.json` et `update-result` sont **construits dans `/var/lib/cuemix-update`** (répertoire réservé à root, 0700, créé par le script ; refusé s'il est un lien symbolique, n'appartient pas à root ou est inscriptible par d'autres), puis déplacés par `mv -fT` : root ne crée, n'écrit ni ne `chmod` jamais rien dans `/var/lib/cuemix-web` (écrivable par l'utilisateur web, sans bit collant), et un lien symbolique posé sur la destination est **remplacé**, pas suivi (`-T` empêche d'entrer dans un répertoire posé là). Une installation en cours est attendue (`--wait-lock`, 60 s) au lieu d'échouer « occupé » ; les deux services ont un `TimeoutStartSec` (contrôle 2 min, installation 15 min).
+  *Piste, non faite* : durcissement `systemd` des deux services root (`ProtectSystem`, `PrivateTmp`, `NoNewPrivileges`…) ; il peut échouer avec 226/NAMESPACE dans un CT Proxmox non privilégié et n'a pas pu être essayé.
+
+**Installations existantes** : le programme de mise à jour intégré ne remplace que le **binaire**. `cuemix-update` (script) et les unités `systemd` ne sont poussés que par les scripts d'installation
+(`deploy/proxmox-setup.sh --update` côté hôte Proxmox, `deploy/linux-setup.sh --refresh-updater` sur Linux). Tant que ce n'est pas fait, le côté racine est l'ancien : son statut n'a pas `features`, donc
+`version_pinning` est `false` et l'interface masque le choix de version (le bouton *Install* habituel marche comme avant).
 
 ## 4. Comportements moteur
 
@@ -436,7 +495,7 @@ vont jamais dans Git.
   sur l'adresse vérifiée). Un seul test manuel à la fois. Les prises à mot de passe ne sont pas gérées.
 * **Pas d'authentification** : n'exposer que sur un LAN de confiance ou derrière un proxy authentifiant.
 * Fichiers locaux git-ignorés : `config.toml`, `*.local.toml`, `deploy/*.env`, `.env`, `*.pem`,
-  `*.key`, `data/labels.json`, `data/power.json`, `data/speaker-plug.json`, `data/presets/*.json`, `.claude/`.
+  `*.key`, `data/labels.json`, `data/power.json`, `data/speaker-plug.json`, `data/osc.json`, `data/update-prefs.json`, `data/presets/*.json`, `.claude/`.
 * `.gitleaks.toml` : règles par défaut + RFC1918 ; exemples en `192.0.2.x`/`127.0.0.1`/`169.254.x.x`.
 
 ## 7. Journal des décisions
@@ -466,12 +525,13 @@ vont jamais dans Git.
 | D21 | Départs/retour de réverbe = paramètres de mix (mix « Reverb », entrée « Reverb ») ; plus de `reverb_send` ni de `return_gain` | C'est ainsi que la MOTU les stocke (dump) |
 | D22 | Mode d'EQ = octet brut (`u8`) + noms côté UI ; pas de bypass global d'EQ (`eq_bypass`, `/eq/{ch}/bypass` retirés) | Valeurs inconnues conservées ; le matériel n'a qu'un bypass par bande |
 | D23 | Encodeurs DSP écrits et testés ; **les EQ d'entrée et de sortie sont actifs** (`props::encode` → `encode_eq_param` ; le slot 1 inutilisé de la sortie n'est jamais écrit ; une règle unique `state::eq_mode_allowed` limite les types de filtre par bande). Compresseur, gate, réverbe et horloge restent dans `props::encode_unverified`, **non branchés** : `is_mapped` faux, rien n'est envoyé | Activation une fonction à la fois après un essai sur la carte |
-| D24 | Mises à jour **déclenchées par l'utilisateur depuis l'UI**, par canal de release (`[update] channel` = `stable` ou `prerelease`, dans `config.toml`, pas dans l'UI) ; jamais automatiques (arbitrage mainteneur 2026-11-15, remplace D16). Un timer root horaire (quotidien avant 0.5.1 ; `cuemix-update --check --status-file`) écrit le statut ; le bouton *Install* ne fait que créer un fichier de demande vide que l'unité `.path` root transforme en `cuemix-update` | Le service web reste non-root et sans accès réseau sortant ; seul le dernier release officiel du canal (sha256, santé, retour arrière) peut être installé, et seulement à la demande d'une personne |
+| D24 | ~~(en partie remplacée par D30 : canal dans l'UI, fichier de demande lu)~~ Mises à jour **déclenchées par l'utilisateur depuis l'UI**, par canal de release (`[update] channel` = `stable` ou `prerelease`, dans `config.toml`, pas dans l'UI) ; jamais automatiques (arbitrage mainteneur 2026-11-15, remplace D16). Un timer root horaire (quotidien avant 0.5.1 ; `cuemix-update --check --status-file`) écrit le statut ; le bouton *Install* ne fait que créer un fichier de demande vide que l'unité `.path` root transforme en `cuemix-update` | Le service web reste non-root et sans accès réseau sortant ; seul le dernier release officiel du canal (sha256, santé, retour arrière) peut être installé, et seulement à la demande d'une personne |
 | D25 | Meters : trame 6000 brute relayée (`meter_raw`, ≈ 30/s) et décodée **côté client** avec la table du bus de patch du mk5 (`frontend/src/lib/meterMap.ts`), confirmée au *Meter probe* et par la table de CueMix 5 | Le serveur reste agnostique ; d'autres modèles = une autre table |
 | D26 | Onglet *Routing* supprimé ; `route` et la matrice restent dans l'état (inertes) pour la compatibilité des présets | La matrice booléenne ne correspond pas au matériel (5010 = une source par sortie) ; les mixes couvrent l'usage |
 | D27 | Valeur 1006/1026 = **Q** (0,45-10) et non une largeur en octaves ; le champ garde le nom `bw_oct` pour les présets | Table et UI de CueMix 5 |
 | D28 | Bruit de test de pièce fourni par le **MPD de l'utilisateur** (`[measure] mpd`, sortie analogique reliée à Line 7-8) et servi par `GET /api/measure/noise.wav` ; la carte n'a **aucun générateur** (table des propriétés de CueMix 5 vérifiée). Pendant le test : instantané puis silence des autres entrées du Main (bus 0), solos coupés, EQ de sortie Main (slot 0) et EQ d'entrée des sources en bypass, via les `Set` normaux ; restauration exacte des seules valeurs changées (une entrée déjà coupée reste coupée), puis reprise de MPD (morceau, position, pause ; MPD est mis en pause par le serveur pendant la phase `quiet`, un arrêt à ce stade fait simplement `pause 0`) ; chien de garde `max_seconds` (20-80 s) ; écritures « silence d'abord » (mutes/solos qui coupent, puis le reste, puis les démutes). L'analyse (micro du téléphone) se fait dans le navigateur | Pas de nouvelle fonction matériel ni de dépendance ; le bruit passe par la chaîne réelle (entrée → mixage → sortie) ; toute erreur réseau MPD aboutit à une restauration propre puis `error` → `idle`. La liste de restauration est écrite dans `measure-restore.json` (à côté de `labels.json`) avant tout changement et gardée jusqu'à ce que la liaison soit restée `online` 3 s après l'envoi : perte de liaison, débranchement, arrêt ou crash en cours de test → restauration rejouée dès que la MOTU est de nouveau `online` (y compris au redémarrage). Limite : après un crash, MPD n'est pas restauré |
 | D29 | **Marche/arrêt de Monitor et Phones sur le serveur** (commande `power`, fondu du moteur, niveau mémorisé dans `power.json`), **prise enceintes** (Main : arrêt = fondu → délai → prise éteinte ; marche = prise → échauffement → fondu), et **API HTTP courte** `/api/v1` (arbitrage mainteneur 2026-11-25, `docs/IOS-PLAN.md` §5.1–5.2b ; sortie en 0.6.0). Le navigateur ne fait plus le fondu (`channelFade` et les clés `localStorage` supprimées, sans migration : le pire cas est un Marche qui monte à −70 dB). Le moteur applique la même courbe que l'ancien code web ; les réglages de la prise viennent de `[speaker_plug]` et du fichier enregistré depuis l'interface ; la requête est un `GET` HTTP écrit à la main sur `TcpStream` (aucune dépendance HTTP ajoutée) et **bornée par une barrière d'adresses locales** | Le niveau mémorisé et le fondu doivent être partagés entre appareils (téléphone, portable, OSC, contrôles iOS, qui ne peuvent pas faire tourner un fondu) ; une prise commandée par le serveur marche depuis n'importe quel client et ne coupe jamais les enceintes à pleine puissance. Compatibilité : `power` / `speaker_plug` / `notice` sont de nouveaux événements (un client ancien les ignore) ; l'événement `power` s'insère entre `measure` et `patch` à la connexion |
+| D30 | **Réglages OSC enregistrés et appliqués en direct** (`osc.json`, commande `set_osc_settings`, événement `osc_settings`) ; **choix de la version à installer** dans l'interface, y compris plus ancienne. **Remplace les parties de D24** « canal pas dans l'UI » (désormais `update-prefs.json`, `PUT /api/update/prefs` ; `[update] channel` n'est plus que la valeur par défaut) et « contenu du fichier de demande jamais lu » (la racine le lit, comme **entrée non fiable** : 64 octets, regex stricte de tag, aucun passage par un shell, refus sans installation, aucune recopie dans les journaux ; le serveur web, lui, ne l'écrit qu'après avoir vérifié le tag dans la liste du statut). La séparation des droits ne change pas : le service web reste non privilégié, sans accès réseau sortant, et ne fait qu'écrire trois petits fichiers ; seule la racine télécharge, vérifie le sha256 et remplace le binaire. Les unités et `cuemix-update` ne se mettent pas à jour seuls : un statut sans `features` ∋ `pin` désactive le choix de version | Les réglages OSC se changent depuis la tablette sans éditer `config.toml` ni redémarrer ; revenir à une version antérieure est le seul remède rapide à une régression en séance (rétrogradation garantie par sha256, santé et retour arrière) ; rien de ce que le service web écrit ne peut choisir autre chose qu'un tag publié |
 
 ### Application écran d'accueil (iOS)
 

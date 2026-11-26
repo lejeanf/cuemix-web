@@ -1,32 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { store } from '../lib/store.svelte';
+  import { updates } from '../lib/updates.svelte';
+  import { S } from '../lib/strings';
+  import { classicLatest, failedResult } from '../lib/update';
 
-  // GET /api/update (see src/web/update.rs). Nothing shows unless the update
-  // units are installed on the server and a newer release exists.
-  interface UpdateInfo {
-    installed: string;
-    channel: string;
-    enabled: boolean;
-    pending: boolean;
-    status: { latest: string; tag: string; update_available: boolean; checked_at: string; release_url: string } | null;
-    last_result: { code: number; outcome: string; at: string } | null;
-  }
-
-  let info = $state<UpdateInfo | null>(null);
+  // GET /api/update (see src/web/update.rs), shared with the Version panel. Nothing shows
+  // unless the update units are installed on the server and a newer release exists.
+  const info = $derived(updates.info);
   let open = $state(false);
-  let busy = $state(false);
-  let message = $state('');
   let root = $state<HTMLElement>();
-
-  async function refresh() {
-    try {
-      const r = await fetch('/api/update', { cache: 'no-store' });
-      if (r.ok) info = (await r.json()) as UpdateInfo;
-    } catch {
-      /* offline: keep the last answer */
-    }
-  }
+  let message = $state('');
+  const refresh = () => updates.refresh();
 
   onMount(() => {
     void refresh();
@@ -39,22 +24,18 @@
     if (store.socketOpen) void refresh();
   });
 
-  const available = $derived(!!info?.enabled && !!info.status?.update_available && info.status.latest !== store.version);
-  const failed = $derived(info?.last_result && info.last_result.outcome !== 'ok' ? info.last_result : null);
-  const inProgress = $derived(busy || !!info?.pending);
+  const latest = $derived(classicLatest(info));
+  const available = $derived(!!latest && latest !== store.version);
+  const failed = $derived(failedResult(info));
+  const inProgress = $derived(updates.inProgress);
+  const when = (s: string) => {
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleString();
+  };
 
   async function install() {
-    busy = true;
     message = '';
-    try {
-      const r = await fetch('/api/update/install', { method: 'POST', headers: { 'x-cuemix-update': '1' } });
-      message = r.ok ? 'Installing… the page reconnects when the new version is running.' : await r.text();
-      if (r.ok) setTimeout(refresh, 3000);
-    } catch {
-      message = 'Request failed';
-    } finally {
-      busy = false;
-    }
+    message = (await updates.install()) ?? S.update.installing;
   }
 
   function outside(e: PointerEvent) {
@@ -66,27 +47,26 @@
 
 {#if available || failed || inProgress}
   <span class="wrap" bind:this={root}>
-    <button class="badge" class:warn={!!failed && !available} onclick={() => (open = !open)} aria-expanded={open}>
-      {#if inProgress}Updating…{:else if available}v{info?.status?.latest} available{:else}Update failed{/if}
+    <button class="badge" class:warn={!!failed && !available && !inProgress} onclick={() => (open = !open)} aria-expanded={open}>
+      {#if inProgress}{S.update.badgeUpdating}{:else if available && latest}{S.update.badgeAvailable(latest)}{:else}{S.update.badgeFailed}{/if}
     </button>
     {#if open && info}
-      <div class="pop" role="dialog" aria-label="Software update">
-        <p><strong>Installed:</strong> v{info.installed} · <strong>channel:</strong> {info.channel}</p>
-        {#if info.status}
+      <div class="pop" role="dialog" aria-label={S.update.popTitle}>
+        <p>{S.update.installedChannel(info.installed, info.channel)}</p>
+        {#if latest}
           <p>
-            <strong>Latest:</strong> v{info.status.latest}
-            (<a href={info.status.release_url} target="_blank" rel="noopener noreferrer">release notes</a>)
-            <br /><small>checked {new Date(info.status.checked_at).toLocaleString()}</small>
+            <strong>{S.update.latest}:</strong> v{latest}
+            {#if info.status?.release_url}(<a href={info.status.release_url} target="_blank" rel="noopener noreferrer">{S.update.releaseNotes}</a>){/if}
+            {#if info.status?.checked_at && when(info.status.checked_at)}<br /><small>{S.update.checked(when(info.status.checked_at))}</small>{/if}
           </p>
         {/if}
-        {#if failed}
-          <p class="err">
-            Last install {failed.outcome === 'rolled_back' ? 'failed and was rolled back to the previous version' : `failed (code ${failed.code})`}{failed.at ? `, ${new Date(failed.at).toLocaleString()}` : ''}.
-          </p>
+        {#if inProgress}<p class="dim" role="status">{S.update.installingVersion(updates.installingVersion)}</p>{/if}
+        {#if failed && !inProgress}
+          <p class="err">{S.update.lastResult(failed.outcome, failed.code, failed.version ?? null, when(failed.at))}</p>
         {/if}
         {#if available}
-          <p class="dim">The service restarts (a few seconds without control; audio keeps playing). The download is checked (sha256) and a version that does not start is rolled back automatically.</p>
-          <button class="go" disabled={inProgress} onclick={install}>{inProgress ? 'Installing…' : `Install v${info.status?.latest}`}</button>
+          <p class="dim">{S.update.restartNote}</p>
+          <button class="go" disabled={inProgress} onclick={install}>{inProgress ? S.update.installingVersion(null) : S.update.installBtn(latest ?? '')}</button>
         {/if}
         {#if message}<p class="dim">{message}</p>{/if}
       </div>
@@ -121,7 +101,7 @@
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    box-shadow: 0 8px 24px #000a;
+    box-shadow: var(--shadow-pop);
     font-size: 12px;
     white-space: normal;
     z-index: 40;
@@ -142,7 +122,7 @@
     min-height: 28px;
     padding: 0 12px;
     background: var(--cyan);
-    color: #111;
+    color: var(--on-accent);
     font-weight: 700;
     border: 0;
     border-radius: 6px;

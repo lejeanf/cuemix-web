@@ -49,6 +49,26 @@
       open = '';
     }
   }
+  /** Arrow keys, Home and End move between the menu items; Tab closes the menu. */
+  function menuKey(e: KeyboardEvent) {
+    const items = [...(menuEl?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? [])];
+    if (!items.length) return;
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    const to =
+      e.key === 'ArrowDown' ? items[(i + 1) % items.length]
+      : e.key === 'ArrowUp' ? items[(i <= 0 ? items.length : i) - 1]
+      : e.key === 'Home' ? items[0]
+      : e.key === 'End' ? items[items.length - 1]
+      : null;
+    if (to) {
+      e.preventDefault();
+      to.focus();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      open = '';
+      moreBtn?.focus();
+    }
+  }
   function setRate(rate: SampleRate) {
     store.set({ param: 'sample_rate', rate }, true);
   }
@@ -166,9 +186,10 @@
   <div class="pw">
     <button class="btn more" data-more-menu bind:this={moreBtn} aria-haspopup="menu" aria-expanded={open === 'menu'} aria-label={S.menu} title={S.menu} onclick={() => toggle('menu')}>⋯</button>
     {#if open === 'menu'}
-      <!-- More items go here as further <button role="menuitem"> entries. -->
-      <div class="pop menu" role="menu" aria-label={S.menu} bind:this={menuEl}>
+      <div class="pop menu" role="menu" aria-label={S.menu} tabindex="-1" bind:this={menuEl} onkeydown={menuKey}>
         <button class="item" role="menuitem" onclick={() => { open = ''; store.plugOpen = true; }}>{S.plugMenuItem}</button>
+        <button class="item" role="menuitem" onclick={() => { open = ''; store.oscOpen = true; }}>{S.oscMenuItem}</button>
+        <button class="item" role="menuitem" onclick={() => { open = ''; store.versionOpen = true; }}>{S.versionMenuItem}</button>
       </div>
     {/if}
   </div>
@@ -274,7 +295,7 @@
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    box-shadow: 0 8px 24px #000a;
+    box-shadow: var(--shadow-pop);
     z-index: 30;
   }
   .hint {

@@ -2,7 +2,8 @@
 // edits with a per-parameter 25 ms send throttle.
 import { meterBank } from './meters';
 import { hasMk5Meters, mk5MeterLevels } from './meterMap';
-import type { ChannelLabel, Command, DeviceInfo, EqBand, MeasureInfo, Param, PowerChannel, ServerEvent, SpeakerPlugSettings } from './protocol';
+import { handleStale } from './reload';
+import type { ChannelLabel, Command, DeviceInfo, EqBand, MeasureInfo, Param, OscSettings, PowerChannel, ServerEvent, SpeakerPlugSettings } from './protocol';
 import { DSP_LIMITS } from './protocol';
 import { applyEvent, applyParam, initialClientState, type ClientState } from './reducer';
 import { ParamSender } from './sender';
@@ -87,6 +88,10 @@ class Store {
   measure: MeasureInfo = $state({ state: 'unavailable', source: [] });
   /** The speaker plug settings panel is open. */
   plugOpen = $state(false);
+  /** The OSC settings panel is open. */
+  oscOpen = $state(false);
+  /** The version panel is open. */
+  versionOpen = $state(false);
   /** The room test panel is open. */
   roomOpen = $state(false);
   /** Main output EQ bands (slot 0) from before the last applied room correction, for Undo. */
@@ -271,7 +276,16 @@ class Store {
     this.socketOpen = false;
   }
 
-  private async refreshVersion(): Promise<void> {
+  /** Build version of this page (overridable for tests). */
+  buildVersion: string = __APP_VERSION__;
+  /** A server update was seen while a panel was open: the reload waits for it to close. */
+  reloadWaiting = false;
+  /** Any modal panel is open (edits in it must not be lost to a reload). */
+  get panelOpen(): boolean {
+    return this.plugOpen || this.oscOpen || this.versionOpen || this.roomOpen;
+  }
+
+  async refreshVersion(): Promise<void> {
     try {
       const r = await fetch(healthUrl(location), { cache: 'no-store' });
       const body = (await r.json()) as { version?: unknown };
@@ -279,6 +293,30 @@ class Store {
     } catch {
       this.version = null;
     }
+    this.checkStale();
+  }
+
+  /** A tab that outlived a server update runs old code: reload it, once per server version, never while a panel is open. */
+  checkStale(): void {
+    let storage: Storage | null = null;
+    try {
+      storage = sessionStorage;
+    } catch {
+      /* blocked */
+    }
+    const out = handleStale({
+      build: this.buildVersion,
+      server: this.version,
+      storage,
+      busy: this.panelOpen,
+      reload: () => location.reload(),
+      notify: () => {
+        if (this.reloadWaiting) return;
+        this.reloadWaiting = true;
+        this.c.toasts.push({ id: ++this.c.toastSeq, message: S.update.reloadNotice, level: 'info' });
+      },
+    });
+    if (out === 'reloaded') this.reloadWaiting = false;
   }
 
   private connect(): void {
@@ -403,6 +441,9 @@ class Store {
   }
   setSpeakerPlug(settings: SpeakerPlugSettings): boolean {
     return this.sendRaw({ cmd: 'set_speaker_plug', settings });
+  }
+  setOscSettings(settings: OscSettings): boolean {
+    return this.sendRaw({ cmd: 'set_osc_settings', settings });
   }
   /** Fires the plug's On or Off URL from the *saved* settings. */
   testSpeakerPlug(on: boolean): boolean {
