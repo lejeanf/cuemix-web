@@ -52,8 +52,39 @@
   function setSource(source: ClockSource) {
     store.set({ param: 'clock_source', source }, true);
   }
+  // Preset management: rename and delete per row, and a confirm before any overwrite.
+  let renaming = $state<string | null>(null);
+  let renameTo = $state('');
+  let deleting = $state<string | null>(null);
+  let replacing = $state<string | null>(null);
+  const hidden = $derived(new Set(store.c.presetsHidden));
+  const renameOk = $derived(isValidPresetName(renameTo) && !store.c.presets.includes(renameTo));
+  function startRename(p: string) {
+    renaming = p;
+    renameTo = p;
+    deleting = null;
+  }
+  function doRename() {
+    if (!renaming || !renameOk) return;
+    store.renamePreset(renaming, renameTo);
+    renaming = null;
+  }
+  function doDelete() {
+    if (deleting) store.deletePreset(deleting);
+    deleting = null;
+  }
+  function doReplace() {
+    if (replacing) store.savePreset(replacing);
+    if (replacing === newName) newName = '';
+    replacing = null;
+  }
   function saveAs() {
     if (!nameOk) return;
+    // Saving over an existing preset asks first.
+    if (store.c.presets.includes(newName)) {
+      replacing = newName;
+      return;
+    }
     store.savePreset(newName);
     newName = '';
   }
@@ -140,14 +171,45 @@
           <ul>
             {#each store.c.presets as p (p)}
               <li class:active={p === session.active_preset}>
-                <span>{p}</span>
-                <button class="btn sm" aria-label="{S.load} {p}" onclick={() => { store.loadPreset(p); open = ''; }}>{S.load}</button>
+                {#if renaming === p}
+                  <form class="inl" onsubmit={(e) => { e.preventDefault(); doRename(); }}>
+                    <!-- svelte-ignore a11y_autofocus -->
+                    <input type="text" bind:value={renameTo} maxlength="64" aria-label="{S.presetUi.renameTo} ({p})" aria-invalid={renameTo !== p && !renameOk} autofocus />
+                    <button class="btn sm" type="submit" disabled={!renameOk}>{S.presetUi.renameBtn}</button>
+                    <button class="btn sm" type="button" onclick={() => (renaming = null)}>{S.cancel}</button>
+                  </form>
+                  {#if renameTo !== p && store.c.presets.includes(renameTo)}<small class="err">{S.presetUi.taken}</small>{:else if renameTo !== '' && !isValidPresetName(renameTo)}<small class="err">{S.presetNameInvalid}</small>{/if}
+                {:else if deleting === p}
+                  <div class="ask" role="alert">
+                    <span>{S.presetUi.delAsk(p)}</span>
+                    <button class="btn sm danger" onclick={doDelete}>{S.presetUi.delBtn}</button>
+                    <button class="btn sm" onclick={() => (deleting = null)}>{S.cancel}</button>
+                  </div>
+                {:else}
+                  <span class="pn">{p}{#if hidden.has(p)}<small class="tag">{S.presetUi.hiddenTag}</small>{/if}</span>
+                  <button class="btn sm" aria-label="{S.load} {p}" onclick={() => { store.loadPreset(p); open = ''; }}>{S.load}</button>
+                  <button class="ic" aria-pressed={!hidden.has(p)} aria-label={S.presetUi.inSimple(p)} title={S.presetUi.inSimple(p)} onclick={() => store.setPresetInSimple(p, hidden.has(p))}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2" />{#if hidden.has(p)}<path d="M4 4l16 16" />{/if}</svg>
+                  </button>
+                  <button class="ic" aria-label={S.presetUi.rename(p)} title={S.presetUi.rename(p)} onclick={() => startRename(p)}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z" /></svg>
+                  </button>
+                  <button class="ic" aria-label={S.presetUi.del(p)} title={S.presetUi.del(p)} onclick={() => { deleting = p; renaming = null; }}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13" /></svg>
+                  </button>
+                {/if}
               </li>
             {/each}
           </ul>
         {/if}
-        {#if session.active_preset}
-          <button class="btn" onclick={() => store.savePreset(session.active_preset!)}>{S.save} “{session.active_preset}”</button>
+        {#if replacing}
+          <div class="ask" role="alert">
+            <span>{S.presetUi.replaceAsk(replacing)}</span>
+            <button class="btn sm" onclick={doReplace}>{S.presetUi.replaceBtn}</button>
+            <button class="btn sm" onclick={() => (replacing = null)}>{S.cancel}</button>
+          </div>
+        {:else if session.active_preset}
+          <button class="btn" onclick={() => (replacing = session.active_preset)}>{S.save} “{session.active_preset}”</button>
         {/if}
         <form onsubmit={(e) => { e.preventDefault(); saveAs(); }}>
           <input type="text" bind:value={newName} placeholder={S.presetName} maxlength="64" aria-label={S.presetName} aria-invalid={newName !== '' && !nameOk} pattern={PRESET_NAME_RE.source} />
@@ -309,6 +371,72 @@
   }
   li.active {
     background: #232733;
+  }
+  li {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .pn {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-wrap: anywhere;
+  }
+  .tag {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .ic {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .ic:hover,
+  .ic:focus-visible {
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .ic[aria-pressed='true'] {
+    color: var(--cyan);
+  }
+  .ic svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .inl {
+    flex: 1;
+    display: flex;
+    gap: 4px;
+  }
+  .ask {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .ask span {
+    flex: 1 1 100%;
+  }
+  .btn.danger {
+    border-color: var(--red);
+    color: var(--red);
   }
   form {
     display: flex;

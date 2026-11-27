@@ -474,6 +474,20 @@ class Store {
   listPresets(): void {
     this.sendRaw({ cmd: 'list_presets' });
   }
+  deletePreset(name: string): void {
+    this.sendRaw({ cmd: 'delete_preset', name });
+  }
+  renamePreset(name: string, to: string): void {
+    this.sendRaw({ cmd: 'rename_preset', name, to });
+  }
+  setPresetInSimple(name: string, show: boolean): void {
+    this.sendRaw({ cmd: 'set_preset_in_simple', name, show });
+  }
+  /** Presets the Simple view lists (the Advanced view lists them all). */
+  get simplePresets(): string[] {
+    const hidden = new Set(this.c.presetsHidden);
+    return this.c.presets.filter((p) => !hidden.has(p));
+  }
   /** Switch Monitor or Phones on/off; the server fades and reports back with a `power` event. */
   power(channel: PowerChannel, on: boolean): void {
     if (!this.ready) return;

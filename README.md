@@ -27,7 +27,7 @@ Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`d
 ## Features
 
 - Web UI for mixes, channel faders, pan, mute/solo, preamps (gain, +48 V, pad, phase), digital inputs, input DSP (EQ, compressor, gate), output trims and EQ (with presets such as *Voice clarity* or *Night*), reverb, control room and clock, with level meters everywhere.
-- Presets stored on the server, plus **Export to file / Import file** to keep or share every setting as one JSON file.
+- Presets stored on the server, plus **Export to file / Import file** to keep or share every setting as one JSON file. The Presets panel loads, saves (asking before it replaces a preset), renames and deletes them, and chooses which presets the Simple view lists (the phone icon on each row).
 - Update notice in the UI, with a user-triggered **Install**, and a **Version…** dialog to install any published release, older ones included back to the security floor (see [Updating](#updating)).
 - **OSC** tab of the ⋯ Advanced settings dialog: change the OSC listen address and the feedback targets live, without editing `config.toml` or restarting (see [OSC settings](#osc-settings)).
 - Bidirectional OSC over UDP `:8000` with 1-based indices (TouchOSC / QLab friendly), with feedback to every controller.

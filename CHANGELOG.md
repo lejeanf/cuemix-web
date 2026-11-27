@@ -12,6 +12,20 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+Preset management from the UI review. Compatibility: preset files are unchanged; the Simple view
+list is a new file, `<presets_dir>/.simple-view.json`.
+
+### Added
+- Rename and delete presets from the Presets panel (Advanced view). Rename never overwrites an
+  existing preset; delete asks first. Commands `rename_preset` and `delete_preset`.
+- "Show in the Simple view" per preset (phone icon in the Presets panel, command
+  `set_preset_in_simple`): the Simple view lists only the shown ones, so the household sees the
+  presets that matter. The `presets` event carries `hidden` (older clients ignore it).
+
+### Changed
+- Saving over an existing preset ("Save “Live”", or Save as with a taken name) asks for
+  confirmation first.
+
 Advanced layout from the UI review (web UI only).
 
 ### Changed

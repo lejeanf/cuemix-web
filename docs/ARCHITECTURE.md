@@ -242,6 +242,9 @@ Client → serveur (`Command`, tag `cmd`) :
 {"cmd":"save_preset","name":"live"}
 {"cmd":"import_preset","name":"from file","text":"{\"schema_version\":2,\"state\":{…}}"}
 {"cmd":"list_presets"}
+{"cmd":"delete_preset","name":"old"}
+{"cmd":"rename_preset","name":"live","to":"live 2"}
+{"cmd":"set_preset_in_simple","name":"studio","show":false}
 {"cmd":"set_label","ch":2,"label":{"name":"Vox","color":"#06B6D4"}}
 {"cmd":"measure_start"}
 {"cmd":"measure_stop"}
@@ -259,7 +262,7 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 {"event":"changed","params":[{"param":"dim","on":true}]}
 {"event":"status","connection":"online"}
 {"event":"session","active_preset":"live","modified":true,"connection":"online","device":{"model":"UL5E","firmware":"2.0.8+2568","topology":{…},"input_names":["Mic 1",…],"mix_names":["Main 1-2",…],"stereo_inputs":[…],"stereo_buses":[…]}}
-{"event":"presets","names":["default","live"]}
+{"event":"presets","names":["default","live","studio"],"hidden":["studio"]}
 {"event":"labels","channels":{"2":{"name":"Vox","color":"#06B6D4"}}}
 {"event":"meters","levels":[0.0,0.12,…]}
 {"event":"measure","state":"playing","source":[6,7],"until":"2026-11-16T20:15:30Z"}
@@ -611,6 +614,7 @@ Trois acteurs, chacun avec ses droits :
 | D31 | **Plancher de version** (0.7.2) : ni l'interface ni la racine n'installent une release plus ancienne que la dernière qui corrige une faille ou un bug grave (`v0.7.2`, relevable par l'asset `min-version` de la dernière release) ; seul root, en ligne de commande, peut passer outre (`cuemix-update --version vX --force`). Restreint D30 (« y compris plus ancienne ») | Sans plancher, n'importe quel client du réseau (ou une page piégée) pouvait réinstaller une version vulnérable ; le retour arrière rapide reste possible entre versions saines |
 | D32 | **Releases signées (minisign, 0.7.2)** : chaque fichier publié (`.tar.gz`, `.deb`, `min-version`) est signé par un job `sign` séparé, dans l'environnement GitHub protégé `release` (relecteur obligatoire, tags `v*`), qui n'exécute aucun code de build tiers et seul lit `MINISIGN_SECRET_KEY` / `MINISIGN_PASSWORD`. Le commentaire de confiance de chaque signature est `cuemix-web <nom du fichier>` ; le job vérifie tout contre `deploy/minisign.pub` avant publication. `cuemix-update` (clé épinglée `MINISIGN_PUBKEY`, égale à `deploy/minisign.pub`, vérifié par la CI), `linux-setup.sh` et le script de provisionnement Proxmox (clé passée par l'hôte) refusent tout fichier dont la signature est absente, invalide, d'une autre clé ou nomme un autre fichier ; `minisign` tourne sans privilèges. `min-version` non signé : ignoré (plancher intégré). Le sha256 reste vérifié | Le sha256 venait de la même release que le binaire : quiconque pouvait modifier une release (jeton volé, dépendance de build compromise) pouvait modifier les deux. Clé hors des jobs de build, approbation humaine à chaque release ; attestations GitHub écartées (un outil de plus dans le conteneur, dépendance à Sigstore) |
 | D33 | **Jeton admin facultatif** (0.7.2, désactivé par défaut) : `[web] admin_token = "auto"` génère un jeton (fichier 0600) et journalise une fois un lien d'appairage ; `cuemix-web --pair-link` le réaffiche (root). Un appareil appairé (cookie `HttpOnly`, `SameSite=Strict`, ou `Authorization: Bearer`) seul peut : installer une release, changer l'interrupteur des pré-versions (`/api/update*` → 401 sinon), `set_speaker_plug`, `test_speaker_plug`, `set_osc_settings` (erreur au seul client sinon). Le droit d'un WebSocket est fixé à l'ouverture ; l'interface rouvre sa connexion après l'appairage. Faders, présets, marche/arrêt restent ouverts. Révocation : supprimer le fichier et redémarrer | Le réseau domestique compte aussi des invités et des objets connectés : ce qui change le logiciel installé ou les cibles réseau du serveur ne doit pas leur être ouvert, sans imposer une connexion à chaque musicien. Le jeton est dans le fragment de l'URL, jamais dans un journal ni un `Referer` |
+| D34 | **Gestion des présets depuis l'interface** : `delete_preset`, `rename_preset` (refusé si le nouveau nom existe : rien n'est jamais écrasé ; le préset est réécrit sous le nouveau nom, champ `name` compris, puis l'ancien fichier est supprimé) et `set_preset_in_simple`. La liste des présets masqués dans la vue Simple est dans `<presets_dir>/.simple-view.json` (`{"hidden_in_simple":[…]}`), sans nouvelle clé de configuration ; aucun nom de préset ne peut commencer par `.`, donc ce fichier n'apparaît jamais dans la liste. L'événement `presets` porte `hidden` (sous-ensemble de `names`, absent des serveurs antérieurs) ; supprimer le préset actif efface `active_preset` (le son ne change pas), le renommer suit le nouveau nom ; le drapeau suit un renommage et disparaît avec une suppression | Le foyer ne voit dans la vue Simple que les présets utiles ; un fichier à part garde les présets eux-mêmes inchangés (compatibles avec les versions antérieures et avec l'export/import) |
 
 ### Application écran d'accueil (iOS)
 

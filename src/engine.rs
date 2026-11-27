@@ -457,6 +457,10 @@ pub async fn start_with(
         tracing::warn!(error = %e, "cannot list presets");
         Vec::new()
     });
+    let preset_hidden = store.load_hidden().await.unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "cannot read the Simple view preset list");
+        Vec::new()
+    });
 
     let mut engine = Engine {
         state: MotuState::new(cfg.topology),
@@ -486,6 +490,7 @@ pub async fn start_with(
         internal: internal_tx,
         last_error: None,
         preset_names,
+        preset_hidden,
         store,
         events: events.clone(),
         to_device: dev_cmd_tx,
@@ -559,6 +564,8 @@ struct Engine {
     last_error: Option<String>,
     /// Cached preset list (no disk I/O on every client connect, audit #12).
     preset_names: Vec<String>,
+    /// Presets the Simple view leaves out (`<presets_dir>/.simple-view.json`).
+    preset_hidden: Vec<String>,
     store: PresetStore,
     events: broadcast::Sender<Envelope>,
     to_device: mpsc::Sender<Param>,
@@ -639,13 +646,7 @@ impl Engine {
                     Target::All,
                     ServerEvent::Session(self.session.clone()),
                 );
-                self.emit(
-                    origin,
-                    Target::All,
-                    ServerEvent::Presets {
-                        names: self.preset_names.clone(),
-                    },
-                );
+                self.emit(origin, Target::All, self.presets_event());
             }
             Err(e) => self.reply_error(origin, format!("{e:#}")),
         }
@@ -683,9 +684,7 @@ impl Engine {
         let mut events = vec![
             self.snapshot(),
             ServerEvent::Labels(self.labels.clone()),
-            ServerEvent::Presets {
-                names: self.preset_names.clone(),
-            },
+            self.presets_event(),
             ServerEvent::Measure(self.measure.clone()),
         ];
         events.push(self.power_event());
@@ -726,6 +725,117 @@ impl Engine {
 
     /// Recalls a preset: validates it, sends what differs to the device and
     /// makes it active.
+    /// The preset list with the Simple view's hidden ones (only those still present).
+    fn presets_event(&self) -> ServerEvent {
+        ServerEvent::Presets {
+            names: self.preset_names.clone(),
+            hidden: self
+                .preset_hidden
+                .iter()
+                .filter(|n| self.preset_names.binary_search(n).is_ok())
+                .cloned()
+                .collect(),
+        }
+    }
+
+    async fn save_hidden(&mut self, origin: Origin, hidden: Vec<String>) -> bool {
+        match self.store.save_hidden(&hidden).await {
+            Ok(()) => {
+                self.preset_hidden = hidden;
+                true
+            }
+            Err(e) => {
+                self.reply_error(origin, format!("{e:#}"));
+                false
+            }
+        }
+    }
+
+    async fn on_delete_preset(&mut self, origin: Origin, name: &str) {
+        if let Err(e) = self.store.delete(name).await {
+            return self.reply_error(origin, format!("{e:#}"));
+        }
+        self.preset_names.retain(|n| n != name);
+        if self.preset_hidden.iter().any(|n| n == name) {
+            let hidden = self
+                .preset_hidden
+                .iter()
+                .filter(|n| *n != name)
+                .cloned()
+                .collect();
+            self.save_hidden(origin, hidden).await;
+        }
+        // The sound stays as it is; it just no longer matches a saved preset.
+        if self.session.active_preset.as_deref() == Some(name) {
+            self.session.active_preset = None;
+            self.session.modified = false;
+            self.active = None;
+            self.emit(
+                origin,
+                Target::All,
+                ServerEvent::Session(self.session.clone()),
+            );
+        }
+        self.emit(origin, Target::All, self.presets_event());
+    }
+
+    async fn on_rename_preset(&mut self, origin: Origin, name: &str, to: &str) {
+        let renamed = match self.store.rename(name, to).await {
+            Ok(p) => p,
+            Err(e) => return self.reply_error(origin, format!("{e:#}")),
+        };
+        self.preset_names.retain(|n| n != name);
+        if let Err(i) = self.preset_names.binary_search(&renamed.name) {
+            self.preset_names.insert(i, renamed.name.clone());
+        }
+        if self.preset_hidden.iter().any(|n| n == name) {
+            let mut hidden: Vec<String> = self
+                .preset_hidden
+                .iter()
+                .filter(|n| *n != name)
+                .cloned()
+                .collect();
+            hidden.push(renamed.name.clone());
+            hidden.sort();
+            self.save_hidden(origin, hidden).await;
+        }
+        if self.session.active_preset.as_deref() == Some(name) {
+            self.session.active_preset = Some(renamed.name.clone());
+            if let Some(a) = self.active.as_mut() {
+                a.name.clone_from(&renamed.name);
+            }
+            self.emit(
+                origin,
+                Target::All,
+                ServerEvent::Session(self.session.clone()),
+            );
+        }
+        self.emit(origin, Target::All, self.presets_event());
+    }
+
+    async fn on_preset_in_simple(&mut self, origin: Origin, name: &str, show: bool) {
+        if self
+            .preset_names
+            .binary_search_by(|n| n.as_str().cmp(name))
+            .is_err()
+        {
+            return self.reply_error(origin, format!("no preset named {name:?}"));
+        }
+        let mut hidden: Vec<String> = self
+            .preset_hidden
+            .iter()
+            .filter(|n| *n != name)
+            .cloned()
+            .collect();
+        if !show {
+            hidden.push(name.to_owned());
+            hidden.sort();
+        }
+        if hidden != self.preset_hidden && self.save_hidden(origin, hidden).await {
+            self.emit(origin, Target::All, self.presets_event());
+        }
+    }
+
     fn recall(&mut self, origin: Origin, preset: Preset) {
         let name = preset.name.clone();
         if preset.state.topology != self.state.topology {
@@ -790,13 +900,7 @@ impl Engine {
                 if let Err(i) = self.preset_names.binary_search(&saved.name) {
                     self.preset_names.insert(i, saved.name.clone());
                 }
-                self.emit(
-                    origin,
-                    Target::All,
-                    ServerEvent::Presets {
-                        names: self.preset_names.clone(),
-                    },
-                );
+                self.emit(origin, Target::All, self.presets_event());
                 self.recall(origin, saved);
             }
             Err(e) => self.reply_error(origin, format!("{e:#}")),
@@ -872,11 +976,16 @@ impl Engine {
                 Err(e) => self.reply_error(origin, e),
                 Ok(()) => self.save_preset(origin, &name).await,
             },
+            Command::DeletePreset { name } => self.on_delete_preset(origin, &name).await,
+            Command::RenamePreset { name, to } => self.on_rename_preset(origin, &name, &to).await,
+            Command::SetPresetInSimple { name, show } => {
+                self.on_preset_in_simple(origin, &name, show).await
+            }
             // Explicit request: re-read the directory and refresh the cache.
             Command::ListPresets => match self.store.list().await {
                 Ok(names) => {
-                    self.preset_names.clone_from(&names);
-                    self.emit(origin, Target::Only(origin), ServerEvent::Presets { names })
+                    self.preset_names = names;
+                    self.emit(origin, Target::Only(origin), self.presets_event())
                 }
                 Err(e) => self.reply_error(origin, format!("{e:#}")),
             },
@@ -1188,7 +1297,8 @@ mod tests {
         assert_eq!(
             next(&mut rx).await.event,
             ServerEvent::Presets {
-                names: vec!["imported".into()]
+                names: vec!["imported".into()],
+                hidden: vec![]
             }
         );
         let ServerEvent::Snapshot { state, session } = next(&mut rx).await.event else {
@@ -1215,6 +1325,108 @@ mod tests {
         let env = next(&mut rx).await;
         assert!(matches!(env.event, ServerEvent::Error { .. }));
         assert!(env.is_for(o) && !env.is_for(Origin::Web(4)));
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn presets_delete_rename_and_simple_view_flag() {
+        let (h, _link, dir) = setup("manage").await;
+        let mut rx = h.subscribe();
+        let o = Origin::Web(3);
+        let presets = |names: &[&str], hidden: &[&str]| ServerEvent::Presets {
+            names: names.iter().map(|s| (*s).into()).collect(),
+            hidden: hidden.iter().map(|s| (*s).into()).collect(),
+        };
+        // Wait for the event a command ends with (session events come first when it is active).
+        async fn presets_ev(rx: &mut broadcast::Receiver<Envelope>) -> ServerEvent {
+            loop {
+                let e = next(rx).await.event;
+                if matches!(e, ServerEvent::Presets { .. }) {
+                    return e;
+                }
+            }
+        }
+        for n in ["Live", "Studio"] {
+            h.command(o, Command::SavePreset { name: n.into() })
+                .await
+                .unwrap();
+            presets_ev(&mut rx).await;
+        }
+        // Hide Studio from the Simple view.
+        h.command(
+            o,
+            Command::SetPresetInSimple {
+                name: "Studio".into(),
+                show: false,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            presets_ev(&mut rx).await,
+            presets(&["Live", "Studio"], &["Studio"])
+        );
+        // Renaming the active, hidden preset: the flag and the session follow it.
+        h.command(
+            o,
+            Command::RenamePreset {
+                name: "Studio".into(),
+                to: "Home".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let ServerEvent::Session(s) = next(&mut rx).await.event else {
+            panic!("session")
+        };
+        assert_eq!(s.active_preset.as_deref(), Some("Home"));
+        assert_eq!(
+            presets_ev(&mut rx).await,
+            presets(&["Home", "Live"], &["Home"])
+        );
+        // Never over an existing preset: refused, to the sender only.
+        h.command(
+            o,
+            Command::RenamePreset {
+                name: "Home".into(),
+                to: "Live".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let env = next(&mut rx).await;
+        assert!(matches!(env.event, ServerEvent::Error { .. }) && env.is_for(o));
+        // Deleting the active preset clears it; the flag goes too.
+        h.command(
+            o,
+            Command::DeletePreset {
+                name: "Home".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let ServerEvent::Session(s) = next(&mut rx).await.event else {
+            panic!("session")
+        };
+        assert_eq!(s.active_preset, None);
+        assert_eq!(presets_ev(&mut rx).await, presets(&["Live"], &[]));
+        assert!(tokio::fs::metadata(dir.join("presets").join("Home.json"))
+            .await
+            .is_err());
+        // Unknown preset: an error.
+        h.command(
+            o,
+            Command::SetPresetInSimple {
+                name: "Nope".into(),
+                show: false,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            next(&mut rx).await.event,
+            ServerEvent::Error { .. }
+        ));
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
@@ -1254,7 +1466,8 @@ mod tests {
         assert_eq!(
             next(&mut rx).await.event,
             ServerEvent::Presets {
-                names: vec!["base".into()]
+                names: vec!["base".into()],
+                hidden: vec![]
             }
         );
 

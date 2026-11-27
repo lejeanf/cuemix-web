@@ -61,6 +61,9 @@ const TYPED_COMMANDS: Command[] = [
   { cmd: 'test_speaker_plug', on: true },
   { cmd: 'set_osc_settings', settings: osc },
   { cmd: 'set_return_level', channel: 'phones', db: -24 },
+  { cmd: 'delete_preset', name: 'Old' },
+  { cmd: 'rename_preset', name: 'Live', to: 'Live 2' },
+  { cmd: 'set_preset_in_simple', name: 'Studio', show: false },
 ];
 
 /** Every event but the snapshot, typed by protocol.ts, in the vectors' order. */
@@ -75,7 +78,7 @@ const TYPED_EVENTS: ServerEvent[] = [
       input_names: [], stereo_names: [], mix_names: [], mix_order: [], stereo_inputs: [], stereo_buses: [],
     },
   },
-  { event: 'presets', names: ['Live', 'Studio'] },
+  { event: 'presets', names: ['Live', 'Studio'], hidden: ['Studio'] },
   { event: 'labels', channels: { 0: label } },
   { event: 'meters', levels: [0, 0.25, 0.5, 1] },
   { event: 'meter_raw', raw: [0, 64, 255] },
