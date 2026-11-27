@@ -361,11 +361,13 @@ fn events() -> Vec<ServerEvent> {
                 on: true,
                 fading: Some(FadeDir::Out),
                 plug: Some(PlugState::On),
+                return_db: Some(-18.0),
             },
             phones: ChannelPower {
                 on: false,
                 fading: None,
                 plug: None,
+                return_db: Some(-70.0),
             },
         },
         ServerEvent::SpeakerPlug {

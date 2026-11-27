@@ -267,10 +267,17 @@ impl Engine {
                 (main && matches!(self.power.stage, Stage::PlugOn | Stage::Warmup { .. }))
                     .then_some(FadeDir::In)
             });
-        ChannelPower {
+        let p = ChannelPower {
             on: !power::is_off(self.level(channel)),
             fading,
             plug: (main && self.plug_enabled()).then_some(self.plug.state),
+            return_db: None,
+        };
+        // Off (or on its way there): say where an On would bring it back to.
+        ChannelPower {
+            return_db: (!p.intent())
+                .then(|| power::return_level(self.power.remembered.get(channel))),
+            ..p
         }
     }
 
@@ -297,6 +304,7 @@ impl Engine {
                 on: p.on,
                 fading: p.fading,
                 plug: p.plug,
+                return_db: p.return_db,
             }
         };
         let device = self.session.device.as_ref();
@@ -1361,8 +1369,8 @@ mod tests {
             serde_json::to_value(ServerEvent::Power { main, phones }).unwrap(),
             serde_json::json!({
                 "event": "power",
-                "main": {"on": true, "fading": null, "plug": null},
-                "phones": {"on": true, "fading": null, "plug": null}
+                "main": {"on": true, "fading": null, "plug": null, "return_db": null},
+                "phones": {"on": true, "fading": null, "plug": null, "return_db": null}
             })
         );
         // Phones fade the same way and are independent of Main.
@@ -1379,6 +1387,9 @@ mod tests {
         let saved = r.saved().await;
         assert_eq!(saved.phones, Some(-30.0));
         assert_eq!(saved.main, None);
+        // Off: clients are told where On goes back to; Main (on) has nothing to say.
+        let (main, phones) = r.power_event().await;
+        assert_eq!((phones.return_db, main.return_db), (Some(-30.0), None));
         // Phones never use the plug.
         assert!(r.fake.calls().is_empty());
         r.cleanup().await;

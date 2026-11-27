@@ -263,6 +263,8 @@ export interface ChannelPower {
   on: boolean;
   /** Server-side fade (or plug warm-up) in progress. */
   fading: FadeDirection | null;
+  /** Whole dB an On fades back to, while off or fading out; null while on. Absent on servers before it was added. */
+  return_db?: number | null;
 }
 export interface PowerInfo {
   main: ChannelPower & { /** null = no plug enabled. */ plug: PlugState | null };

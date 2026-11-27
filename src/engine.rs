@@ -210,6 +210,8 @@ pub struct ChannelSummary {
     pub fading: Option<FadeDir>,
     /// Speaker plug state (Main only, `null` when no plug is enabled).
     pub plug: Option<PlugState>,
+    /// Whole dB an On fades back to while the channel is off or fading out; `null` while on.
+    pub return_db: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

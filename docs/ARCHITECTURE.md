@@ -262,7 +262,7 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 {"event":"labels","channels":{"2":{"name":"Vox","color":"#06B6D4"}}}
 {"event":"meters","levels":[0.0,0.12,…]}
 {"event":"measure","state":"playing","source":[6,7],"until":"2026-11-16T20:15:30Z"}
-{"event":"power","main":{"on":true,"fading":"out","plug":"on"},"phones":{"on":true,"fading":null,"plug":null}}
+{"event":"power","main":{"on":true,"fading":"out","plug":"on","return_db":-18.0},"phones":{"on":true,"fading":null,"plug":null,"return_db":null}}
 {"event":"speaker_plug","settings":{…},"urls":{"on":"http://plug.example/rpc/Switch.Set?id=0&on=true","off":"…&on=false"},"state":"unknown"}
 {"event":"speaker_plug_result","on":true,"ok":false,"message":"no answer (timeout)"}
 {"event":"osc_settings","settings":{"listen":"0.0.0.0:8000","targets":["192.0.2.20:9000"]},"listening":true,"error":null}
@@ -322,14 +322,14 @@ accepté) et répondent avec `Cache-Control: no-store`.
 
 ```json
 {"api":1,"version":"0.6.0",
- "main":{"db":-12.0,"on":true,"fading":null,"plug":"on"},
- "phones":{"db":-30.0,"on":true,"fading":null,"plug":null},
+ "main":{"db":-12.0,"on":true,"fading":null,"plug":"on","return_db":null},
+ "phones":{"db":-100.0,"on":false,"fading":null,"plug":null,"return_db":-30.0},
  "preset":{"active":"live","modified":false},
  "presets":["default","live"],
  "motu":{"status":"online","model":"UL5E","firmware":"2.0.8+2568"}}
 ```
 
-`db` = dB entiers `-100..0` ; `on`, `fading`, `plug` comme l'événement `power` ; `motu.status` ∈
+`db` = dB entiers `-100..0` ; `on`, `fading`, `plug`, `return_db` comme l'événement `power` (`return_db` : dB entiers vers lesquels un « Marche » ramène le canal tant qu'il est éteint ou en fondu de sortie — le niveau mémorisé, sinon −70 dB ; `null` quand il est allumé ou en fondu d'entrée ; absent des serveurs antérieurs) ; `motu.status` ∈
 `online`/`connecting`/`demo` ; `model` / `firmware` = `null` sans appareil identifié.
 
 `POST /api/v1/command` — corps JSON = **la même `Command` que `/ws`**, limitée à
@@ -621,7 +621,7 @@ Trois acteurs, chacun avec ses droits :
 ### Vue Simple : affinages de la revue UX (non publié)
 
 - Courbe des boutons de volume (Monitor, Phones ; vue Simple et vue Sortie) : `volKnobToNorm` / `volKnobFromNorm` (`frontend/src/lib/fader.ts`), c'est-à-dire la loi « trim » des curseurs étirée pour que le plancher (−100 dB) soit au début de l'arc. Vecteurs partagés avec l'app iOS : `design/vectors/volume-knob.json` (vérifiés par vitest). Flèches, molette et lecteur d'écran : pas exact de 1 dB (prop `keyStep` de `Knob.svelte`, avec `curve`).
-- Boutons marche/arrêt : pendant un fondu, couleur de l'état visé et barre animée (immobile avec `prefers-reduced-motion`) ; préchauffage de la prise en ambre avec compte à rebours calculé côté client depuis `warmup_ms` des réglages de la prise et l'instant où l'état `warming` arrive. Le niveau mémorisé n'est pas envoyé aux clients, donc la vue n'affiche pas encore « revient à … dB ».
+- Boutons marche/arrêt : pendant un fondu, couleur de l'état visé et barre animée (immobile avec `prefers-reduced-motion`) ; préchauffage de la prise en ambre avec compte à rebours calculé côté client depuis `warmup_ms` des réglages de la prise et l'instant où l'état `warming` arrive. Sous un canal éteint, « returns to −18 dB » vient du champ `return_db` de l'événement `power` (ligne réservée, pour que le bouton ne bouge pas).
 - Canal éteint : « Off » au lieu du plancher sous le bouton (et dans `aria-valuetext`).
 - Présets en vue Simple : ligne « Preset » (préset courant, « ● Modified ») qui ouvre `PresetPicker.svelte` (fenêtre `Dialog`, un bouton Load par préset) ; `store.presetsOpen` compte dans `panelOpen`.
 - Mètres (`meters.ts`) : graduations à −40/−18/−6 dBFS, repère d'écrêtage rouge mémorisé dès qu'une trame atteint ≈ −0,3 dBFS, effacé d'un toucher sur le mètre (les mètres ne servent plus de surface de glissement du bouton).

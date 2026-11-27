@@ -234,6 +234,7 @@ export const S = {
     presetsNote: 'Loading a preset changes every mix. Monitor and Phones levels stay as they are.',
     current: 'current',
     off: 'Off',
+    returnsTo: (db: string) => `returns to ${db} dB`,
     warmingUp: (s: number | null) => (s === null ? 'Warming up…' : `Warming up · ${s} s`),
     tapToCancel: 'Tap again to cancel',
   },

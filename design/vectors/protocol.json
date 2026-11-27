@@ -1188,12 +1188,14 @@
       "main": {
         "fading": "out",
         "on": true,
-        "plug": "on"
+        "plug": "on",
+        "return_db": -18.0
       },
       "phones": {
         "fading": null,
         "on": false,
-        "plug": null
+        "plug": null,
+        "return_db": -70.0
       }
     },
     {

@@ -177,7 +177,7 @@ Everything ships as **cuemix-web 0.6.0** (phase 1), with the usual release steps
 Controls and intents run for a few seconds in the background; opening a WebSocket and waiting for
 the full snapshot is too slow for that. New routes:
 
-- `GET /api/v1/summary`: Monitor and Phones level, their on/off and fading state, active preset,
+- `GET /api/v1/summary`: Monitor and Phones level, their on/off and fading state, the level On returns to (`return_db`), active preset,
   preset list, MOTU status, server version.
 - `POST /api/v1/command`: only the commands quick access needs: set `main_vol` / `phones_vol`,
   `power`, `load_preset`. Everything else is refused (400). In particular the room test can never

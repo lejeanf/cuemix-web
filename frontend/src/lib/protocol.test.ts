@@ -80,7 +80,7 @@ const TYPED_EVENTS: ServerEvent[] = [
   { event: 'meter_raw', raw: [0, 64, 255] },
   { event: 'patch', sources: [0, 1, 2] },
   { event: 'measure', state: 'idle', source: [2, 3] },
-  { event: 'power', main: { on: true, fading: 'out', plug: 'on' }, phones: { on: false, fading: null, plug: null } },
+  { event: 'power', main: { on: true, fading: 'out', plug: 'on', return_db: -18 }, phones: { on: false, fading: null, plug: null, return_db: -70 } },
   {
     event: 'speaker_plug', settings: plug, state: 'off',
     urls: { on: 'http://plug.example/rpc/Switch.Set?id=0&on=true', off: 'http://plug.example/rpc/Switch.Set?id=0&on=false' },

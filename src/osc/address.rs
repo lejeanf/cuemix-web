@@ -744,11 +744,13 @@ mod tests {
             on: true,
             fading: Some(FadeDir::Out),
             plug: None,
+            return_db: Some(-20.0),
         };
         let phones = ChannelPower {
             on: false,
             fading: Some(FadeDir::In),
             plug: None,
+            return_db: None,
         };
         let fb = power_feedback(&main, &phones);
         assert_eq!(fb.len(), 2);

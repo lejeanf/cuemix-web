@@ -44,6 +44,8 @@
   const phonesPower = $derived(powerView(store.c.power, 'phones', phones));
   /** "Off" instead of the floor level while a channel is off (and not fading). */
   const levelText = (v: PowerView) => (db: number) => (!v.on && v.fading === null ? S.simple.off : dbText(db));
+  /** "returns to −18 dB" under an off channel: the level the server's On fades back to. */
+  const returnText = (v: PowerView) => (!v.on && v.fading === null && v.returnDb !== null ? S.simple.returnsTo(formatDb(v.returnDb, 0)) : '');
 
   // Plug warm-up countdown: the warm-up time comes from the plug settings, counted from
   // when the server reported "warming". Null when the settings are not known.
@@ -134,6 +136,8 @@
           <Meter index={METER_SLOT.output(1)} label="Main R meter" />
         </div>
       </div>
+      <!-- Always there (empty when on) so the button below never jumps. -->
+      <p class="ret" aria-live="polite">{returnText(mainPower)}</p>
       {@render power(mainPower, 'monitor')}
     </section>
     <section class="card" aria-label="{S.phones} volume" bind:this={phonesCard}>
@@ -159,6 +163,8 @@
           <Meter index={METER_SLOT.output(11)} label="Phones R meter" />
         </div>
       </div>
+      <!-- Always there (empty when on) so the button below never jumps. -->
+      <p class="ret" aria-live="polite">{returnText(phonesPower)}</p>
       {@render power(phonesPower, 'phones')}
     </section>
   </div>
@@ -255,6 +261,13 @@
     border-radius: 12px;
     cursor: pointer;
     touch-action: manipulation;
+  }
+  .ret {
+    margin: -6px 0 0;
+    min-height: 1.3em;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-dim);
   }
   .power svg {
     width: 26px;
