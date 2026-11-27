@@ -12,6 +12,19 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+### Added
+- `design/vectors/protocol.json`: one sample of every WebSocket message, written by the
+  server's own types (`tests/protocol_vectors.rs`). vitest checks `protocol.ts` and the
+  client reducer against it, so the web UI and the server can no longer drift apart
+  silently. Regenerate with `UPDATE_VECTORS=1 cargo test --test protocol_vectors`.
+
+### Security
+- npm never runs package install scripts (`frontend/.npmrc`, and `npm ci --ignore-scripts`
+  in CI): the usual way a compromised package runs code on a build machine. No package in
+  the lock needs one.
+
+Compatibility: no change to presets, `config.toml` or the protocol.
+
 ## [0.7.0] - 2026-11-26
 
 OSC and version settings in the Advanced menu, and open tabs follow updates.

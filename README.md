@@ -159,7 +159,7 @@ The DSP drawer and the output EQ follow CueMix 5: a curve with draggable bands, 
 ```sh
 cd frontend && npm install
 npm run dev      # Vite dev server, proxies /ws and /api to 127.0.0.1:8080
-npm test         # vitest
+npm test         # vitest (incl. protocol.ts against design/vectors/protocol.json)
 npm run check    # svelte-check
 npm run build    # outputs frontend/dist (embedded into the binary)
 ```
@@ -308,6 +308,7 @@ How an update stays safe:
 - Never commit `config.toml`, `*.local.toml`, `deploy/*.env`, `.env`, keys, or `data/` contents (labels and presets). All are git-ignored, and `make check-secrets` / CI run gitleaks with a rule that blocks RFC1918 addresses.
 - Committed examples use only `192.0.2.x` (documentation range), `127.0.0.1`, and link-local `169.254.x.x`. Put real addresses only in local, git-ignored files.
 - The server runs as a non-root user, and production code avoids `unwrap`/`expect` (enforced by a clippy lint).
+- The web UI's npm packages are build-time only, and npm never runs their install scripts (`frontend/.npmrc` sets `ignore-scripts=true`; CI also passes `--ignore-scripts`). CI audits both dependency trees (`cargo audit`, `npm audit`).
 
 ## Documentation
 
