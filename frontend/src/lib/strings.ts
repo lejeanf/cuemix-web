@@ -235,6 +235,7 @@ export const S = {
     current: 'current',
     off: 'Off',
     returnsTo: (db: string) => `returns to ${db} dB`,
+    keepAwake: 'Keep screen on',
     warmingUp: (s: number | null) => (s === null ? 'Warming up…' : `Warming up · ${s} s`),
     tapToCancel: 'Tap again to cancel',
   },

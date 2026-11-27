@@ -573,6 +573,11 @@
           "192.0.2.10:9001"
         ]
       }
+    },
+    {
+      "channel": "phones",
+      "cmd": "set_return_level",
+      "db": -24.0
     }
   ],
   "events": [

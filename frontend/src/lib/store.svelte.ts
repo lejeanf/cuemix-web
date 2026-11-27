@@ -41,7 +41,7 @@ const TABS: readonly Tab[] = ['mixer', 'input', 'output', 'reverb', 'probe'];
 const VIEW_KEY = 'cuemix.view';
 
 /** localStorage, or null when the browser blocks even looking at it. */
-function safeStorage(): Storage | null {
+export function safeStorage(): Storage | null {
   try {
     return localStorage;
   } catch {
@@ -478,6 +478,11 @@ class Store {
   power(channel: PowerChannel, on: boolean): void {
     if (!this.ready) return;
     this.sendRaw({ cmd: 'power', channel, on });
+  }
+  /** While a channel is off: choose the level its next On fades back to (it stays off). */
+  setReturnLevel(channel: PowerChannel, db: number): void {
+    if (!this.ready) return;
+    this.sendRaw({ cmd: 'set_return_level', channel, db: Math.round(db) });
   }
   setSpeakerPlug(settings: SpeakerPlugSettings): boolean {
     return this.sendRaw({ cmd: 'set_speaker_plug', settings });

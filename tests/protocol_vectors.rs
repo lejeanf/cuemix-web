@@ -97,9 +97,10 @@ fn command_kind(c: &Command) -> usize {
         C::SetSpeakerPlug { .. } => 9,
         C::TestSpeakerPlug { .. } => 10,
         C::SetOscSettings { .. } => 11,
+        C::SetReturnLevel { .. } => 12,
     }
 }
-const COMMAND_KINDS: usize = 12;
+const COMMAND_KINDS: usize = 13;
 
 fn event_kind(e: &ServerEvent) -> usize {
     use ServerEvent as E;
@@ -300,6 +301,10 @@ fn commands() -> Vec<Command> {
         Command::TestSpeakerPlug { on: true },
         Command::SetOscSettings {
             settings: osc_settings(),
+        },
+        Command::SetReturnLevel {
+            channel: PowerChannel::Phones,
+            db: -24.0,
         },
     ]
 }

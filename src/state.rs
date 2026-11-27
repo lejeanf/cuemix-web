@@ -853,6 +853,13 @@ pub enum Command {
         channel: PowerChannel,
         on: bool,
     },
+    /// While a channel is off (or fading out): choose the level its next On fades back to
+    /// (a drag on the off channel's knob). Whole dB; at the minimum it clears the choice (On
+    /// then goes to the safe level). Ignored while the channel is on or fading in.
+    SetReturnLevel {
+        channel: PowerChannel,
+        db: f64,
+    },
     /// Validate, save and broadcast the speaker plug settings.
     SetSpeakerPlug {
         settings: SpeakerPlugSettings,
@@ -902,6 +909,15 @@ impl Command {
             | Self::MeasureStop
             | Self::Power { .. }
             | Self::TestSpeakerPlug { .. } => Ok(()),
+            Self::SetReturnLevel { db, .. } => {
+                if db.is_finite() && (TRIM_MIN_DB..=0.0).contains(db) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "return level must be between {TRIM_MIN_DB} and 0 dB"
+                    ))
+                }
+            }
         }
     }
 }

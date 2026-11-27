@@ -60,6 +60,7 @@ const TYPED_COMMANDS: Command[] = [
   { cmd: 'set_speaker_plug', settings: plug },
   { cmd: 'test_speaker_plug', on: true },
   { cmd: 'set_osc_settings', settings: osc },
+  { cmd: 'set_return_level', channel: 'phones', db: -24 },
 ];
 
 /** Every event but the snapshot, typed by protocol.ts, in the vectors' order. */

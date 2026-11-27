@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { store } from '../lib/store.svelte';
+  import { safeStorage, store } from '../lib/store.svelte';
+  import { canKeepAwake, holdScreenAwake, loadKeepAwake, saveKeepAwake } from '../lib/wakelock';
   import { S } from '../lib/strings';
   import { TRIM_MIN_DB } from '../lib/protocol';
   import { formatDb, volKnobFromNorm, volKnobToNorm } from '../lib/fader';
@@ -43,9 +44,35 @@
   const mainPower = $derived(powerView(store.c.power, 'main', main));
   const phonesPower = $derived(powerView(store.c.power, 'phones', phones));
   /** "Off" instead of the floor level while a channel is off (and not fading). */
-  const levelText = (v: PowerView) => (db: number) => (!v.on && v.fading === null ? S.simple.off : dbText(db));
-  /** "returns to −18 dB" under an off channel: the level the server's On fades back to. */
-  const returnText = (v: PowerView) => (!v.on && v.fading === null && v.returnDb !== null ? S.simple.returnsTo(formatDb(v.returnDb, 0)) : '');
+  const isOff = (v: PowerView) => !v.on && v.fading === null;
+  const levelText = (v: PowerView) => (db: number) => (isOff(v) ? S.simple.off : dbText(db));
+
+  // While a channel is off its knob sets the level On comes back to (it stays off): the knob
+  // shows that level with a grey arc. `pending` is the level being dragged, until the server
+  // reports it back.
+  type Ch = 'main' | 'phones';
+  let pending = $state<Record<Ch, number | null>>({ main: null, phones: null });
+  const returnOf = (ch: Ch, v: PowerView) => pending[ch] ?? v.returnDb;
+  const knobValue = (ch: Ch, v: PowerView, live: number) => (isOff(v) ? (returnOf(ch, v) ?? TRIM_MIN_DB) : live);
+  /** "returns to −18 dB" under an off channel. */
+  const returnText = (ch: Ch, v: PowerView) => {
+    const r = returnOf(ch, v);
+    return isOff(v) && r !== null ? S.simple.returnsTo(formatDb(r, 0)) : '';
+  };
+  function turn(ch: Ch, v: PowerView, db: number, final: boolean) {
+    if (!isOff(v)) return setVol(ch === 'main' ? 'main_vol' : 'phones_vol', db, final);
+    // Never down to the floor: that would mean "nothing remembered" (On then goes to −70 dB).
+    const d = Math.max(Math.round(db), TRIM_MIN_DB + 1);
+    pending[ch] = d;
+    if (final) store.setReturnLevel(ch, d);
+  }
+  // A drag is settled once the server reports its level back, or the channel turns on.
+  $effect(() => {
+    for (const [ch, v] of [['main', mainPower], ['phones', phonesPower]] as const) {
+      const p = pending[ch];
+      if (p !== null && (!isOff(v) || v.returnDb === p)) pending[ch] = null;
+    }
+  });
 
   // Plug warm-up countdown: the warm-up time comes from the plug settings, counted from
   // when the server reported "warming". Null when the settings are not known.
@@ -77,6 +104,15 @@
   $effect(() => {
     if (store.ready) store.listPresets();
   });
+
+  // Keep screen on (stage use): optional, per browser, off by default.
+  const awakeSupported = canKeepAwake();
+  let keepAwake = $state(awakeSupported && loadKeepAwake(safeStorage()));
+  $effect(() => (keepAwake ? holdScreenAwake() : undefined));
+  function toggleAwake() {
+    keepAwake = !keepAwake;
+    saveKeepAwake(safeStorage(), keepAwake);
+  }
 </script>
 
 
@@ -116,7 +152,8 @@
     <section class="card" aria-label="{S.monitor} volume" bind:this={mainCard}>
       <div class="blk">
         <Knob
-          value={main}
+          value={knobValue('main', mainPower, main)}
+          ghost={isOff(mainPower)}
           min={TRIM_MIN_DB}
           max={0}
           step={1}
@@ -129,7 +166,7 @@
           format={levelText(mainPower)}
           disabled={off}
           surface={mainCard}
-          onchange={(v, f) => setVol('main_vol', v, f)}
+          onchange={(v, f) => turn('main', mainPower, v, f)}
         />
         <div class="km" style:height="{size}px" aria-hidden="true">
           <Meter index={METER_SLOT.output(0)} label="Main L meter" />
@@ -137,13 +174,14 @@
         </div>
       </div>
       <!-- Always there (empty when on) so the button below never jumps. -->
-      <p class="ret" aria-live="polite">{returnText(mainPower)}</p>
+      <p class="ret" aria-live="polite">{returnText('main', mainPower)}</p>
       {@render power(mainPower, 'monitor')}
     </section>
     <section class="card" aria-label="{S.phones} volume" bind:this={phonesCard}>
       <div class="blk">
         <Knob
-          value={phones}
+          value={knobValue('phones', phonesPower, phones)}
+          ghost={isOff(phonesPower)}
           min={TRIM_MIN_DB}
           max={0}
           step={1}
@@ -156,7 +194,7 @@
           format={levelText(phonesPower)}
           disabled={off}
           surface={phonesCard}
-          onchange={(v, f) => setVol('phones_vol', v, f)}
+          onchange={(v, f) => turn('phones', phonesPower, v, f)}
         />
         <div class="km" style:height="{size}px" aria-hidden="true">
           <Meter index={METER_SLOT.output(10)} label="Phones L meter" />
@@ -164,7 +202,7 @@
         </div>
       </div>
       <!-- Always there (empty when on) so the button below never jumps. -->
-      <p class="ret" aria-live="polite">{returnText(phonesPower)}</p>
+      <p class="ret" aria-live="polite">{returnText('phones', phonesPower)}</p>
       {@render power(phonesPower, 'phones')}
     </section>
   </div>
@@ -176,6 +214,12 @@
       <span class="pv">{session.active_preset ?? S.simple.choosePreset}</span>
       {#if session.active_preset && session.modified}<span class="mod">{S.modified}</span>{/if}
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+    </button>
+  {/if}
+
+  {#if awakeSupported}
+    <button class="awake" role="switch" aria-checked={keepAwake} onclick={toggleAwake}>
+      <span class="sw" aria-hidden="true"></span>{S.simple.keepAwake}
     </button>
   {/if}
 
@@ -401,6 +445,51 @@
     stroke-width: 2;
     stroke-linecap: round;
     stroke-linejoin: round;
+  }
+  .awake {
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 14px;
+    background: none;
+    border: 0;
+    color: var(--text-dim);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .sw {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    transition: background 0.15s;
+  }
+  .sw::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: transform 0.15s;
+  }
+  .awake[aria-checked='true'] {
+    color: var(--text);
+  }
+  .awake[aria-checked='true'] .sw {
+    background: var(--cyan);
+    border-color: var(--cyan);
+  }
+  .awake[aria-checked='true'] .sw::after {
+    transform: translateX(16px);
+    background: var(--on-accent);
   }
   .room {
     align-self: center;

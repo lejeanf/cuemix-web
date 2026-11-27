@@ -18,6 +18,10 @@ Simple view refinements from the UI review. Compatibility: no preset or `config.
 - `power` event and `GET /api/v1/summary`: `return_db` per channel, the whole-dB level an On
   fades back to while the channel is off or fading out (the remembered level, else −70 dB), `null`
   while it is on. Older clients ignore it; the web UI reads it when present.
+- `set_return_level` command (WebSocket): while a channel is off or fading out, sets the level its
+  next On fades back to; ignored while it is on. Kept in `power.json` (also in demo mode).
+- Simple view: **Keep screen on** switch (screen wake lock while the page is visible), per
+  browser, off by default; shown only where the browser supports it.
 
 ### Changed
 - Monitor and Phones knobs (Simple view and Output view) use the same curve as the sliders: most
@@ -29,7 +33,8 @@ Simple view refinements from the UI review. Compatibility: no preset or `config.
   speaker plug warm-up turns the button amber with a countdown ("Warming up · 2 s"), and the plug
   dot is larger.
 - An off channel shows "Off" instead of "−100 dB" under its knob (and to screen readers), with the
-  level On brings it back to ("returns to −18 dB").
+  level On brings it back to ("returns to −18 dB"). Turning its knob while off now sets that level
+  (grey needle) and leaves the channel off; before, it set the live volume and turned it on.
 - Presets in the Simple view: a "Preset" row shows the current preset and "● Modified"; it opens a
   list where each preset has its own Load button, so one mis-tap no longer changes every mix.
 - Meters: faint ticks at −40, −18 and −6 dBFS, and a red clip mark that stays until the meter is

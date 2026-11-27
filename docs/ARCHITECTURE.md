@@ -246,6 +246,7 @@ Client → serveur (`Command`, tag `cmd`) :
 {"cmd":"measure_start"}
 {"cmd":"measure_stop"}
 {"cmd":"power","channel":"main","on":false}
+{"cmd":"set_return_level","channel":"phones","db":-24}
 {"cmd":"set_speaker_plug","settings":{"enabled":true,"kind":"shelly_rpc","host":"plug.example","switch_id":0,"on_url":"","off_url":"","warmup_ms":2000,"off_delay_ms":300,"timeout_ms":2000}}
 {"cmd":"test_speaker_plug","on":true}
 {"cmd":"set_osc_settings","settings":{"listen":"0.0.0.0:8000","targets":["192.0.2.20:9000","ipad.local:9000"]}}
@@ -621,7 +622,7 @@ Trois acteurs, chacun avec ses droits :
 ### Vue Simple : affinages de la revue UX (non publié)
 
 - Courbe des boutons de volume (Monitor, Phones ; vue Simple et vue Sortie) : `volKnobToNorm` / `volKnobFromNorm` (`frontend/src/lib/fader.ts`), c'est-à-dire la loi « trim » des curseurs étirée pour que le plancher (−100 dB) soit au début de l'arc. Vecteurs partagés avec l'app iOS : `design/vectors/volume-knob.json` (vérifiés par vitest). Flèches, molette et lecteur d'écran : pas exact de 1 dB (prop `keyStep` de `Knob.svelte`, avec `curve`).
-- Boutons marche/arrêt : pendant un fondu, couleur de l'état visé et barre animée (immobile avec `prefers-reduced-motion`) ; préchauffage de la prise en ambre avec compte à rebours calculé côté client depuis `warmup_ms` des réglages de la prise et l'instant où l'état `warming` arrive. Sous un canal éteint, « returns to −18 dB » vient du champ `return_db` de l'événement `power` (ligne réservée, pour que le bouton ne bouge pas).
+- Boutons marche/arrêt : pendant un fondu, couleur de l'état visé et barre animée (immobile avec `prefers-reduced-motion`) ; préchauffage de la prise en ambre avec compte à rebours calculé côté client depuis `warmup_ms` des réglages de la prise et l'instant où l'état `warming` arrive. Sous un canal éteint, « returns to −18 dB » vient du champ `return_db` de l'événement `power` (ligne réservée, pour que le bouton ne bouge pas). Tant que le canal est éteint, son bouton rotatif règle ce niveau de retour au lieu du volume (aiguille et arc gris ; commande `set_return_level`, entiers −99..0 dB, ignorée si le canal est allumé ou en fondu d'entrée ; le serveur le garde dans `power.json` même en démo, car c'est un choix explicite, contrairement au niveau mémorisé à l'arrêt). Option « Keep screen on » (verrou d'écran `navigator.wakeLock`, redemandé à chaque retour au premier plan ; par navigateur, désactivée par défaut, `frontend/src/lib/wakelock.ts`).
 - Canal éteint : « Off » au lieu du plancher sous le bouton (et dans `aria-valuetext`).
 - Présets en vue Simple : ligne « Preset » (préset courant, « ● Modified ») qui ouvre `PresetPicker.svelte` (fenêtre `Dialog`, un bouton Load par préset) ; `store.presetsOpen` compte dans `panelOpen`.
 - Mètres (`meters.ts`) : graduations à −40/−18/−6 dBFS, repère d'écrêtage rouge mémorisé dès qu'une trame atteint ≈ −0,3 dBFS, effacé d'un toucher sur le mètre (les mètres ne servent plus de surface de glissement du bouton).

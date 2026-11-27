@@ -18,6 +18,8 @@
     curve?: { toNorm: (v: number) => number; fromNorm: (n: number) => number };
     /** Exact value step for arrow keys and the wheel (Shift: still fine). Default: 2 % of the arc. */
     keyStep?: number;
+    /** Grey arc: the knob shows a stand-by value (e.g. the level an off channel returns to). */
+    ghost?: boolean;
     format?: (v: number) => string;
     disabled?: boolean;
     hint?: string;
@@ -45,6 +47,7 @@
     log = false,
     curve,
     keyStep,
+    ghost = false,
     format = (v) => String(Math.round(v * 100) / 100),
     disabled = false,
     hint,
@@ -190,7 +193,7 @@
   const ptr = $derived(pt(norm));
 </script>
 
-<div class="knob" class:disabled={off} data-unmapped={hint ? '' : undefined} title={hint}>
+<div class="knob" class:disabled={off} class:ghost data-unmapped={hint ? '' : undefined} title={hint}>
   <div
     class="dial"
     style:width="{size}px"
@@ -257,6 +260,13 @@
   .needle {
     stroke: var(--text);
     stroke-width: 2;
+  }
+  .ghost .arc {
+    stroke: var(--text-dim);
+    stroke-dasharray: 2 2.5;
+  }
+  .ghost .needle {
+    stroke: var(--text-dim);
   }
   .val {
     font-size: 12px;

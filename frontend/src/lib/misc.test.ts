@@ -330,3 +330,19 @@ describe('meter scale and clip', () => {
     expect(levelToPos(10 ** (-1 / 20))).toBeLessThan(CLIP_POS);
   });
 });
+
+describe('keep screen on choice', () => {
+  it('is off by default and survives blocked storage', async () => {
+    const { KEEP_AWAKE_KEY, loadKeepAwake, saveKeepAwake } = await import('./wakelock');
+    const m = new Map<string, string>();
+    const s = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+    expect(loadKeepAwake(s)).toBe(false);
+    saveKeepAwake(s, true);
+    expect(m.get(KEEP_AWAKE_KEY)).toBe('1');
+    expect(loadKeepAwake(s)).toBe(true);
+    const blocked = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+    expect(loadKeepAwake(blocked)).toBe(false);
+    expect(() => saveKeepAwake(blocked, true)).not.toThrow();
+    expect(loadKeepAwake(null)).toBe(false);
+  });
+});

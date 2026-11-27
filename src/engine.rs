@@ -834,6 +834,7 @@ impl Engine {
             Command::MeasureStart => self.on_measure(origin, MeasureRequest::Start),
             Command::MeasureStop => self.on_measure(origin, MeasureRequest::Stop),
             Command::Power { channel, on } => self.on_power(channel, on),
+            Command::SetReturnLevel { channel, db } => self.on_return_level(channel, db),
             Command::SetSpeakerPlug { settings } => self.on_set_speaker_plug(origin, settings),
             Command::TestSpeakerPlug { on } => self.on_test_speaker_plug(origin, on),
             Command::SetOscSettings { settings } => self.on_set_osc_settings(origin, settings),

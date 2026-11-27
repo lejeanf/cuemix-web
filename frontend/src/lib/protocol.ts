@@ -226,6 +226,8 @@ export type Command =
   | { cmd: 'measure_start' }
   | { cmd: 'measure_stop' }
   | { cmd: 'power'; channel: PowerChannel; on: boolean }
+  /** While off: the level the next On fades back to (whole dB; the minimum clears it). */
+  | { cmd: 'set_return_level'; channel: PowerChannel; db: number }
   | { cmd: 'set_speaker_plug'; settings: SpeakerPlugSettings }
   | { cmd: 'test_speaker_plug'; on: boolean }
   | { cmd: 'set_osc_settings'; settings: OscSettings };
