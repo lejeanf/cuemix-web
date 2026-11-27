@@ -78,6 +78,76 @@ impl PresetStore {
         names.sort();
         Ok(names)
     }
+
+    /// Removes `<name>.json`. A missing preset is an error (nothing was deleted).
+    pub async fn delete(&self, name: &str) -> Result<()> {
+        let path = self.path(name)?;
+        tokio::fs::remove_file(&path)
+            .await
+            .with_context(|| format!("cannot delete preset {name:?}"))
+    }
+
+    /// Renames a preset: written under the new name (its `name` field too), then the old file
+    /// is removed. Refused when the new name is taken, so nothing is ever overwritten.
+    pub async fn rename(&self, from: &str, to: &str) -> Result<Preset> {
+        let target = self.path(to)?;
+        if from == to {
+            bail!("the new name is the same as the old one");
+        }
+        if tokio::fs::try_exists(&target).await.unwrap_or(false) {
+            bail!("a preset named {to:?} already exists");
+        }
+        let mut preset = self.load(from).await?;
+        preset.name = to.to_owned();
+        write_atomic(&target, &serde_json::to_vec_pretty(&preset)?).await?;
+        self.delete(from).await?;
+        Ok(preset)
+    }
+
+    /// The hidden file with the presets the Simple view leaves out. Its name starts with a
+    /// `.`, which no preset name may, so it never shows up in [`Self::list`].
+    fn hidden_path(&self) -> PathBuf {
+        self.dir.join(SIMPLE_HIDDEN_FILE)
+    }
+
+    /// Presets not shown in the Simple view (sorted, unique). A missing file is an empty list;
+    /// invalid names in it are dropped.
+    pub async fn load_hidden(&self) -> Result<Vec<String>> {
+        let text = match tokio::fs::read_to_string(self.hidden_path()).await {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e).context("cannot read the Simple view preset list"),
+        };
+        let file: HiddenFile =
+            serde_json::from_str(&text).context("invalid Simple view preset list")?;
+        let mut names: Vec<String> = file
+            .hidden_in_simple
+            .into_iter()
+            .filter(|n| validate_name(n).is_ok())
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
+    pub async fn save_hidden(&self, names: &[String]) -> Result<()> {
+        tokio::fs::create_dir_all(&self.dir)
+            .await
+            .with_context(|| format!("cannot create {}", self.dir.display()))?;
+        let file = HiddenFile {
+            hidden_in_simple: names.to_vec(),
+        };
+        write_atomic(&self.hidden_path(), &serde_json::to_vec_pretty(&file)?).await
+    }
+}
+
+/// `<presets_dir>/.simple-view.json`: presets the Simple view does not list.
+pub const SIMPLE_HIDDEN_FILE: &str = ".simple-view.json";
+
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct HiddenFile {
+    hidden_in_simple: Vec<String>,
 }
 
 /// Parse a preset file (D15).
@@ -196,6 +266,36 @@ pub(crate) async fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
     use crate::state::{ChannelLabel, Param};
+
+    #[tokio::test]
+    async fn delete_rename_and_the_simple_view_list() {
+        let dir = tmp_dir("manage");
+        let store = PresetStore::new(&dir);
+        let st = MotuState::new(crate::state::Topology::default());
+        store.save("Evening", &st).await.unwrap();
+        store.save("Live", &st).await.unwrap();
+        // Rename: new file, new inner name, old one gone; never over an existing preset.
+        let p = store.rename("Evening", "Night").await.unwrap();
+        assert_eq!(p.name, "Night");
+        assert_eq!(store.load("Night").await.unwrap().name, "Night");
+        assert_eq!(store.list().await.unwrap(), vec!["Live", "Night"]);
+        assert!(store.rename("Night", "Live").await.is_err());
+        assert!(store.rename("Night", "../x").await.is_err());
+        assert!(store.rename("Gone", "Other").await.is_err());
+        // Delete.
+        store.delete("Live").await.unwrap();
+        assert!(store.delete("Live").await.is_err());
+        assert_eq!(store.list().await.unwrap(), vec!["Night"]);
+        // The Simple view list lives in a dot file that is never listed as a preset.
+        assert!(store.load_hidden().await.unwrap().is_empty());
+        store
+            .save_hidden(&["Night".into(), "../bad".into()])
+            .await
+            .unwrap();
+        assert_eq!(store.load_hidden().await.unwrap(), vec!["Night"]);
+        assert_eq!(store.list().await.unwrap(), vec!["Night"]);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
 
     fn tmp_dir(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()

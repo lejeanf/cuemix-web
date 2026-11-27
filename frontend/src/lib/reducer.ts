@@ -28,6 +28,8 @@ export interface ClientState {
   state: MotuState | null;
   session: SessionInfo;
   presets: string[];
+  /** Presets the Simple view leaves out. */
+  presetsHidden: string[];
   labels: Labels;
   meters: number[];
   toasts: Toast[];
@@ -47,6 +49,7 @@ export function initialClientState(): ClientState {
     state: null,
     session: { active_preset: null, modified: false, connection: 'connecting' },
     presets: [],
+    presetsHidden: [],
     labels: { channels: {} },
     meters: [],
     toasts: [],
@@ -282,6 +285,7 @@ export function applyEvent(s: ClientState, ev: ServerEvent): ClientState {
       break;
     case 'presets':
       s.presets = [...ev.names];
+      s.presetsHidden = [...(ev.hidden ?? [])];
       break;
     case 'labels':
       s.labels = { channels: { ...ev.channels } };

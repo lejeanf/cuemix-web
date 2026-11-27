@@ -6,8 +6,8 @@
   import { PRESET_SCHEMA_VERSION, exportFileName, presetNameFromFile } from '../lib/presetFile';
   import type { Snippet } from 'svelte';
 
-  /** The view tabs, shown in the same bar. */
-  let { children }: { children?: Snippet } = $props();
+  /** The view tabs, shown in the same bar. `phoneTabs`: also on phones (else a bottom bar has them). */
+  let { children, phoneTabs = true }: { children?: Snippet; phoneTabs?: boolean } = $props();
 
   let root: HTMLElement;
   let moreBtn = $state<HTMLButtonElement>();
@@ -52,8 +52,39 @@
   function setSource(source: ClockSource) {
     store.set({ param: 'clock_source', source }, true);
   }
+  // Preset management: rename and delete per row, and a confirm before any overwrite.
+  let renaming = $state<string | null>(null);
+  let renameTo = $state('');
+  let deleting = $state<string | null>(null);
+  let replacing = $state<string | null>(null);
+  const hidden = $derived(new Set(store.c.presetsHidden));
+  const renameOk = $derived(isValidPresetName(renameTo) && !store.c.presets.includes(renameTo));
+  function startRename(p: string) {
+    renaming = p;
+    renameTo = p;
+    deleting = null;
+  }
+  function doRename() {
+    if (!renaming || !renameOk) return;
+    store.renamePreset(renaming, renameTo);
+    renaming = null;
+  }
+  function doDelete() {
+    if (deleting) store.deletePreset(deleting);
+    deleting = null;
+  }
+  function doReplace() {
+    if (replacing) store.savePreset(replacing);
+    if (replacing === newName) newName = '';
+    replacing = null;
+  }
   function saveAs() {
     if (!nameOk) return;
+    // Saving over an existing preset asks first.
+    if (store.c.presets.includes(newName)) {
+      replacing = newName;
+      return;
+    }
     store.savePreset(newName);
     newName = '';
   }
@@ -100,9 +131,9 @@
 
 <svelte:window onpointerdown={outside} onkeydown={key} />
 
-<header class="top" bind:this={root}>
+<header class="top" class:adv={!store.simple} bind:this={root}>
   <span class="brand">{S.appName}</span>
-  {#if !store.simple}<nav class="tabs">{@render children?.()}</nav>{/if}
+  {#if !store.simple}<nav class="tabs" class:wideonly={!phoneTabs}>{@render children?.()}</nav>{:else}<span class="grow"></span>{/if}
 
   <div class="pw">
     <button class="btn clock" aria-haspopup="dialog" aria-expanded={open === 'clock'} disabled={off} onclick={() => toggle('clock')}>
@@ -140,14 +171,45 @@
           <ul>
             {#each store.c.presets as p (p)}
               <li class:active={p === session.active_preset}>
-                <span>{p}</span>
-                <button class="btn sm" aria-label="{S.load} {p}" onclick={() => { store.loadPreset(p); open = ''; }}>{S.load}</button>
+                {#if renaming === p}
+                  <form class="inl" onsubmit={(e) => { e.preventDefault(); doRename(); }}>
+                    <!-- svelte-ignore a11y_autofocus -->
+                    <input type="text" bind:value={renameTo} maxlength="64" aria-label="{S.presetUi.renameTo} ({p})" aria-invalid={renameTo !== p && !renameOk} autofocus />
+                    <button class="btn sm" type="submit" disabled={!renameOk}>{S.presetUi.renameBtn}</button>
+                    <button class="btn sm" type="button" onclick={() => (renaming = null)}>{S.cancel}</button>
+                  </form>
+                  {#if renameTo !== p && store.c.presets.includes(renameTo)}<small class="err">{S.presetUi.taken}</small>{:else if renameTo !== '' && !isValidPresetName(renameTo)}<small class="err">{S.presetNameInvalid}</small>{/if}
+                {:else if deleting === p}
+                  <div class="ask" role="alert">
+                    <span>{S.presetUi.delAsk(p)}</span>
+                    <button class="btn sm danger" onclick={doDelete}>{S.presetUi.delBtn}</button>
+                    <button class="btn sm" onclick={() => (deleting = null)}>{S.cancel}</button>
+                  </div>
+                {:else}
+                  <span class="pn">{p}{#if hidden.has(p)}<small class="tag">{S.presetUi.hiddenTag}</small>{/if}</span>
+                  <button class="btn sm" aria-label="{S.load} {p}" onclick={() => { store.loadPreset(p); open = ''; }}>{S.load}</button>
+                  <button class="ic" aria-pressed={!hidden.has(p)} aria-label={S.presetUi.inSimple(p)} title={S.presetUi.inSimple(p)} onclick={() => store.setPresetInSimple(p, hidden.has(p))}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2" />{#if hidden.has(p)}<path d="M4 4l16 16" />{/if}</svg>
+                  </button>
+                  <button class="ic" aria-label={S.presetUi.rename(p)} title={S.presetUi.rename(p)} onclick={() => startRename(p)}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z" /></svg>
+                  </button>
+                  <button class="ic" aria-label={S.presetUi.del(p)} title={S.presetUi.del(p)} onclick={() => { deleting = p; renaming = null; }}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13" /></svg>
+                  </button>
+                {/if}
               </li>
             {/each}
           </ul>
         {/if}
-        {#if session.active_preset}
-          <button class="btn" onclick={() => store.savePreset(session.active_preset!)}>{S.save} “{session.active_preset}”</button>
+        {#if replacing}
+          <div class="ask" role="alert">
+            <span>{S.presetUi.replaceAsk(replacing)}</span>
+            <button class="btn sm" onclick={doReplace}>{S.presetUi.replaceBtn}</button>
+            <button class="btn sm" onclick={() => (replacing = null)}>{S.cancel}</button>
+          </div>
+        {:else if session.active_preset}
+          <button class="btn" onclick={() => (replacing = session.active_preset)}>{S.save} “{session.active_preset}”</button>
         {/if}
         <form onsubmit={(e) => { e.preventDefault(); saveAs(); }}>
           <input type="text" bind:value={newName} placeholder={S.presetName} maxlength="64" aria-label={S.presetName} aria-invalid={newName !== '' && !nameOk} pattern={PRESET_NAME_RE.source} />
@@ -165,15 +227,26 @@
   </div>
   {/if}
 
+  <button class="btn moon" aria-pressed={store.theme === 'night'} aria-label={S.night.label} title={store.theme === 'night' ? S.night.on : S.night.off} onclick={() => store.setTheme(store.theme === 'night' ? 'dark' : 'night')}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>
+  </button>
   <button class="btn more" data-more-menu bind:this={moreBtn} aria-haspopup="dialog" aria-expanded={store.advancedOpen} aria-label={S.advanced.title} title={S.advanced.title} onclick={() => store.openAdvanced()}>⋯</button>
 
   {#if !store.embed}
-  <button class="btn mode" aria-pressed={!store.simple} title={store.simple ? 'Show every control' : 'Volume remote for phones'} onclick={() => store.setSimple(!store.simple)}
-    >{store.simple ? 'Advanced' : 'Simple'}</button
-  >
+  <!-- Shows where you are: the current view is the highlighted half. Icons on phones. -->
+  <div class="seg" role="group" aria-label={S.view.label}>
+    <button class="segb" aria-pressed={store.simple} aria-label={S.view.simple} title={S.view.simpleHint} onclick={() => store.setSimple(true)}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 12l4-4" /></svg>
+      <span class="segt">{S.view.simple}</span>
+    </button>
+    <button class="segb" aria-pressed={!store.simple} aria-label={S.view.advanced} title={S.view.advancedHint} onclick={() => store.setSimple(false)}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v16M12 4v16M18 4v16" /><path d="M4 14h4M10 8h4M16 16h4" /></svg>
+      <span class="segt">{S.view.advanced}</span>
+    </button>
+  </div>
   <span class="sr" role="status">{linkText}</span>
   <button class="status {link}" class:show={showStatus} aria-label="Connection: {linkText}" title={linkText} onclick={() => flashStatus()}>
-    <span class="dot" aria-hidden="true"></span><span class="txt" aria-hidden="true">{linkText}</span>
+    <span class="dot" aria-hidden="true"></span><span class="txt" aria-hidden="true">{link === 'demo' ? S.demoShort : linkText}</span>
   </button>
   {/if}
 </header>
@@ -223,6 +296,23 @@
     border-radius: 6px;
     cursor: pointer;
   }
+  .btn.moon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    padding: 0 7px;
+    color: var(--text-dim);
+  }
+  .btn.moon[aria-pressed='true'] {
+    color: var(--amber);
+    border-color: var(--amber);
+  }
+  .btn.moon svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+  }
   .btn.more {
     min-width: 34px;
     padding: 0 8px;
@@ -270,7 +360,7 @@
   select,
   input[type='text'] {
     min-height: 34px;
-    background: #0d0e11;
+    background: var(--field);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -300,7 +390,73 @@
     border-radius: 4px;
   }
   li.active {
-    background: #232733;
+    background: var(--row-active);
+  }
+  li {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .pn {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-wrap: anywhere;
+  }
+  .tag {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .ic {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .ic:hover,
+  .ic:focus-visible {
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .ic[aria-pressed='true'] {
+    color: var(--cyan);
+  }
+  .ic svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .inl {
+    flex: 1;
+    display: flex;
+    gap: 4px;
+  }
+  .ask {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .ask span {
+    flex: 1 1 100%;
+  }
+  .btn.danger {
+    border-color: var(--red);
+    color: var(--red);
   }
   form {
     display: flex;
@@ -350,8 +506,67 @@
   .status.connecting {
     --c: var(--amber);
   }
+  /* Demo is not a fault: amber, and its label always shows (in the flow, so it
+     never covers a button). Red stays for real problems. */
   .status.demo {
-    --c: var(--red);
+    --c: var(--amber);
+    width: auto;
+    gap: 6px;
+    padding: 0 10px 0 8px;
+    border: 1px solid var(--c);
+    border-radius: 999px;
+    height: 28px;
+  }
+  .status.demo .dot {
+    width: 9px;
+    height: 9px;
+  }
+  .status.demo .txt {
+    position: static;
+    transform: none;
+    padding: 0;
+    border: 0;
+    background: none;
+    opacity: 1;
+  }
+  .grow {
+    flex: 1;
+  }
+  .seg {
+    flex: none;
+    display: inline-flex;
+    padding: 2px;
+    gap: 2px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .segb {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 0 10px;
+    background: none;
+    border: 0;
+    border-radius: 6px;
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .segb[aria-pressed='true'] {
+    background: var(--bg-alt);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--cyan);
+  }
+  .segb svg {
+    display: none;
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
   }
   .dot {
     flex: none;
@@ -409,12 +624,79 @@
       flex-basis: 100%;
       min-height: 40px;
     }
+    /* The bottom tab bar has the views on phones: the header keeps one row. */
+    .tabs.wideonly {
+      display: none;
+    }
     .clock {
       display: none;
     }
     .btn {
       min-height: 30px;
       padding: 0 10px;
+    }
+    /* One row on a 375 px phone even with a long preset name and the demo
+       pill: the preset button is capped and the brand gives way first. */
+    .brand {
+      display: block;
+      min-width: 0;
+      line-height: 44px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .btn {
+      max-width: 100px;
+    }
+    .grow {
+      display: none;
+    }
+    /* Icons only: the two halves fit beside Presets and ⋯. */
+    .segb {
+      min-width: 40px;
+      min-height: 32px;
+      justify-content: center;
+      padding: 0 8px;
+    }
+    .segb svg {
+      display: block;
+    }
+    .segt {
+      display: none;
+    }
+    /* The presets panel is wider than the space left of its button: pin it to
+       both screen edges under the header instead (was cut off at 375 px). */
+    .pop.wide {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 50px);
+      left: max(8px, env(safe-area-inset-left, 0px));
+      right: max(8px, env(safe-area-inset-right, 0px));
+      width: auto;
+      max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 66px);
+      overflow-y: auto;
+    }
+  }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .btn,
+    .segb,
+    .status {
+      min-height: 44px;
+    }
+    .btn.more,
+    .btn.moon,
+    .status {
+      min-width: 44px;
+    }
+    .ic {
+      width: 44px;
+      height: 44px;
+    }
+  }
+  /* Narrow phones, Advanced view: the buttons need the room, so the name gives way entirely
+     (it still takes the free space, keeping the buttons on the right). */
+  @media (max-width: 420px) {
+    .top.adv .brand {
+      font-size: 0;
     }
   }
 </style>

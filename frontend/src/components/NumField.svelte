@@ -45,7 +45,7 @@
   input {
     width: 72px;
     min-height: 30px;
-    background: #0d0e11;
+    background: var(--field);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -55,5 +55,11 @@
   }
   em {
     font-style: normal;
+  }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .in {
+      min-height: 44px;
+    }
   }
 </style>

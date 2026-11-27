@@ -141,3 +141,13 @@ describe('applyEvent', () => {
     expect(s.toasts).toEqual([{ id: 1, message: 'boom' }]);
   });
 });
+
+describe('presets hidden from the Simple view', () => {
+  it('keeps the list and the hidden ones; an older server sends none', () => {
+    const s = initialClientState();
+    applyEvent(s, { event: 'presets', names: ['Live', 'Studio'], hidden: ['Studio'] });
+    expect([s.presets, s.presetsHidden]).toEqual([['Live', 'Studio'], ['Studio']]);
+    applyEvent(s, { event: 'presets', names: ['Live'] });
+    expect(s.presetsHidden).toEqual([]);
+  });
+});

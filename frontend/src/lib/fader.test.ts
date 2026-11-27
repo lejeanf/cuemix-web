@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { dbToPos, gainToPos, posToDb, posToGain, trimDbToPos, trimPosToDb } from './fader';
+import { dbToPos, gainToPos, posToDb, posToGain, trimDbToPos, trimPosToDb, volKnobFromNorm, volKnobToNorm } from './fader';
+import knob from '../../../design/vectors/volume-knob.json';
 
 describe('fader law parity with Rust', () => {
   it('anchors', () => {
@@ -20,5 +21,26 @@ describe('fader law parity with Rust', () => {
       const p = i / 1000;
       expect(Math.abs(trimDbToPos(trimPosToDb(p, -1000)) - p)).toBeLessThan(1e-9);
     }
+  });
+});
+
+describe('volume knob curve (design/vectors/volume-knob.json)', () => {
+  it('matches every shared point both ways', () => {
+    for (const { db, pos } of knob.points) {
+      expect(Math.abs(volKnobToNorm(db, knob.floor_db) - pos)).toBeLessThan(knob.tolerance);
+      expect(Math.round(volKnobFromNorm(pos, knob.floor_db))).toBe(db);
+    }
+  });
+  it('is monotonic and bounded', () => {
+    let last = -Infinity;
+    for (let i = 0; i <= 1000; i++) {
+      const db = volKnobFromNorm(i / 1000, -100);
+      expect(db).toBeGreaterThanOrEqual(last);
+      expect(db).toBeLessThanOrEqual(0);
+      expect(db).toBeGreaterThanOrEqual(-100);
+      last = db;
+    }
+    expect(volKnobToNorm(-Infinity, -100)).toBe(0);
+    expect(volKnobToNorm(6, -100)).toBe(1);
   });
 });

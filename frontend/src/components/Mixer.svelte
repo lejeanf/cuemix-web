@@ -7,6 +7,7 @@
   import Strip from './Strip.svelte';
   import Meter from './Meter.svelte';
   import { METER_SLOT, OUTPUTS } from '../lib/meterMap';
+  import { groupStrips } from '../lib/mixerGroups';
 
   const st = $derived(store.state);
   const off = $derived(!store.ready);
@@ -16,6 +17,20 @@
     if (2 * m + 1 < OUTPUTS) return [METER_SLOT.output(2 * m), METER_SLOT.output(2 * m + 1)];
     return [METER_SLOT.mixerInput(30), METER_SLOT.mixerInput(31)];
   });
+  /** Strips grouped by kind (Mic, Line, S/PDIF, Optical, Computer, Reverb). */
+  const groups = $derived(
+    groupStrips(store.strips, {
+      inputs: st?.topology.mixer_inputs ?? 0,
+      mics: st?.topology.mic_inputs ?? 0,
+      analog: st?.preamps.length ?? 0,
+      reverbReturn: store.reverbReturn,
+    }),
+  );
+  /** Scale beside the Monitor fader, at the fader's own positions. */
+  const SCALE_DB = [0, -10, -20, -40, -60];
+  /** Same geometry as Fader.svelte: the thumb centre travels between HALF and height − HALF. */
+  const HALF = 11;
+  const tickTop = (db: number) => `calc(${HALF}px + ${1 - trimDbToPos(db)} * (100% - ${2 * HALF}px))`;
 </script>
 
 {#if st}
@@ -32,16 +47,26 @@
     </div>
     <div class="row">
       <div class="strips">
-        {#each store.strips as s (s.ch)}
-          <Strip ch={s.ch} pair={s.pair} />
+        {#each groups as g, gi (gi)}
+          <div class="grp" role="group" aria-label={g.title}>
+            <div class="gh">{g.title}</div>
+            <div class="gs">
+              {#each g.strips as s (s.ch)}
+                <Strip ch={s.ch} pair={s.pair} />
+              {/each}
+            </div>
+          </div>
         {/each}
       </div>
-      <section class="main" aria-label={S.main}>
-        <div class="title">{S.main}</div>
+      <section class="main" aria-label={S.monitor}>
+        <div class="title">{S.monitor}</div>
         <div class="mrow">
+          <div class="scale" aria-hidden="true">
+            {#each SCALE_DB as db (db)}<span style:top={tickTop(db)}>{db}</span>{/each}
+          </div>
         <Fader
           pos={trimDbToPos(st.main.db)}
-          label="{S.main} level"
+          label="{S.monitor} level"
           valueText="{formatDb(st.main.db, 0)} dB"
           resetPos={1}
           mark={1}
@@ -97,7 +122,7 @@
   .buses button.sel {
     background: var(--cyan);
     border-color: var(--cyan);
-    color: #111;
+    color: var(--on-accent);
     font-weight: 600;
   }
   .row {
@@ -119,9 +144,50 @@
     /* popovers inside strips must not be clipped vertically */
     align-items: stretch;
   }
+  /* Groups: a small heading over each run of strips, a gap between runs. */
+  .grp {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .grp + .grp {
+    margin-left: 6px;
+    border-left: 1px solid var(--border);
+  }
+  .gh {
+    flex: none;
+    padding: 3px 6px 2px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    white-space: nowrap;
+    background: var(--bg-alt);
+    border-bottom: 1px solid var(--border);
+  }
+  .gs {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: stretch;
+  }
+  .scale {
+    position: relative;
+    flex: none;
+    width: 22px;
+    font-size: 10px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .scale span {
+    position: absolute;
+    right: 0;
+    transform: translateY(-50%);
+  }
   .main {
     flex: none;
-    width: 80px;
+    width: 104px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -138,5 +204,21 @@
     font-size: 12px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
+  }
+  /* Phones: a narrower Monitor column leaves room for more strips. */
+  @media (max-width: 640px) {
+    .main {
+      width: 84px;
+    }
+    .scale {
+      width: 18px;
+      font-size: 9px;
+    }
+  }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .buses button {
+      min-height: 44px;
+    }
   }
 </style>

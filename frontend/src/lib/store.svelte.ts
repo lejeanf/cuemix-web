@@ -11,6 +11,8 @@ import { ParamSender } from './sender';
 import { clamp } from './validate';
 import { isHwMapped, isHwReadOnly, visibleTabs, type Tab } from './hwmap';
 import { S } from './strings';
+import { tabFromHash, toastTimeout } from './ui';
+import { applyTheme, loadTheme, saveTheme, type Theme } from './theme';
 import { LIVENESS_CHECK_MS, needsLivenessCheck, parseLaunchFlags, resolveSimple, shouldDropSilentSocket, shouldReconnectNow } from './launch';
 
 export type Link = 'offline' | 'connecting' | 'online' | 'demo';
@@ -40,7 +42,7 @@ const TABS: readonly Tab[] = ['mixer', 'input', 'output', 'reverb', 'probe'];
 const VIEW_KEY = 'cuemix.view';
 
 /** localStorage, or null when the browser blocks even looking at it. */
-function safeStorage(): Storage | null {
+export function safeStorage(): Storage | null {
   try {
     return localStorage;
   } catch {
@@ -65,9 +67,8 @@ function launchFlags() {
   return parseLaunchFlags(typeof location === 'undefined' ? '' : location.search);
 }
 
-function tabFromHash(): Tab {
-  const h = typeof location === 'undefined' ? '' : location.hash.slice(1);
-  return (TABS as readonly string[]).includes(h) ? (h as Tab) : 'mixer';
+function initialTab(): Tab {
+  return (typeof location === 'undefined' ? null : tabFromHash(location.hash, TABS)) ?? 'mixer';
 }
 
 class Store {
@@ -81,9 +82,16 @@ class Store {
     return visibleTabs({ online: this.online, reverbWritable: isHwMapped('reverb_decay'), probe });
   }
   /** Current view; `#mixer`, `#input`, `#output`, `#reverb` in the URL open it directly. */
-  tab: Tab = $state(tabFromHash());
+  tab: Tab = $state(initialTab());
   /** Phone remote (Main / Phones volume) instead of the full console. */
   simple = $state(initialSimple());
+  /** Night mode (dimmed theme), per browser. */
+  theme: Theme = $state(loadTheme(safeStorage()));
+  setTheme(t: Theme): void {
+    this.theme = t;
+    saveTheme(safeStorage(), t);
+    applyTheme(t);
+  }
   /** `?embed`: running inside the native app's web view (hides the view toggle and status dot). */
   embed = launchFlags().embed;
   setSimple(on: boolean): void {
@@ -102,6 +110,8 @@ class Store {
   advancedTab: AdvancedTab = $state('plug');
   /** The room test panel is open. */
   roomOpen = $state(false);
+  /** Simple view preset picker (a sheet: recall takes a deliberate second tap). */
+  presetsOpen = $state(false);
   /** Main output EQ bands (slot 0) from before the last applied room correction, for Undo. */
   roomUndo: EqBand[] | null = $state(null);
   /** The room test can be offered: the server has it configured and we are connected. */
@@ -218,8 +228,15 @@ class Store {
     this.connect();
     document.addEventListener('visibilitychange', this.onVisible);
     window.addEventListener('pageshow', this.onPageShow);
+    window.addEventListener('hashchange', this.onHash);
     if (import.meta.env.DEV && new URLSearchParams(location.search).has('fakeMeters')) this.startFakeMeters();
   }
+
+  /** Back/forward or an edited `#tab` on an open page switches the view. */
+  private onHash = (): void => {
+    const t = tabFromHash(location.hash, TABS);
+    if (t) this.tab = t;
+  };
 
   private onVisible = (): void => {
     if (document.visibilityState !== 'visible') return;
@@ -284,6 +301,7 @@ class Store {
     this.stopped = true;
     document.removeEventListener('visibilitychange', this.onVisible);
     window.removeEventListener('pageshow', this.onPageShow);
+    window.removeEventListener('hashchange', this.onHash);
     if (this.retry) clearTimeout(this.retry);
     this.clearLiveness();
     if (this.fakeTimer) clearInterval(this.fakeTimer);
@@ -310,7 +328,7 @@ class Store {
   reloadWaiting = false;
   /** Any modal panel is open (edits in it must not be lost to a reload). */
   get panelOpen(): boolean {
-    return this.advancedOpen || this.roomOpen;
+    return this.advancedOpen || this.roomOpen || this.presetsOpen;
   }
 
   async refreshVersion(): Promise<void> {
@@ -404,8 +422,10 @@ class Store {
     }
     applyEvent(this.c, ev);
     if (ev.event === 'error' || ev.event === 'notice') {
-      const id = this.c.toastSeq;
-      setTimeout(() => this.dismissToast(id), 5000);
+      // Errors stay until tapped away; notices and warnings fade on their own.
+      const t = this.c.toasts.find((x) => x.id === this.c.toastSeq);
+      const ms = t ? toastTimeout(t) : null;
+      if (t && ms !== null) setTimeout(() => this.dismissToast(t.id), ms);
     }
     if (ev.event === 'snapshot' && this.bus >= ev.state.topology.mixes) this.bus = 0;
   }
@@ -462,10 +482,29 @@ class Store {
   listPresets(): void {
     this.sendRaw({ cmd: 'list_presets' });
   }
+  deletePreset(name: string): void {
+    this.sendRaw({ cmd: 'delete_preset', name });
+  }
+  renamePreset(name: string, to: string): void {
+    this.sendRaw({ cmd: 'rename_preset', name, to });
+  }
+  setPresetInSimple(name: string, show: boolean): void {
+    this.sendRaw({ cmd: 'set_preset_in_simple', name, show });
+  }
+  /** Presets the Simple view lists (the Advanced view lists them all). */
+  get simplePresets(): string[] {
+    const hidden = new Set(this.c.presetsHidden);
+    return this.c.presets.filter((p) => !hidden.has(p));
+  }
   /** Switch Monitor or Phones on/off; the server fades and reports back with a `power` event. */
   power(channel: PowerChannel, on: boolean): void {
     if (!this.ready) return;
     this.sendRaw({ cmd: 'power', channel, on });
+  }
+  /** While a channel is off: choose the level its next On fades back to (it stays off). */
+  setReturnLevel(channel: PowerChannel, db: number): void {
+    if (!this.ready) return;
+    this.sendRaw({ cmd: 'set_return_level', channel, db: Math.round(db) });
   }
   setSpeakerPlug(settings: SpeakerPlugSettings): boolean {
     return this.sendRaw({ cmd: 'set_speaker_plug', settings });

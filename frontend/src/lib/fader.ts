@@ -58,6 +58,26 @@ export function trimDbToPos(db: number): number {
   return Math.min(1, Math.max(0, dbToPos(Math.min(db, 0)) / UNITY_POS));
 }
 
+/**
+ * Volume knob curve (Monitor, Phones): the trim taper of the sliders, stretched so the
+ * floor sits at the start of the arc. Knob position 0..1 ↔ dB (floorDb..0). Most of the
+ * travel goes to the top 40 dB, where listening levels are. Shared with the iOS app
+ * through `design/vectors/volume-knob.json`.
+ */
+export function volKnobToNorm(db: number, floorDb: number): number {
+  if (!Number.isFinite(db) || db <= floorDb) return 0;
+  const p0 = trimDbToPos(floorDb);
+  return Math.min(1, Math.max(0, (trimDbToPos(db) - p0) / (1 - p0)));
+}
+
+/** Inverse of `volKnobToNorm` (not rounded). */
+export function volKnobFromNorm(n: number, floorDb: number): number {
+  const c = Math.min(1, Math.max(0, Number.isFinite(n) ? n : 0));
+  if (c <= 0) return floorDb;
+  const p0 = trimDbToPos(floorDb);
+  return Math.min(0, trimPosToDb(p0 + c * (1 - p0), floorDb));
+}
+
 /** Human label: "-inf", "-6.0", "+3.5" (dB). */
 export function formatDb(db: number, digits = 1): string {
   if (!Number.isFinite(db)) return db < 0 ? '-inf' : '+inf';

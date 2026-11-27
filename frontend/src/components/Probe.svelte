@@ -108,7 +108,7 @@
   .bar input {
     flex: 1 1 220px;
     min-height: 26px;
-    background: #0d0e11;
+    background: var(--field);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 5px;
@@ -173,7 +173,7 @@
   .b {
     grid-column: 1 / -1;
     height: 3px;
-    background: #0d0e11;
+    background: var(--field);
     border-radius: 2px;
     overflow: hidden;
   }

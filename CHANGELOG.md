@@ -12,6 +12,96 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-27
+
+The web UI from the UI review: a Simple view that is safer to use on a phone (a preset list with
+its own Load button, the level On returns to, a knob curve that favours listening levels), an
+Advanced view with a bottom tab bar on phones and grouped mixer strips, preset management
+(rename, delete, choose what the Simple view lists), Night mode and 44 px touch targets.
+
+Compatibility: no `config.toml` change and no change to preset files. The list of presets shown in
+the Simple view is a new file, `<presets_dir>/.simple-view.json`. The WebSocket protocol only
+gains: the `power` event and `GET /api/v1/summary` carry `return_db`, the `presets` event carries
+`hidden`, and the commands `set_return_level`, `rename_preset`, `delete_preset` and
+`set_preset_in_simple`; older clients ignore the new fields.
+
+### Added
+- `power` event and `GET /api/v1/summary`: `return_db` per channel, the whole-dB level an On
+  fades back to while the channel is off or fading out (the remembered level, else −70 dB), `null`
+  while it is on. Older clients ignore it; the web UI reads it when present.
+- `set_return_level` command (WebSocket): while a channel is off or fading out, sets the level its
+  next On fades back to; ignored while it is on. Kept in `power.json` (also in demo mode).
+- Simple view: **Keep screen on** switch (screen wake lock while the page is visible), per
+  browser, off by default; shown only where the browser supports it.
+- Rename and delete presets from the Presets panel (Advanced view). Rename never overwrites an
+  existing preset; delete asks first. Commands `rename_preset` and `delete_preset`.
+- "Show in the Simple view" per preset (phone icon in the Presets panel, command
+  `set_preset_in_simple`): the Simple view lists only the shown ones, so the household sees the
+  presets that matter. The `presets` event carries `hidden` (older clients ignore it).
+- **Night mode**: a moon button in the header dims the whole UI (text, accents, meters, borders)
+  for a dark room or a stage. Off by default, remembered per browser, applied before the first
+  paint. Text keeps at least 4.5:1 contrast on its background.
+
+### Changed
+- Header: a two-part **Simple | Advanced** switch shows the current view (icons on phones) instead
+  of one button labelled with the other view. The header buttons now sit on the right in both views.
+- Demo mode: the status shows an amber **Demo** pill, always visible (its full text, "Demo — no
+  MOTU", is the accessible name). Red is no longer used for demo.
+- Error toasts stay until tapped (with a ×) and are announced at once (`role="alert"`); notices and
+  warnings still fade after 5 s.
+- Input view on phones: preamp cards share each row evenly (three per row) instead of leaving gaps.
+- Monitor and Phones knobs (Simple view and Output view) use the same curve as the sliders: most
+  of the travel now covers the top 40 dB, where listening levels are (−30 dB sits at 44 % of the
+  arc instead of 70 %). Arrow keys, the mouse wheel and screen-reader steps move exactly 1 dB.
+  The curve is shared with the future iOS app in `design/vectors/volume-knob.json`.
+- On/off buttons: during a fade the button keeps the colour of where it is going and a bar sweeps
+  along its bottom edge (a still bar with reduced motion), so it no longer looks disabled. The
+  speaker plug warm-up turns the button amber with a countdown ("Warming up · 2 s"), and the plug
+  dot is larger.
+- An off channel shows "Off" instead of "−100 dB" under its knob (and to screen readers), with the
+  level On brings it back to ("returns to −18 dB"). Turning its knob while off now sets that level
+  (grey needle) and leaves the channel off; before, it set the live volume and turned it on.
+- Presets in the Simple view: a "Preset" row shows the current preset and "● Modified"; it opens a
+  list where each preset has its own Load button, so one mis-tap no longer changes every mix.
+- Meters: faint ticks at −40, −18 and −6 dBFS, and a red clip mark that stays until the meter is
+  tapped.
+- Simple view knobs grow on tablets and laptops (up to 220 px, was 150 px).
+- Phones: a bottom tab bar (Mixer, Input, Output, Reverb, with icons) replaces the second header
+  row, in the order and names planned for the iOS app. Not shown with `?embed` (the app has its
+  own tab bar there).
+- Control Room bar: Monitor and Phones each get an on/off button (the server-side fade, like the
+  Simple view). On phones the two levels get touch-sized rows and DIM, MONO, A/B and Talkback fold
+  behind a ⋯ button. The Main level is called **Monitor** everywhere (bar, mixer column), "Main"
+  stays the name of the mix. Double-click on the Monitor slider no longer jumps to 0 dB.
+- Mixer: strips are grouped under Mic, Line, S/PDIF, Optical, Computer and Reverb headings (the
+  digital and USB groups only for the 32-input layout); the Monitor fader has a dB scale (0, −10,
+  −20, −40, −60).
+- Phones: messages (toasts) show under the header instead of over the bottom bars.
+- Saving over an existing preset ("Save “Live”", or Save as with a taken name) asks for
+  confirmation first.
+- Touch screens (`pointer: coarse`): buttons and fields are at least 44 px tall (mute/solo, +48V /
+  pad / phase, Control Room, mix tabs, EQ band controls, header buttons); the mouse keeps the
+  dense layout.
+- Colours: every UI colour now comes from a token in `app.css` (new tokens for the error
+  background and text, the current list row, the fader thumb and the EQ grid); the meters read
+  theirs from the tokens too.
+- Phones (≤ 420 px), Advanced view: the header hides the app name to keep its buttons on one row.
+- README: the Web UI section describes the header (Simple | Advanced, Night mode, Demo pill),
+  the Simple view and the Advanced view on phones in one place; new screenshots (Mixer, Input,
+  Output at desktop size; Simple view, Monitor off with its return level, the preset sheet,
+  Night mode and the phone Advanced view at 390 × 844), taken in demo mode. The WebSocket
+  examples show `power`, `set_return_level`, `rename_preset`, `delete_preset`,
+  `set_preset_in_simple`, and the `hidden` / `return_db` fields.
+- `docs/IOS-PLAN.md`: parity notes for the bottom tabs, the Night token set, the volume-knob
+  vectors, `return_db` / `set_return_level` and the presets `hidden` field.
+- Meters: the scale ticks and the clip mark take their colours from the theme tokens (new
+  `--meter-tick`), so Night mode dims them too.
+
+### Fixed
+- Presets panel on phones: it ran 121 px off the left edge at 375 px, hiding the preset names. Below
+  640 px it now spans the screen under the header and scrolls if needed.
+- The view follows the URL fragment on an open page: Back/Forward or editing `#output` switches tab.
+
 ## [0.7.2] - 2026-11-27
 
 Fixes from a security review: a web page could control the mixer through DNS rebinding,

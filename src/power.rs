@@ -60,13 +60,18 @@ pub enum FadeDir {
 }
 
 /// One channel of [`crate::state::ServerEvent::Power`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ChannelPower {
     /// Level above the minimum.
     pub on: bool,
     pub fading: Option<FadeDir>,
     /// Speaker plug state (Main only; `null` when no plug is enabled).
     pub plug: Option<PlugState>,
+    /// Whole dB an On fades back to, while the channel is off or fading out (the remembered
+    /// level, or [`FADE_SAFE_DB`] when none is); `null` while it is on or fading in. An older
+    /// client ignores it.
+    #[serde(default)]
+    pub return_db: Option<f64>,
 }
 
 impl ChannelPower {
@@ -141,6 +146,11 @@ pub fn plan_in(current: f64, remembered: Option<f64>) -> FadePlan {
         ms: fade_ms(target - from),
         end: target,
     }
+}
+
+/// The level an On fades back to: what [`plan_in`] heads for.
+pub fn return_level(remembered: Option<f64>) -> f64 {
+    plan_in(TRIM_MIN_DB, remembered).to
 }
 
 /// Whole-dB value to write at time `t` (0..1), clamped to the plan's range.
@@ -529,21 +539,35 @@ mod tests {
             on: true,
             fading: Some(FadeDir::Out),
             plug: Some(PlugState::Warming),
+            return_db: Some(-20.0),
         };
         assert!(!p.intent());
         assert_eq!(
             serde_json::to_value(p).unwrap(),
-            serde_json::json!({"on":true,"fading":"out","plug":"warming"})
+            serde_json::json!({"on":true,"fading":"out","plug":"warming","return_db":-20.0})
         );
         let q = ChannelPower {
             on: false,
             fading: Some(FadeDir::In),
             plug: None,
+            return_db: None,
         };
         assert!(q.intent());
         assert_eq!(
             serde_json::to_value(q).unwrap(),
-            serde_json::json!({"on":false,"fading":"in","plug":null})
+            serde_json::json!({"on":false,"fading":"in","plug":null,"return_db":null})
         );
+        // An older event without the field still reads.
+        let old: ChannelPower =
+            serde_json::from_value(serde_json::json!({"on":false,"fading":null,"plug":null}))
+                .unwrap();
+        assert_eq!(old.return_db, None);
+    }
+
+    #[test]
+    fn return_level_is_where_on_fades_to() {
+        assert_eq!(return_level(Some(-18.4)), -18.0);
+        assert_eq!(return_level(None), FADE_SAFE_DB);
+        assert_eq!(return_level(Some(5.0)), 0.0);
     }
 }
