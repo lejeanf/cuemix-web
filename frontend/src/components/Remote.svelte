@@ -2,7 +2,7 @@
   import { store } from '../lib/store.svelte';
   import { S } from '../lib/strings';
   import { TRIM_MIN_DB } from '../lib/protocol';
-  import { formatDb } from '../lib/fader';
+  import { formatDb, volKnobFromNorm, volKnobToNorm } from '../lib/fader';
   import { METER_SLOT } from '../lib/meterMap';
   import { powerView, type PowerView } from '../lib/power';
   import Knob from './Knob.svelte';
@@ -17,18 +17,22 @@
   const off = $derived(!store.ready);
   const session = $derived(store.c.session);
   const dbText = (v: number) => `${formatDb(v, 0)} dB`;
+  /** Same curve as the sliders (most travel near listening levels), 1 dB per key or swipe. */
+  const curve = { toNorm: (v: number) => volKnobToNorm(v, TRIM_MIN_DB), fromNorm: (n: number) => volKnobFromNorm(n, TRIM_MIN_DB) };
 
   // Knob size follows the width so both knob + meter blocks fit side by side.
   const GAP = 10; // between the two cards
   const PAD = 10; // card padding
   const INNER = 8; // knob to meters
   const METERS_W = 2 * 12 + 2;
+  /** Knobs grow with the screen (tablet, laptop), up to this. */
+  const MAX_KNOB = 220;
   let width = $state(0);
   const stacked = $derived(width > 0 && width < 340);
   const size = $derived.by(() => {
     if (width <= 0) return 96;
     const block = stacked ? width : (width - GAP) / 2;
-    return Math.round(Math.min(150, Math.max(96, block - 2 * PAD - INNER - METERS_W - 2)));
+    return Math.round(Math.min(MAX_KNOB, Math.max(96, block - 2 * PAD - INNER - METERS_W - 2)));
   });
   const travel = $derived(Math.round(size * 2.5));
 
@@ -38,8 +42,31 @@
   // On/off per channel: the server fades and remembers the level; we show what it reports.
   const mainPower = $derived(powerView(store.c.power, 'main', main));
   const phonesPower = $derived(powerView(store.c.power, 'phones', phones));
+  /** "Off" instead of the floor level while a channel is off (and not fading). */
+  const levelText = (v: PowerView) => (db: number) => (!v.on && v.fading === null ? S.simple.off : dbText(db));
+
+  // Plug warm-up countdown: the warm-up time comes from the plug settings, counted from
+  // when the server reported "warming". Null when the settings are not known.
+  let warmStart = $state<number | null>(null);
+  let now = $state(Date.now());
+  $effect(() => {
+    if (mainPower.plug !== 'warming') {
+      warmStart = null;
+      return;
+    }
+    warmStart = Date.now();
+    now = warmStart;
+    const t = setInterval(() => (now = Date.now()), 250);
+    return () => clearInterval(t);
+  });
+  const warmLeft = $derived.by(() => {
+    const ms = store.c.plug?.settings.warmup_ms;
+    if (warmStart === null || !ms) return null;
+    return Math.max(0, Math.ceil((ms - (now - warmStart)) / 1000));
+  });
+
   const powerLabel = (v: PowerView) =>
-    v.fading === 'out' ? S.fadingOut : v.plug === 'warming' ? S.plug.warmingUp : v.fading === 'in' ? S.fadingIn : v.on ? S.powerOn : S.powerOff;
+    v.fading === 'out' ? S.fadingOut : v.plug === 'warming' ? S.simple.warmingUp(warmLeft) : v.fading === 'in' ? S.fadingIn : v.on ? S.powerOn : S.powerOff;
 
   // The whole card is the drag surface of its knob.
   let mainCard = $state<HTMLElement | null>(null);
@@ -55,7 +82,8 @@
   <button
     class="power"
     class:on={v.on}
-    class:busy={v.fading !== null}
+    class:warming={v.plug === 'warming'}
+    title={v.fading !== null ? S.simple.tapToCancel : undefined}
     aria-pressed={v.on}
     aria-label={kind === 'monitor' ? (v.plug ? `${S.monitorPower}, ${S.plugState[v.plug]}` : S.monitorPower) : S.phonesPower}
     aria-busy={v.fading !== null}
@@ -73,7 +101,8 @@
         <rect x="17" y="14" width="4" height="7" rx="1.5" />
       {/if}
     </svg>
-    <span>{powerLabel(v)}</span>
+    <span class="pl">{powerLabel(v)}</span>
+    {#if v.fading !== null}<span class="prog {v.fading}" aria-hidden="true"></span>{/if}
     {#if v.plug}
       <span class="plug {v.plug}" role="img" aria-label={S.plugState[v.plug]} title={S.plugState[v.plug]}></span>
     {/if}
@@ -89,11 +118,13 @@
           min={TRIM_MIN_DB}
           max={0}
           step={1}
+          keyStep={1}
+          {curve}
           label={S.monitor}
           ariaLabel="{S.monitor} level"
           {size}
           {travel}
-          format={dbText}
+          format={levelText(mainPower)}
           disabled={off}
           surface={mainCard}
           onchange={(v, f) => setVol('main_vol', v, f)}
@@ -112,11 +143,13 @@
           min={TRIM_MIN_DB}
           max={0}
           step={1}
+          keyStep={1}
+          {curve}
           label={S.phones}
           ariaLabel="{S.phones} level"
           {size}
           {travel}
-          format={dbText}
+          format={levelText(phonesPower)}
           disabled={off}
           surface={phonesCard}
           onchange={(v, f) => setVol('phones_vol', v, f)}
@@ -131,13 +164,13 @@
   </div>
 
   {#if store.c.presets.length}
-    <label class="preset">
-      <span>{S.presets}</span>
-      <select value={session.active_preset ?? ''} disabled={off} onchange={(e) => store.loadPreset(e.currentTarget.value)}>
-        <option value="" disabled>{S.noPreset}</option>
-        {#each store.c.presets as p (p)}<option value={p}>{p}</option>{/each}
-      </select>
-    </label>
+    <!-- Opens a list with a Load button per preset: recall is a deliberate second tap. -->
+    <button class="preset" disabled={off} aria-haspopup="dialog" onclick={() => (store.presetsOpen = true)}>
+      <span class="pk">{S.simple.presetRow}</span>
+      <span class="pv">{session.active_preset ?? S.simple.choosePreset}</span>
+      {#if session.active_preset && session.modified}<span class="mod">{S.modified}</span>{/if}
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+    </button>
   {/if}
 
   {#if store.roomTestAvailable}
@@ -150,7 +183,7 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-width: 560px;
+    max-width: 760px;
     min-height: 100%;
     margin: 0 auto;
     padding: 4px 0 16px;
@@ -237,19 +270,48 @@
     color: var(--cyan);
     border-color: var(--cyan);
   }
-  .power.busy {
-    opacity: 0.85;
-  }
+  /* During a fade the button keeps the colour of where it is going (On blue, Off grey)
+     and a bar sweeps along its bottom edge: busy, not disabled. */
   .power {
     position: relative;
+    overflow: hidden;
+  }
+  .pl {
+    text-align: center;
+    line-height: 1.15;
+  }
+  .power.warming {
+    color: var(--amber);
+    border-color: var(--amber);
+  }
+  .prog {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: 40%;
+    background: currentColor;
+    border-radius: 2px;
+    animation: sweep 1s ease-in-out infinite;
+  }
+  .prog.out {
+    animation-direction: reverse;
+  }
+  @keyframes sweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(250%);
+    }
   }
   /* Speaker plug state: a small dot in the corner of the Monitor button. */
   .plug {
     position: absolute;
     top: 6px;
     right: 8px;
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     border: 1px solid var(--text-dim);
     box-sizing: border-box;
@@ -279,23 +341,53 @@
     .plug.warming {
       animation: none;
     }
+    /* The text says it; a still bar marks the button busy. */
+    .prog {
+      animation: none;
+      width: 100%;
+      opacity: 0.5;
+    }
   }
   .preset {
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 14px;
-    color: var(--text-dim);
-  }
-  .preset select {
-    flex: 1;
-    min-height: 40px;
-    font-size: 14px;
-    background: #0d0e11;
+    min-height: 52px;
+    padding: 0 10px 0 14px;
+    font-size: 15px;
+    text-align: left;
+    background: var(--card);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 0 8px;
+    border-radius: 12px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .pk {
+    color: var(--text-dim);
+  }
+  .pv {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .mod {
+    flex: none;
+    font-size: 12px;
+    color: var(--amber);
+  }
+  .preset svg {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: var(--text-dim);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   .room {
     align-self: center;
@@ -309,8 +401,7 @@
     cursor: pointer;
     touch-action: manipulation;
   }
-  button:disabled,
-  select:disabled {
+  button:disabled {
     opacity: 0.45;
   }
 </style>

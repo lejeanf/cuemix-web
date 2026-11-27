@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { biquadMagDb, bwToQ, eqResponseDb, freqToX, peakingBiquad, xToFreq } from './eq';
-import { levelToPos, stepMeter } from './meters';
+import { CLIP_POS, dbToMeterPos, levelToPos, stepMeter } from './meters';
 import { EQ_MODE, TRIM_MIN_DB, eqModeName, type EqBand, type Param } from './protocol';
 import { ParamSender, paramKey } from './sender';
 import { isHexColor, isValidLabelName, isValidPresetName } from './validate';
@@ -315,5 +315,18 @@ describe('label names refuse invisible and reordering characters', () => {
   it('matches the server rule', () => {
     expect(isValidLabelName('Guîtare \u{1f3b8}')).toBe(true);
     for (const bad of ['', 'a\nb', 'a\0', 'a\u0085b', '‮cba', 'a​b', '﻿x', '⁦x', 'x'.repeat(65)]) expect(isValidLabelName(bad), JSON.stringify(bad)).toBe(false);
+  });
+});
+
+describe('meter scale and clip', () => {
+  it('places ticks on the -60..0 dB scale', () => {
+    expect(dbToMeterPos(-60)).toBe(0);
+    expect(dbToMeterPos(-6)).toBeCloseTo(0.9, 9);
+    expect(dbToMeterPos(-18)).toBeCloseTo(0.7, 9);
+    expect(dbToMeterPos(3)).toBe(1);
+  });
+  it('latches clip only at the top of the scale', () => {
+    expect(levelToPos(1)).toBeGreaterThanOrEqual(CLIP_POS);
+    expect(levelToPos(10 ** (-1 / 20))).toBeLessThan(CLIP_POS);
   });
 });

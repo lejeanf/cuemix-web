@@ -102,6 +102,8 @@ class Store {
   advancedTab: AdvancedTab = $state('plug');
   /** The room test panel is open. */
   roomOpen = $state(false);
+  /** Simple view preset picker (a sheet: recall takes a deliberate second tap). */
+  presetsOpen = $state(false);
   /** Main output EQ bands (slot 0) from before the last applied room correction, for Undo. */
   roomUndo: EqBand[] | null = $state(null);
   /** The room test can be offered: the server has it configured and we are connected. */
@@ -318,7 +320,7 @@ class Store {
   reloadWaiting = false;
   /** Any modal panel is open (edits in it must not be lost to a reload). */
   get panelOpen(): boolean {
-    return this.advancedOpen || this.roomOpen;
+    return this.advancedOpen || this.roomOpen || this.presetsOpen;
   }
 
   async refreshVersion(): Promise<void> {

@@ -350,7 +350,7 @@ string catalogue. Text built by functions (such as EQ band rows) stays hand-writ
 checked by the vectors below.
 
 **3. One behaviour, checked by shared test vectors.** JSON test cases run by vitest on the web and
-by Swift tests in the app: knob drag distance → value, wheel and arrow steps, "no reset on volume
+by Swift tests in the app: knob drag distance → value (the volume curve is in `design/vectors/volume-knob.json`), wheel and arrow steps, "no reset on volume
 knobs", dB text formatting, meter decoding and colours. The fade curve vectors run in `cargo test`
 (the only place the fade runs). If one side changes a behaviour without the other, its tests fail.
 

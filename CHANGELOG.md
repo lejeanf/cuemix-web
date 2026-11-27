@@ -12,6 +12,24 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+Simple view refinements from the UI review (web UI only; no server, protocol or preset change).
+
+### Changed
+- Monitor and Phones knobs (Simple view and Output view) use the same curve as the sliders: most
+  of the travel now covers the top 40 dB, where listening levels are (−30 dB sits at 44 % of the
+  arc instead of 70 %). Arrow keys, the mouse wheel and screen-reader steps move exactly 1 dB.
+  The curve is shared with the future iOS app in `design/vectors/volume-knob.json`.
+- On/off buttons: during a fade the button keeps the colour of where it is going and a bar sweeps
+  along its bottom edge (a still bar with reduced motion), so it no longer looks disabled. The
+  speaker plug warm-up turns the button amber with a countdown ("Warming up · 2 s"), and the plug
+  dot is larger.
+- An off channel shows "Off" instead of "−100 dB" under its knob (and to screen readers).
+- Presets in the Simple view: a "Preset" row shows the current preset and "● Modified"; it opens a
+  list where each preset has its own Load button, so one mis-tap no longer changes every mix.
+- Meters: faint ticks at −40, −18 and −6 dBFS, and a red clip mark that stays until the meter is
+  tapped.
+- Simple view knobs grow on tablets and laptops (up to 220 px, was 150 px).
+
 Quick fixes from the UI review (web UI only; no server or preset change).
 
 ### Changed

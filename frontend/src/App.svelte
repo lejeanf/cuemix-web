@@ -13,6 +13,7 @@
   import Remote from './components/Remote.svelte';
   import RoomTest from './components/RoomTest.svelte';
   import AdvancedDialog from './components/AdvancedDialog.svelte';
+  import PresetPicker from './components/PresetPicker.svelte';
   import { updates } from './lib/updates.svelte';
 
   onMount(() => {
@@ -79,6 +80,10 @@
 <!-- Panels and toasts sit outside the (inert while a panel is open) app. -->
 {#if store.roomOpen}
   <RoomTest />
+{/if}
+
+{#if store.presetsOpen}
+  <PresetPicker />
 {/if}
 
 {#if store.advancedOpen}

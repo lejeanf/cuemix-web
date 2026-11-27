@@ -227,6 +227,16 @@ export const S = {
     checked: (when: string) => `Checked ${when}`,
     safeNote: 'The download is checked (sha256) and a version that does not start is rolled back automatically.',
   },
+  simple: {
+    presetRow: 'Preset',
+    choosePreset: 'Choose a preset',
+    presetsTitle: 'Presets',
+    presetsNote: 'Loading a preset changes every mix. Monitor and Phones levels stay as they are.',
+    current: 'current',
+    off: 'Off',
+    warmingUp: (s: number | null) => (s === null ? 'Warming up…' : `Warming up · ${s} s`),
+    tapToCancel: 'Tap again to cancel',
+  },
   roomTest: 'Room test',
   measureRoom: 'Measure room…',
   room: {

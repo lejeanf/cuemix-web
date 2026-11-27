@@ -14,6 +14,10 @@
     step?: number;
     /** Logarithmic mapping (frequency, times). */
     log?: boolean;
+    /** Custom value ↔ arc position mapping (e.g. the volume curve); overrides `log`. */
+    curve?: { toNorm: (v: number) => number; fromNorm: (n: number) => number };
+    /** Exact value step for arrow keys and the wheel (Shift: still fine). Default: 2 % of the arc. */
+    keyStep?: number;
     format?: (v: number) => string;
     disabled?: boolean;
     hint?: string;
@@ -39,6 +43,8 @@
     ariaLabel,
     step = 0,
     log = false,
+    curve,
+    keyStep,
     format = (v) => String(Math.round(v * 100) / 100),
     disabled = false,
     hint,
@@ -50,10 +56,10 @@
   }: Props = $props();
 
   const toNorm = (v: number) =>
-    log ? Math.log(Math.max(v, min) / min) / Math.log(max / min) : (v - min) / (max - min);
+    curve ? curve.toNorm(v) : log ? Math.log(Math.max(v, min) / min) / Math.log(max / min) : (v - min) / (max - min);
   const fromNorm = (n: number) => {
     const c = Math.min(1, Math.max(0, n));
-    let v = log ? min * (max / min) ** c : min + c * (max - min);
+    let v = curve ? curve.fromNorm(c) : log ? min * (max / min) ** c : min + c * (max - min);
     if (step > 0) v = Math.round(v / step) * step;
     return Math.min(max, Math.max(min, v));
   };
@@ -75,8 +81,8 @@
 
   function down(e: PointerEvent) {
     if (off || e.button > 0) return;
-    // Buttons inside a shared surface stay plain buttons.
-    if (surface && (e.target as Element).closest('button, a, select, input, textarea')) return;
+    // Buttons inside a shared surface stay plain buttons; a tap on a meter clears its clip mark.
+    if (surface && (e.target as Element).closest('button, a, select, input, textarea, canvas')) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragging = true;
     moved = false;
@@ -142,6 +148,10 @@
   function onwheel(e: WheelEvent) {
     if (off) return;
     e.preventDefault();
+    if (keyStep) {
+      onchange(Math.min(max, Math.max(min, value + (e.deltaY < 0 ? keyStep : -keyStep))), true);
+      return;
+    }
     const d = (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 0.002 : 0.02);
     let v = fromNorm(toNorm(value) + d);
     if (step > 0 && v === value) v = Math.min(max, Math.max(min, value + (d > 0 ? step : -step)));
@@ -150,7 +160,10 @@
   function key(e: KeyboardEvent) {
     if (off) return;
     const d = e.key === 'ArrowUp' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowDown' || e.key === 'ArrowLeft' ? -1 : 0;
-    if (d) {
+    if (d && keyStep) {
+      e.preventDefault();
+      onchange(Math.min(max, Math.max(min, value + d * keyStep)), true);
+    } else if (d) {
       e.preventDefault();
       let v = fromNorm(toNorm(value) + d * (e.shiftKey ? 0.002 : 0.02));
       if (step > 0 && v === value) v = Math.min(max, Math.max(min, value + d * step));
