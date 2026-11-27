@@ -111,6 +111,8 @@ pub struct Storage {
     /// Update preferences saved from the UI (`{"show_prerelease":bool}`); when absent,
     /// `[update] channel` decides the default.
     pub update_prefs_file: PathBuf,
+    /// Admin token (`[web] admin_token = "auto"`), created with mode 0600 on first start.
+    pub admin_token_file: PathBuf,
 }
 
 impl Default for Storage {
@@ -122,6 +124,7 @@ impl Default for Storage {
             speaker_plug_file: PathBuf::from("/var/lib/cuemix-web/speaker-plug.json"),
             osc_file: PathBuf::from("/var/lib/cuemix-web/osc.json"),
             update_prefs_file: PathBuf::from("/var/lib/cuemix-web/update-prefs.json"),
+            admin_token_file: PathBuf::from("/var/lib/cuemix-web/admin-token"),
         }
     }
 }
@@ -210,6 +213,10 @@ pub struct Web {
     /// or a router DNS name). IP addresses, `localhost`, `*.local` and the mDNS name are
     /// always accepted; any other `Host` gets 421 (DNS-rebinding guard).
     pub allowed_hosts: Vec<String>,
+    /// `""` (default): no admin token, every device may change everything. `"auto"`: a token
+    /// is generated in `[storage] admin_token_file`, and only devices paired with it may
+    /// install releases, switch pre-releases, or change the speaker plug and OSC settings.
+    pub admin_token: String,
 }
 
 /// Keys present in `raw` but absent from the serialised known config.

@@ -50,6 +50,8 @@ speaker_plug_file = "/var/lib/cuemix-web/speaker-plug.json"
 osc_file = "/var/lib/cuemix-web/osc.json"
 # "Show pre-releases" switch of the Version dialog; without this file, [update] channel decides.
 update_prefs_file = "/var/lib/cuemix-web/update-prefs.json"
+# Admin token ([web] admin_token = "auto"), created with mode 0600.
+admin_token_file = "/var/lib/cuemix-web/admin-token"
 
 [web]
 # Use X-Forwarded-For (rightmost entry) for client IPs in logs. Enable only behind
@@ -62,6 +64,12 @@ allowed_origins = []
 # name (always accepted). Any other Host header gets 421: this blocks DNS-rebinding pages.
 # Example: ["mixer.example.com", "cuemix.example.net"]
 allowed_hosts = []
+# Optional admin token. "" (default): every device on the network may install releases and
+# change the speaker plug and OSC settings. "auto": a token is generated in
+# [storage] admin_token_file on first start, its pairing link is logged once (print it again
+# with `cuemix-web --config /etc/cuemix-web/config.toml --pair-link`, as root), and only
+# devices that opened it may do those things. Faders, presets and power stay open.
+admin_token = ""
 
 [update]
 # Default of the "Show pre-releases" switch (Advanced menu, "Version..."), used until

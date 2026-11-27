@@ -240,17 +240,26 @@ class Store {
       if (this.stopped) return;
       const ws = this.ws;
       if (!ws || !shouldDropSilentSocket(ws.readyState, this.link, this.lastMsgAt, visibleAt)) return;
-      ws.onclose = null;
-      ws.onmessage = null;
-      ws.onerror = null;
-      this.ws = null;
-      this.socketOpen = false;
-      ws.close();
-      if (this.retry) clearTimeout(this.retry);
-      this.retry = null;
-      this.attempt = 0;
-      this.connect();
+      this.dropAndReconnect(ws);
     }, LIVENESS_CHECK_MS);
+  }
+  private dropAndReconnect(ws: WebSocket): void {
+    ws.onclose = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    this.ws = null;
+    this.socketOpen = false;
+    ws.close();
+    if (this.retry) clearTimeout(this.retry);
+    this.retry = null;
+    this.attempt = 0;
+    this.connect();
+  }
+  /** Open a new socket now (the server decides what a socket may do when it opens, e.g. after admin pairing). */
+  renew(): void {
+    if (this.stopped) return;
+    if (this.ws) this.dropAndReconnect(this.ws);
+    else this.reconnectNow();
   }
   private clearLiveness(): void {
     if (this.liveTimer) clearTimeout(this.liveTimer);

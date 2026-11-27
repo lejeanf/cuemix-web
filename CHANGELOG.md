@@ -16,7 +16,19 @@ need attention. Preset files carry `schema_version`; see
 
 Fixes from a security review: a web page could control the mixer through DNS rebinding,
 releases could be downgraded to vulnerable versions, and the release pipeline gave build
-code more rights than it needs.
+code more rights than it needs. Releases are now signed, and an optional admin token can
+reserve installs and the plug/OSC settings to paired devices.
+
+### Added
+- **Optional admin token** (`[web] admin_token = "auto"`, off by default). The server creates
+  a random token in `[storage] admin_token_file` (mode 0600) and logs a pairing link once;
+  `cuemix-web --config <path> --pair-link` prints it again (as root). Opening the link on a
+  device pairs it (`HttpOnly`, `SameSite=Strict` cookie; the token travels in the URL
+  fragment, never to a server log). Only paired devices may install releases, switch
+  pre-releases, or change and test the speaker plug and OSC settings; faders, presets and
+  power stay open to everyone. Unpaired devices see these controls read-only with a note.
+  Scripts can send `Authorization: Bearer <token>`. New routes: `GET /api/admin`,
+  `POST /api/admin/pair`, `POST /api/admin/unpair`.
 
 ### Security
 - **DNS rebinding**: the server now answers only for host names an outside site cannot own:

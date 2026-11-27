@@ -4,6 +4,7 @@
   import OscPanel from './OscPanel.svelte';
   import VersionPanel from './VersionPanel.svelte';
   import { store } from '../lib/store.svelte';
+  import { admin } from '../lib/admin.svelte';
   import { S } from '../lib/strings';
   import { ADVANCED_TABS, nextTab, type AdvancedTab } from '../lib/advanced';
 
@@ -49,15 +50,30 @@
     {/each}
   </div>
 
-  <div role="tabpanel" id="adv-panel-plug" aria-labelledby="adv-tab-plug" hidden={tab !== 'plug'}>
-    <SpeakerPlug onDirty={(d) => (plugDirty = d)} />
-  </div>
-  <div role="tabpanel" id="adv-panel-osc" aria-labelledby="adv-tab-osc" hidden={tab !== 'osc'}>
-    <OscPanel onDirty={(d) => (oscDirty = d)} />
-  </div>
-  <div role="tabpanel" id="adv-panel-version" aria-labelledby="adv-tab-version" hidden={tab !== 'version'}>
-    <VersionPanel />
-  </div>
+  {#if admin.message}<p class="admin-msg" role="status">{admin.message}</p>{/if}
+  {#if admin.locked}
+    <div class="admin-locked" role="note">
+      <strong>{S.admin.lockedTitle}</strong>
+      <p>{S.admin.locked}</p>
+    </div>
+  {/if}
+
+  <!-- A disabled fieldset makes every control of the panels read-only at once. -->
+  <fieldset class="panels" disabled={admin.locked}>
+    <div role="tabpanel" id="adv-panel-plug" aria-labelledby="adv-tab-plug" hidden={tab !== 'plug'}>
+      <SpeakerPlug onDirty={(d) => (plugDirty = d)} />
+    </div>
+    <div role="tabpanel" id="adv-panel-osc" aria-labelledby="adv-tab-osc" hidden={tab !== 'osc'}>
+      <OscPanel onDirty={(d) => (oscDirty = d)} />
+    </div>
+    <div role="tabpanel" id="adv-panel-version" aria-labelledby="adv-tab-version" hidden={tab !== 'version'}>
+      <VersionPanel />
+    </div>
+  </fieldset>
+
+  {#if admin.info?.required && admin.info.paired}
+    <p class="admin-paired">{S.admin.pairedNote} <button type="button" class="link" onclick={() => admin.unpair()}>{S.admin.unpair}</button></p>
+  {/if}
 </Dialog>
 
 <style>
@@ -101,6 +117,37 @@
   }
   [role='tabpanel'][hidden] {
     display: none;
+  }
+  .panels {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+  .panels:disabled {
+    opacity: 0.6;
+  }
+  .admin-locked {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-top: 8px;
+  }
+  .admin-locked p,
+  .admin-msg,
+  .admin-paired {
+    margin: 4px 0 0;
+    color: var(--text-dim);
+    font-size: 0.9em;
+  }
+  .link {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--cyan);
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
   }
   :global(.panel) {
     display: flex;
