@@ -12,6 +12,8 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-27
+
 Follow-up to the UI review, after trying 0.8.0. Web UI only; no protocol, preset or
 `config.toml` change.
 
