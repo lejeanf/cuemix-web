@@ -481,7 +481,7 @@
   .meter {
     width: 12px;
     height: 70px;
-    background: #0d0e11;
+    background: var(--field);
     border: 1px solid var(--border);
     border-radius: 3px;
     display: flex;

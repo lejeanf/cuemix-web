@@ -161,22 +161,22 @@
   .eq {
     width: 100%;
     height: auto;
-    background: #0d0e11;
+    background: var(--field);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     touch-action: none;
     user-select: none;
   }
   .grid {
-    stroke: #1d2027;
+    stroke: var(--grid);
     stroke-width: 1;
     vector-effect: non-scaling-stroke;
   }
   .grid.zero {
-    stroke: #343947;
+    stroke: var(--grid-strong);
   }
   .axis {
-    fill: #6b7280;
+    fill: var(--axis-text);
     font-size: calc(10px * var(--k, 1));
   }
   .curve {
@@ -187,7 +187,7 @@
   }
   .handle {
     cursor: grab;
-    stroke: #0d0e11;
+    stroke: var(--field);
     stroke-width: 1.5;
     vector-effect: non-scaling-stroke;
   }
@@ -200,7 +200,7 @@
   .num {
     font-size: calc(10px * var(--k, 1));
     font-weight: 700;
-    fill: #111;
+    fill: var(--on-accent);
     pointer-events: none;
   }
 </style>

@@ -262,7 +262,7 @@
   .b.on {
     background: var(--on);
     border-color: var(--on);
-    color: #111;
+    color: var(--on-accent);
     font-weight: 700;
   }
   .b:disabled {
@@ -285,5 +285,12 @@
   }
   .confirm p {
     margin: 0 0 6px;
+  }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .b {
+      min-height: 40px;
+      min-width: 36px;
+    }
   }
 </style>

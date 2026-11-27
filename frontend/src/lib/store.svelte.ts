@@ -12,6 +12,7 @@ import { clamp } from './validate';
 import { isHwMapped, isHwReadOnly, visibleTabs, type Tab } from './hwmap';
 import { S } from './strings';
 import { tabFromHash, toastTimeout } from './ui';
+import { applyTheme, loadTheme, saveTheme, type Theme } from './theme';
 import { LIVENESS_CHECK_MS, needsLivenessCheck, parseLaunchFlags, resolveSimple, shouldDropSilentSocket, shouldReconnectNow } from './launch';
 
 export type Link = 'offline' | 'connecting' | 'online' | 'demo';
@@ -84,6 +85,13 @@ class Store {
   tab: Tab = $state(initialTab());
   /** Phone remote (Main / Phones volume) instead of the full console. */
   simple = $state(initialSimple());
+  /** Night mode (dimmed theme), per browser. */
+  theme: Theme = $state(loadTheme(safeStorage()));
+  setTheme(t: Theme): void {
+    this.theme = t;
+    saveTheme(safeStorage(), t);
+    applyTheme(t);
+  }
   /** `?embed`: running inside the native app's web view (hides the view toggle and status dot). */
   embed = launchFlags().embed;
   setSimple(on: boolean): void {
@@ -473,6 +481,20 @@ class Store {
   }
   listPresets(): void {
     this.sendRaw({ cmd: 'list_presets' });
+  }
+  deletePreset(name: string): void {
+    this.sendRaw({ cmd: 'delete_preset', name });
+  }
+  renamePreset(name: string, to: string): void {
+    this.sendRaw({ cmd: 'rename_preset', name, to });
+  }
+  setPresetInSimple(name: string, show: boolean): void {
+    this.sendRaw({ cmd: 'set_preset_in_simple', name, show });
+  }
+  /** Presets the Simple view lists (the Advanced view lists them all). */
+  get simplePresets(): string[] {
+    const hidden = new Set(this.c.presetsHidden);
+    return this.c.presets.filter((p) => !hidden.has(p));
   }
   /** Switch Monitor or Phones on/off; the server fades and reports back with a `power` event. */
   power(channel: PowerChannel, on: boolean): void {

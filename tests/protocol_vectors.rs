@@ -98,9 +98,12 @@ fn command_kind(c: &Command) -> usize {
         C::TestSpeakerPlug { .. } => 10,
         C::SetOscSettings { .. } => 11,
         C::SetReturnLevel { .. } => 12,
+        C::DeletePreset { .. } => 13,
+        C::RenamePreset { .. } => 14,
+        C::SetPresetInSimple { .. } => 15,
     }
 }
-const COMMAND_KINDS: usize = 13;
+const COMMAND_KINDS: usize = 16;
 
 fn event_kind(e: &ServerEvent) -> usize {
     use ServerEvent as E;
@@ -306,6 +309,15 @@ fn commands() -> Vec<Command> {
             channel: PowerChannel::Phones,
             db: -24.0,
         },
+        Command::DeletePreset { name: "Old".into() },
+        Command::RenamePreset {
+            name: "Live".into(),
+            to: "Live 2".into(),
+        },
+        Command::SetPresetInSimple {
+            name: "Studio".into(),
+            show: false,
+        },
     ]
 }
 
@@ -344,6 +356,7 @@ fn events() -> Vec<ServerEvent> {
         ServerEvent::Session(session()),
         ServerEvent::Presets {
             names: vec!["Live".into(), "Studio".into()],
+            hidden: vec!["Studio".into()],
         },
         ServerEvent::Labels(Labels { channels }),
         ServerEvent::Meters {

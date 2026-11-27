@@ -578,6 +578,20 @@
       "channel": "phones",
       "cmd": "set_return_level",
       "db": -24.0
+    },
+    {
+      "cmd": "delete_preset",
+      "name": "Old"
+    },
+    {
+      "cmd": "rename_preset",
+      "name": "Live",
+      "to": "Live 2"
+    },
+    {
+      "cmd": "set_preset_in_simple",
+      "name": "Studio",
+      "show": false
     }
   ],
   "events": [
@@ -1141,6 +1155,9 @@
     },
     {
       "event": "presets",
+      "hidden": [
+        "Studio"
+      ],
       "names": [
         "Live",
         "Studio"

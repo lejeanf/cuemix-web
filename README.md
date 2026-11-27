@@ -4,13 +4,23 @@ High-performance **Rust** web controller and bidirectional **OSC** bridge for th
 
 **Status:** in daily use on a real UltraLite-mk5 (firmware 2.0.8). The device is identified on connect, its whole state is read back, levels are metered, and the mixes, preamps, trims and monitoring are controlled. The input and output EQ are written to the card; dynamics, reverb and clock are read from it, and writing them is enabled one feature at a time after a test on a card.
 
-![Mixer view: one strip per input or stereo pair with pan, fader, level meter, mute/solo and DSP; the selected mix's output meter beside the Main fader; the Control Room bar at the bottom](docs/images/webui-mixer.png)
+![Mixer view: one tab per mix, strips grouped under Mic, Line, S/PDIF and Optical headings with pan, fader, level meter, mute/solo and DSP; the Monitor fader with its dB scale on the right; the Control Room bar at the bottom with an on/off button for Monitor and Phones; the header with the sample rate, the current preset, the moon (Night mode) and ⋯ buttons, the Simple | Advanced switch and the amber Demo pill](docs/images/webui-mixer.png)
 
 ![Input view: mic and line preamps with gain, phase, pad, +48V and input meters; S/PDIF and optical inputs with the ADAT/TOS switch](docs/images/webui-input.png)
 
-![Output view: monitor and phones levels with meters, output trims per pair, and the output EQ with a preset applied: curve on the left, bands on the right](docs/images/webui-output.png)
+![Output view: Monitor and Phones levels with meters, mono, A/B and talkback, output trims per pair, and the output EQ with the Loudness preset applied: curve on the left, bands on the right; the header shows the preset as modified](docs/images/webui-output.png)
 
-<sub>Screenshots taken from a real UltraLite-mk5 playing music through its optical input.</sub>
+<p>
+<img src="docs/images/simple-phone.png" width="195" alt="Simple view on a phone: Monitor at −18 dB and Phones at −24 dB as two large knobs with meters and on/off buttons, the Preset row showing Live, and the Keep screen on switch">
+<img src="docs/images/simple-phone-off.png" width="195" alt="Simple view with Monitor off: the knob reads Off, returns to −18 dB, with a grey needle at the level On will fade back to">
+<img src="docs/images/simple-phone-presets.png" width="195" alt="Simple view preset sheet: the presets chosen for the Simple view, each with its own Load button, the current one marked">
+<img src="docs/images/simple-phone-night.png" width="195" alt="Simple view in Night mode: the same layout with dimmed text, accents and meters, the moon button lit">
+</p>
+<p>
+<img src="docs/images/advanced-phone.png" width="195" alt="Advanced view on a phone: the mixer with Mic and Line groups and the Monitor fader, Monitor and Phones rows with on/off buttons and a ⋯ button for DIM, MONO, A/B and Talkback, and the bottom tab bar with Mixer, Input, Output and Reverb">
+</p>
+
+<sub>Screenshots taken in demo mode (no MOTU connected, so the meters are empty), at 1400 × 820 for the desktop views and 390 × 844 for the phone views.</sub>
 
 ## Hardware coverage
 
@@ -27,7 +37,7 @@ Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`d
 ## Features
 
 - Web UI for mixes, channel faders, pan, mute/solo, preamps (gain, +48 V, pad, phase), digital inputs, input DSP (EQ, compressor, gate), output trims and EQ (with presets such as *Voice clarity* or *Night*), reverb, control room and clock, with level meters everywhere.
-- Presets stored on the server, plus **Export to file / Import file** to keep or share every setting as one JSON file.
+- Presets stored on the server, plus **Export to file / Import file** to keep or share every setting as one JSON file. The Presets panel loads, saves (asking before it replaces a preset), renames and deletes them, and chooses which presets the Simple view lists (the phone icon on each row).
 - Update notice in the UI, with a user-triggered **Install**, and a **Version…** dialog to install any published release, older ones included back to the security floor (see [Updating](#updating)).
 - **OSC** tab of the ⋯ Advanced settings dialog: change the OSC listen address and the feedback targets live, without editing `config.toml` or restarting (see [OSC settings](#osc-settings)).
 - Bidirectional OSC over UDP `:8000` with 1-based indices (TouchOSC / QLab friendly), with feedback to every controller.
@@ -141,20 +151,32 @@ Once running:
 
 The embedded Svelte 5 console (dark theme) has four views, each reachable directly with a URL fragment (`#mixer`, `#input`, `#output`, `#reverb`; changing the fragment or using Back on an open page switches the view):
 
-- **Mixer**: one tab per mix (Main 1-2, Phones, Line 3-4 … Reverb, in CueMix 5 order), one strip per input or stereo pair (pan, fader, meter, mute/solo, DSP drawer on the analog inputs), the Main volume with the selected mix's output meter.
+- **Mixer**: one tab per mix (Main 1-2, Phones, Line 3-4 … Reverb, in CueMix 5 order), one strip per input or stereo pair (pan, fader, meter, mute/solo, DSP drawer on the analog inputs), grouped under Mic, Line, S/PDIF, Optical, Computer and Reverb headings, and the Monitor (Main volume) fader with a dB scale and the selected mix's output meter.
 - **Input**: mic and line preamps with their meters, S/PDIF and optical inputs (ADAT/TOS).
 - **Output**: monitor and phones levels, mono, A/B, talkback, output trims per pair, and the output EQ (curve on the left, bands on the right, presets).
 - **Reverb**: reverb settings, sends (the Reverb mix) and returns.
+- **Control Room bar** (bottom of every view): DIM, MONO, A/B, Talkback, and the Monitor and Phones levels, each with its own on/off button (the same server-side fade as the Simple view).
 
-On a phone the UI opens in a **Simple** view: two large rotary knobs, Monitor (Main) and Phones, each with vertical meters (drag up or right for more; arrow keys and the wheel move 1 dB; no double-tap reset; most of the travel covers the top 40 dB, like the sliders; an off channel reads "Off" with the level On brings it back to, and turning its knob then changes that level without switching it on), a Main on/off button that fades the Main volume out and back in over about a second (the server runs the fade, so every device sees it, and remembers the level it goes back to, never above it), and preset recall (the Preset row opens a list with a Load button per preset and shows "● Modified" when the sound no longer matches it). During a fade the on/off button shows a moving bar; with a speaker plug it turns amber and counts down the warm-up. Meters have ticks at −40, −18 and −6 dBFS and a red clip mark that a tap clears. **Keep screen on** (where the browser supports it) stops the phone from sleeping while the Simple view is in front; it is off by default and remembered per browser. The **Simple | Advanced** switch in the header (two icons on phones) shows the current view and opens the full console (which also fits phone and tablet screens); the choice is remembered per browser. In demo mode (no MOTU found) the header shows an amber **Demo** label. Error messages stay until you tap them; notices disappear after 5 seconds.
+**Header.** The **Simple | Advanced** switch (two icons on phones) shows the current view and switches between them; the choice is remembered per browser. The moon button turns on **Night mode**, a dimmer version of the dark theme for a dark room or a stage: text, accents, meters and borders are dimmed, text keeps at least 4.5:1 contrast, and the choice is remembered per browser (off by default, never automatic). In demo mode (no MOTU found) the header shows an amber **Demo** pill. Error messages stay until you tap them; notices disappear after 5 seconds. On touch screens every button is at least 44 px tall.
+
+**Simple view.** On a phone the UI opens in the Simple view (household use, a dark room, a stage):
+
+- Two large rotary knobs, **Monitor** (Main) and **Phones**, each with vertical meters. Drag up or right for more; arrow keys and the wheel move 1 dB; there is no double-tap reset. The knobs use the same curve as the sliders, so most of the travel covers the top 40 dB where listening levels are.
+- An on/off button per knob fades the level out and back in over about a second. The server runs the fade, so every device sees it, and remembers the level it goes back to (never above it). During a fade the button shows a moving bar; with a speaker plug, Monitor turns amber and counts down the warm-up.
+- An off channel reads **Off** with the level On brings it back to ("returns to −18 dB"). Turning its knob then changes that level (grey needle) without switching it on.
+- Meters have ticks at −40, −18 and −6 dBFS and a red clip mark that a tap clears.
+- The **Preset** row shows the current preset and "● Modified" when the sound no longer matches it; it opens a list with a Load button per preset. Only the presets marked for the Simple view are listed (the phone icon in the Advanced Presets panel).
+- **Keep screen on** (where the browser supports it) stops the phone from sleeping while the Simple view is in front; off by default, remembered per browser.
+
+**Advanced view on phones.** The full console also fits phone and tablet screens. On phones a bottom tab bar (Mixer, Input, Output, Reverb, the same order and names as the planned iOS app) replaces the header tabs, and the Control Room bar shows Monitor and Phones with their own on/off buttons; DIM, MONO, A/B and Talkback are under its ⋯ button.
 
 ### Add to the iPhone home screen
 
-Open the UI in Safari, tap **Share**, then **Add to Home Screen** (name: Cue Desk). The icon opens the UI full screen like an app, straight in the Simple view. The home-screen app has its own storage, separate from Safari: the view choice starts empty. The remembered Main on/off level lives on the server and is shared by every device.
+Open the UI in Safari, tap **Share**, then **Add to Home Screen** (name: Cue Desk). The icon opens the UI full screen like an app, straight in the Simple view. The home-screen app has its own storage, separate from Safari: the view choice starts empty. The levels Monitor and Phones return to when switched on live on the server and are shared by every device.
 
-URL flags (never saved): `?simple` forces the Simple view for that page load; `?embed` (for a native app's web view) opens the Advanced view and hides the Simple/Advanced toggle and the connection dot, and `?embed&simple` opens Simple. When you unlock the phone or switch back to the page, it reconnects at once if the connection was lost; if it still looks connected but no message arrives within 2 seconds (online or demo), it drops that connection and reconnects.
+URL flags (never saved): `?simple` forces the Simple view for that page load; `?embed` (for a native app's web view) opens the Advanced view and hides the Simple/Advanced toggle, the connection dot and the bottom tab bar (the app has its own), and `?embed&simple` opens Simple. When you unlock the phone or switch back to the page, it reconnects at once if the connection was lost; if it still looks connected but no message arrives within 2 seconds (online or demo), it drops that connection and reconnects.
 
-The DSP drawer and the output EQ follow CueMix 5: a curve with draggable bands, and per band an on/off button, frequency, gain, Q and the filter types the hardware offers on that band. Faders: double-click/tap resets to 0 dB, Shift-drag is fine adjustment, mouse wheel nudges. Controls whose changes are not sent to the MOTU yet (compressor, gate, clock, Dim, Speaker A/B) are greyed out and disabled, with a tooltip saying why; the Reverb tab is hidden while a MOTU is connected until reverb can be written. A diagnostic **Meter probe** view (`/?probe`) shows the card's raw meter points.
+The DSP drawer and the output EQ follow CueMix 5: a curve with draggable bands, and per band an on/off button, frequency, gain, Q and the filter types the hardware offers on that band. Faders: double-click/tap resets to 0 dB (not the Monitor level, which never jumps up), Shift-drag is fine adjustment, mouse wheel nudges. Controls whose changes are not sent to the MOTU yet (compressor, gate, clock, Dim, Speaker A/B) are greyed out and disabled, with a tooltip saying why; the Reverb tab is hidden while a MOTU is connected until reverb can be written. A diagnostic **Meter probe** view (`/?probe`) shows the card's raw meter points.
 
 ```sh
 cd frontend && npm install
@@ -229,6 +251,11 @@ Endpoint `/ws`. Indices are **0-based** in JSON, and values use the native units
 {"cmd":"save_preset","name":"live"}
 {"cmd":"import_preset","name":"from file","text":"{\"schema_version\":2,\"state\":{…}}"}
 {"cmd":"list_presets"}
+{"cmd":"rename_preset","name":"live","to":"stage"}
+{"cmd":"delete_preset","name":"stage"}
+{"cmd":"set_preset_in_simple","name":"live","show":false}
+{"cmd":"power","channel":"main","on":false}
+{"cmd":"set_return_level","channel":"main","db":-18}
 {"cmd":"set_label","ch":2,"label":{"name":"Vox","color":"#06B6D4"}}
 {"cmd":"measure_start"}
 {"cmd":"measure_stop"}
@@ -240,14 +267,15 @@ On connection the server sends `snapshot`, `labels`, `presets` and `measure`. La
 {"event":"changed","params":[{"param":"dim","on":true}]}
 {"event":"status","connection":"online"}
 {"event":"session","active_preset":"live","modified":true,"connection":"online"}
-{"event":"presets","names":["default","live"]}
+{"event":"presets","names":["default","live"],"hidden":["default"]}
+{"event":"power","main":{"on":false,"fading":null,"plug":null,"return_db":-18},"phones":{"on":true,"fading":null,"plug":null,"return_db":null}}
 {"event":"labels","channels":{"2":{"name":"Vox","color":"#06B6D4"}}}
 {"event":"meters","levels":[0.0,0.12]}
 {"event":"measure","state":"playing","source":[6,7],"until":"2026-11-16T20:15:30Z"}
 {"event":"error","message":"..."}
 ```
 
-`meters` is limited to 60 per second per client. Incoming messages are capped at 256 KiB. `import_preset` stores the JSON it carries (the preset file format, any readable version) as `<name>.json`, then recalls it like `load_preset`. The server does not send a `changed` back to the client that caused it.
+`meters` is limited to 60 per second per client. Incoming messages are capped at 256 KiB. `import_preset` stores the JSON it carries (the preset file format, any readable version) as `<name>.json`, then recalls it like `load_preset`. The server does not send a `changed` back to the client that caused it. `hidden` lists the presets left out of the Simple view (`set_preset_in_simple`, kept in `<presets_dir>/.simple-view.json`). `return_db` is the whole-dB level an On fades back to while a channel is off or fading out (`null` while on); `set_return_level` changes it while the channel is off and is ignored while it is on.
 
 ## Deployment
 

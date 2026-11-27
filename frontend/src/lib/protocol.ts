@@ -222,6 +222,10 @@ export type Command =
   | { cmd: 'save_preset'; name: string }
   | { cmd: 'import_preset'; name: string; text: string }
   | { cmd: 'list_presets' }
+  | { cmd: 'delete_preset'; name: string }
+  /** Refused when `to` is taken. */
+  | { cmd: 'rename_preset'; name: string; to: string }
+  | { cmd: 'set_preset_in_simple'; name: string; show: boolean }
   | { cmd: 'set_label'; ch: number; label: ChannelLabel | null }
   | { cmd: 'measure_start' }
   | { cmd: 'measure_stop' }
@@ -238,7 +242,8 @@ export type ServerEvent =
   | { event: 'changed'; params: Param[] }
   | { event: 'status'; connection: ConnectionStatus }
   | ({ event: 'session' } & SessionInfo)
-  | { event: 'presets'; names: string[] }
+  /** `hidden`: presets the Simple view leaves out (absent on older servers). */
+  | { event: 'presets'; names: string[]; hidden?: string[] }
   | ({ event: 'labels' } & Labels)
   | { event: 'meters'; levels: number[] }
   /** Raw meter frame from the MOTU (prop 6000), for the meter probe. */
