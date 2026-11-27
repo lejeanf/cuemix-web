@@ -639,7 +639,7 @@ mod tests {
             "releases": [
                 {"tag":"v9.1.0-alpha.2","version":"9.1.0-alpha.2","prerelease":true,"published_at":"2026-11-25T09:00:00Z"},
                 {"tag":"v9.0.0","version":"9.0.0","prerelease":false,"published_at":"2026-11-24T09:00:00Z"},
-                {"tag":"v0.8.1","version":"0.8.1","prerelease":false,"published_at":"2026-11-01T09:00:00Z"},
+                {"tag":"v8.8.8","version":"8.8.8","prerelease":false,"published_at":"2026-11-01T09:00:00Z"},
             ],
         })
         .to_string()
@@ -870,7 +870,7 @@ mod tests {
     #[tokio::test]
     async fn a_new_status_without_the_pin_marker_refuses_a_version() {
         let (cfg, dir) = setup("nopin", Some(status_text("0.6.0", false))).await;
-        let (code, msg) = request_install(&cfg, br#"{"version":"v0.8.1"}"#).await;
+        let (code, msg) = request_install(&cfg, br#"{"version":"v8.8.8"}"#).await;
         assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{msg}");
         assert!(!cfg.update.request_file.exists());
         // A plain request still works (the old root side installs the newest).
@@ -884,36 +884,36 @@ mod tests {
         let (cfg, dir) = setup("body", Some(status_text("0.6.0", true))).await;
         for (body, want) in [
             (&br#"{"version":"v7.7.7"}"#[..], StatusCode::BAD_REQUEST),
-            (br#"{"version":"v0.8.1; reboot"}"#, StatusCode::BAD_REQUEST),
-            (br#"{"version":"0.8.1"}"#, StatusCode::BAD_REQUEST),
+            (br#"{"version":"v8.8.8; reboot"}"#, StatusCode::BAD_REQUEST),
+            (br#"{"version":"8.8.8"}"#, StatusCode::BAD_REQUEST),
             (br#"{"version":5}"#, StatusCode::BAD_REQUEST),
             (b"not json", StatusCode::BAD_REQUEST),
             (b"[]", StatusCode::BAD_REQUEST),
-            (b"\"v0.8.1\"", StatusCode::BAD_REQUEST),
+            (b"\"v8.8.8\"", StatusCode::BAD_REQUEST),
         ] {
             let (code, msg) = request_install(&cfg, body).await;
             assert_eq!(code, want, "{} -> {msg}", String::from_utf8_lossy(body));
             assert!(!cfg.update.request_file.exists());
         }
         // A tag from the list is written as is, atomically, and only once.
-        let (code, _) = request_install(&cfg, br#"{"version":"v0.8.1"}"#).await;
+        let (code, _) = request_install(&cfg, br#"{"version":"v8.8.8"}"#).await;
         assert_eq!(code, StatusCode::ACCEPTED);
         assert_eq!(
             tokio::fs::read_to_string(&cfg.update.request_file)
                 .await
                 .unwrap(),
-            "v0.8.1"
+            "v8.8.8"
         );
         let v = status_json(&cfg).await;
         assert_eq!(v["pending"], true);
-        assert_eq!(v["pending_version"], "v0.8.1");
+        assert_eq!(v["pending_version"], "v8.8.8");
         let (code, _) = request_install(&cfg, br#"{"version":"v9.0.0"}"#).await;
         assert_eq!(code, StatusCode::CONFLICT);
         assert_eq!(
             tokio::fs::read_to_string(&cfg.update.request_file)
                 .await
                 .unwrap(),
-            "v0.8.1",
+            "v8.8.8",
             "the queued request is untouched"
         );
         // No temporary file is left behind.
@@ -1193,7 +1193,7 @@ mod tests {
         );
         assert!(!cfg.update.request_file.exists() && !cfg.update_prefs_file.exists());
 
-        let big = format!(r#"{{"version":"v0.8.1","pad":"{}"}}"#, "x".repeat(2000));
+        let big = format!(r#"{{"version":"v8.8.8","pad":"{}"}}"#, "x".repeat(2000));
         assert_eq!(http(addr, "POST", "/api/update", true, &big).await.0, 413);
         assert!(!cfg.update.request_file.exists());
 
@@ -1217,7 +1217,7 @@ mod tests {
             400
         );
         assert_eq!(
-            http(addr, "POST", "/api/update", true, r#"{"version":"v0.8.1"}"#)
+            http(addr, "POST", "/api/update", true, r#"{"version":"v8.8.8"}"#)
                 .await
                 .0,
             202
@@ -1254,25 +1254,25 @@ mod tests {
 
         let gate = Cooldown::new(std::time::Duration::ZERO);
         for bad in [
-            &br#"{"version":"v0.8.1","extra":true}"#[..],
+            &br#"{"version":"v8.8.8","extra":true}"#[..],
             br#"{"version":5}"#,
-            br#"{"version":["v0.8.1"]}"#,
-            br#"{"version":"v0.8.1\n"}"#,
-            br#"{"version":"v0.8.1\u0000"}"#,
-            br#"{"version":"v0.8.1\r\nX: 1"}"#,
-            br#"{"version":"v0.8.1/../../x"}"#,
-            br#"{"version":"v0.8.1 "}"#,
+            br#"{"version":["v8.8.8"]}"#,
+            br#"{"version":"v8.8.8\n"}"#,
+            br#"{"version":"v8.8.8\u0000"}"#,
+            br#"{"version":"v8.8.8\r\nX: 1"}"#,
+            br#"{"version":"v8.8.8/../../x"}"#,
+            br#"{"version":"v8.8.8 "}"#,
             br#"{"version":"V0.8.1"}"#,
             br#"{"version":"v0.5"}"#,
-            br#"{"version":"v0.8.1-"}"#,
-            br#"{"version":"v0.8.1;rm -rf /"}"#,
-            br#"{"version":"v0.8.1$(id)"}"#,
+            br#"{"version":"v8.8.8-"}"#,
+            br#"{"version":"v8.8.8;rm -rf /"}"#,
+            br#"{"version":"v8.8.8$(id)"}"#,
             "{\"version\":\"v0.5.\u{ff11}\"}".as_bytes(),
-            "{\"version\":\"v0.8.1\u{202e}\"}".as_bytes(),
-            b"{\"version\":\"v0.8.1\"}\0",
+            "{\"version\":\"v8.8.8\u{202e}\"}".as_bytes(),
+            b"{\"version\":\"v8.8.8\"}\0",
             br#"[]"#,
-            br#""v0.8.1""#,
-            b"v0.8.1",
+            br#""v8.8.8""#,
+            b"v8.8.8",
             b"\xff",
         ] {
             let (code, _) = queue_install(&cfg, &gate, bad).await;
@@ -1373,7 +1373,7 @@ mod tests {
                 "{ct:?}"
             );
             assert_eq!(
-                http_ct(addr, "POST", "/api/update", ct, r#"{"version":"v0.8.1"}"#).await,
+                http_ct(addr, "POST", "/api/update", ct, r#"{"version":"v8.8.8"}"#).await,
                 415,
                 "{ct:?}"
             );
