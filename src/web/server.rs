@@ -25,11 +25,13 @@
 //!   ([`security_headers`]).
 //! - every WebSocket write has a [`SEND_TIMEOUT`]; a client that stops
 //!   reading is disconnected so it can never pin memory or stall others.
+//! - a client gets [`HEADER_READ_TIMEOUT`] to send its request headers (slow-header attacks), at
+//!   most [`MAX_CONNECTIONS`] HTTP connections are served at once, and WebSockets are capped at
+//!   [`MAX_WS_TOTAL`], [`MAX_WS_PER_IP`] per client address (503 beyond).
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
-use anyhow::Context;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::DefaultBodyLimit;
 use axum::extract::{ConnectInfo, Request, State};
@@ -60,6 +62,14 @@ const PING_EVERY: Duration = Duration::from_secs(20);
 const SEND_TIMEOUT: Duration = Duration::from_secs(2);
 /// Minimum spacing between two forwarded `Meters` events (60 Hz).
 const METER_MIN_INTERVAL: Duration = Duration::from_micros(16_667);
+/// Time a client has to send a request's headers (also how long an idle keep-alive connection
+/// stays open).
+pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// HTTP connections served at once (WebSockets are counted separately once upgraded).
+pub const MAX_CONNECTIONS: usize = 256;
+/// Open WebSockets, in total and per client address.
+pub const MAX_WS_TOTAL: usize = 64;
+pub const MAX_WS_PER_IP: usize = 16;
 
 /// Web server settings.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -97,6 +107,49 @@ pub(super) struct AppState {
     pub(super) cfg: WebConfig,
     /// Spacing of accepted install requests.
     pub(super) gate: std::sync::Arc<super::update::Cooldown>,
+    /// Open WebSockets per client address.
+    ws_slots: std::sync::Arc<WsSlots>,
+}
+
+/// Counts open WebSockets, in total and per client address.
+#[derive(Debug, Default)]
+struct WsSlots {
+    open: std::sync::Mutex<std::collections::HashMap<IpAddr, usize>>,
+}
+
+/// One open WebSocket; frees its slot when dropped.
+struct WsSlot {
+    slots: std::sync::Arc<WsSlots>,
+    ip: IpAddr,
+}
+
+impl WsSlots {
+    /// A slot for `ip`, or `None` when the total or the per-address limit is reached.
+    fn take(self: &std::sync::Arc<Self>, ip: IpAddr) -> Option<WsSlot> {
+        let mut open = self.open.lock().unwrap_or_else(|p| p.into_inner());
+        let total: usize = open.values().sum();
+        let mine = open.get(&ip).copied().unwrap_or(0);
+        if total >= MAX_WS_TOTAL || mine >= MAX_WS_PER_IP {
+            return None;
+        }
+        open.insert(ip, mine + 1);
+        Some(WsSlot {
+            slots: self.clone(),
+            ip,
+        })
+    }
+}
+
+impl Drop for WsSlot {
+    fn drop(&mut self) {
+        let mut open = self.slots.open.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(n) = open.get_mut(&self.ip) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                open.remove(&self.ip);
+            }
+        }
+    }
 }
 
 /// Build the router (HTTP + WebSocket).
@@ -107,6 +160,7 @@ pub fn router(engine: EngineHandle, cfg: WebConfig) -> Router {
         gate: std::sync::Arc::new(super::update::Cooldown::new(
             super::update::INSTALL_COOLDOWN,
         )),
+        ws_slots: std::sync::Arc::default(),
     };
     Router::new()
         .route("/ws", get(ws_handler))
@@ -156,13 +210,80 @@ pub async fn serve(
         "web UI answers for these host names (others get 421; add yours to [web] allowed_hosts)"
     );
     let app = router(engine, cfg);
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .with_graceful_shutdown(async move { shutdown.wait().await })
-    .await
-    .context("web server failed")
+    // Each connection task holds a receiver; closing the sender asks them to finish.
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(());
+    let slots = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
+    loop {
+        let (stream, peer) = tokio::select! {
+            accepted = listener.accept() => match accepted {
+                Ok(pair) => pair,
+                Err(e) => {
+                    // Out of file descriptors and the like: back off instead of spinning.
+                    tracing::warn!(error = %e, "cannot accept a connection");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+            },
+            () = shutdown.wait() => break,
+        };
+        let Ok(permit) = slots.clone().try_acquire_owned() else {
+            tracing::debug!(peer = %peer.ip(), "too many connections, closing a new one");
+            continue;
+        };
+        let app = app.clone();
+        let mut stop = stop_rx.clone();
+        tokio::spawn(async move {
+            serve_connection(stream, peer, app, &mut stop).await;
+            drop(permit);
+        });
+    }
+    drop(listener);
+    drop(stop_rx);
+    stop_tx.send_replace(());
+    // Let open requests finish (upgraded WebSockets are not waited for).
+    let _ = tokio::time::timeout(Duration::from_secs(5), stop_tx.closed()).await;
+    Ok(())
+}
+
+/// One HTTP/1 connection: headers must arrive within [`HEADER_READ_TIMEOUT`], the peer address
+/// is passed to handlers as `ConnectInfo`, and a change on `stop` starts a graceful close.
+async fn serve_connection(
+    stream: tokio::net::TcpStream,
+    peer: SocketAddr,
+    app: Router,
+    stop: &mut tokio::sync::watch::Receiver<()>,
+) {
+    use hyper_util::rt::{TokioIo, TokioTimer};
+    use hyper_util::service::TowerToHyperService;
+    use tower::ServiceExt;
+
+    let service = app.map_request(move |req: axum::http::Request<hyper::body::Incoming>| {
+        let mut req = req.map(axum::body::Body::new);
+        req.extensions_mut().insert(ConnectInfo(peer));
+        req
+    });
+    let conn = hyper::server::conn::http1::Builder::new()
+        .timer(TokioTimer::new())
+        .header_read_timeout(HEADER_READ_TIMEOUT)
+        .serve_connection(TokioIo::new(stream), TowerToHyperService::new(service))
+        .with_upgrades();
+    let mut conn = std::pin::pin!(conn);
+    let mut stopping = false;
+    loop {
+        tokio::select! {
+            result = conn.as_mut() => {
+                if let Err(e) = result {
+                    tracing::trace!(error = %e, "connection ended with an error");
+                }
+                break;
+            }
+            changed = stop.changed(), if !stopping => {
+                let _ = changed;
+                stopping = true;
+                conn.as_mut().graceful_shutdown();
+            }
+        }
+    }
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -479,12 +600,17 @@ async fn ws_handler(
         return StatusCode::FORBIDDEN.into_response();
     }
     let ip = client_ip(peer, &headers, app.cfg.trust_forwarded_headers);
+    let Some(slot) = app.ws_slots.take(ip) else {
+        tracing::info!(%ip, "refused websocket: too many open connections");
+        return (StatusCode::SERVICE_UNAVAILABLE, "too many open connections").into_response();
+    };
     ws.max_message_size(MAX_MESSAGE_BYTES)
         .max_frame_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |socket| async move {
             let id = app.engine.next_client_id();
             tracing::info!(client = id, %ip, "websocket connected");
             session(socket, app.engine, Origin::Web(id)).await;
+            drop(slot);
             tracing::info!(client = id, %ip, "websocket disconnected");
         })
 }

@@ -852,3 +852,55 @@ async fn update_endpoints_refuse_cross_site_origins() -> Result<(), Box<dyn std:
     }
     Ok(())
 }
+
+/// One client address cannot hold more than `MAX_WS_PER_IP` WebSockets; closing one frees a slot.
+#[tokio::test]
+async fn websockets_are_capped_per_client_address() -> Result<(), Box<dyn std::error::Error>> {
+    use cuemix_web::web::server::MAX_WS_PER_IP;
+    let h = harness("ws-cap").await?;
+    let mut open = Vec::new();
+    for _ in 0..MAX_WS_PER_IP {
+        open.push(connect(&h).await?);
+    }
+    assert_eq!(connect_with_origin(&h, None).await?, 503);
+    let mut first = open.remove(0);
+    first.close(None).await?;
+    drop(first);
+    // The slot comes back once the server has seen the close.
+    let mut status = 0;
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        status = connect_with_origin(&h, None).await?;
+        if status == 101 {
+            break;
+        }
+    }
+    assert_eq!(status, 101);
+    Ok(())
+}
+
+/// A client that never finishes its request headers is disconnected (slow-header attack).
+#[tokio::test]
+async fn a_client_that_never_finishes_its_headers_is_dropped(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use cuemix_web::web::server::HEADER_READ_TIMEOUT;
+    let h = harness("slow-header").await?;
+    let mut s = TcpStream::connect(h.addr).await?;
+    s.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n")
+        .await?;
+    let started = std::time::Instant::now();
+    let mut buf = [0u8; 256];
+    // Closed (0 bytes, or an error answer then close) well before twice the timeout.
+    let read = tokio::time::timeout(HEADER_READ_TIMEOUT * 2, async {
+        loop {
+            match s.read(&mut buf).await {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await;
+    assert!(read.is_ok(), "still open after {:?}", started.elapsed());
+    assert!(started.elapsed() >= HEADER_READ_TIMEOUT / 2);
+    Ok(())
+}

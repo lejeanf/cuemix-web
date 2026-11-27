@@ -334,7 +334,11 @@ pub(super) async fn status_json(cfg: &WebConfig) -> Value {
                 .and_then(|s| s.get("update_available"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            (tag, flag)
+            // The root side only compares for equality: an older release is never "available".
+            let newer = tag
+                .as_deref()
+                .is_some_and(|t| cmp_versions(t, installed) == Ordering::Greater);
+            (tag, flag && newer)
         }
     };
     let latest = latest.map(|tag| {
@@ -818,7 +822,7 @@ mod tests {
     #[tokio::test]
     async fn old_root_side_reports_no_pinning_and_keeps_its_own_verdict() {
         let old = json!({
-            "installed": "0.6.0", "latest": "0.7.0", "tag": "v0.7.0",
+            "installed": "0.6.0", "latest": "9.0.0", "tag": "v9.0.0",
             "channel": "stable", "update_available": true,
             "checked_at": "2026-11-25T10:00:00Z"
         })
@@ -828,7 +832,20 @@ mod tests {
         assert_eq!(v["version_pinning"], false);
         assert_eq!(v["enabled"], true);
         assert_eq!(v["update_available"], true);
-        assert_eq!(v["latest"]["tag"], "v0.7.0");
+        assert_eq!(v["latest"]["tag"], "v9.0.0");
+        // Its "available" flag only means "different": an older release is not offered.
+        let older = json!({"tag": "v0.7.0", "update_available": true}).to_string();
+        tokio::fs::write(&cfg.update.status_file, older)
+            .await
+            .unwrap();
+        assert_eq!(status_json(&cfg).await["update_available"], false);
+        let old = json!({
+            "installed": "0.6.0", "latest": "9.0.0", "tag": "v9.0.0",
+            "channel": "stable", "update_available": true,
+        });
+        tokio::fs::write(&cfg.update.status_file, old.to_string())
+            .await
+            .unwrap();
         assert_eq!(v["releases"], json!([]));
         // Asking for a version is refused, not turned into "newest".
         let (code, msg) = request_install(&cfg, br#"{"version":"v0.5.2"}"#).await;

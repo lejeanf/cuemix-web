@@ -56,6 +56,9 @@ pub const API_VERSION: u32 = 1;
 
 /// Capacity of the client → engine request queue.
 const REQUEST_QUEUE: usize = 1024;
+/// Most presets kept on disk: a new name beyond this is refused (no client can fill the disk
+/// with presets). Overwriting an existing preset is always allowed.
+pub const MAX_PRESETS: usize = 200;
 /// Capacity of the engine → device queue (the client drains it continuously).
 /// Sized for a whole-state recall on an unidentified device: every mix param
 /// (4 per input and bus) plus the output EQ (165 params) must fit.
@@ -619,6 +622,48 @@ impl Engine {
         });
     }
 
+    /// `SavePreset`: store the live state under `name` and make it active.
+    async fn save_preset(&mut self, origin: Origin, name: &str) {
+        match self.store.save(name, &self.state).await {
+            Ok(preset) => {
+                self.session.active_preset = Some(preset.name.clone());
+                self.session.modified = false;
+                if let Err(i) = self.preset_names.binary_search(&preset.name) {
+                    self.preset_names.insert(i, preset.name.clone());
+                }
+                self.active = Some(preset);
+                self.emit(
+                    origin,
+                    Target::All,
+                    ServerEvent::Session(self.session.clone()),
+                );
+                self.emit(
+                    origin,
+                    Target::All,
+                    ServerEvent::Presets {
+                        names: self.preset_names.clone(),
+                    },
+                );
+            }
+            Err(e) => self.reply_error(origin, format!("{e:#}")),
+        }
+    }
+
+    /// `Ok` when `name` exists already or there is room for one more preset.
+    fn room_for(&self, name: &str) -> Result<(), String> {
+        let exists = self
+            .preset_names
+            .binary_search_by(|n| n.as_str().cmp(name))
+            .is_ok();
+        if exists || self.preset_names.len() < MAX_PRESETS {
+            Ok(())
+        } else {
+            Err(format!(
+                "there are already {MAX_PRESETS} presets: delete or overwrite one first"
+            ))
+        }
+    }
+
     fn reply_error(&mut self, origin: Origin, message: String) {
         tracing::debug!(?origin, %message, "request rejected");
         self.last_error = Some(message.clone());
@@ -721,6 +766,9 @@ impl Engine {
     /// Imports a preset file sent by a client (same format as the files in
     /// the presets directory): checks it, stores it under `name`, recalls it.
     async fn import(&mut self, origin: Origin, name: &str, text: &str) {
+        if let Err(e) = self.room_for(name) {
+            return self.reply_error(origin, e);
+        }
         let preset = match presets::parse_preset(name, text) {
             Ok(p) => p,
             Err(e) => return self.reply_error(origin, format!("cannot import {name:?}: {e:#}")),
@@ -817,28 +865,9 @@ impl Engine {
                 Err(e) => self.reply_error(origin, format!("{e:#}")),
             },
             Command::ImportPreset { name, text } => self.import(origin, &name, &text).await,
-            Command::SavePreset { name } => match self.store.save(&name, &self.state).await {
-                Ok(preset) => {
-                    self.session.active_preset = Some(preset.name.clone());
-                    self.session.modified = false;
-                    if let Err(i) = self.preset_names.binary_search(&preset.name) {
-                        self.preset_names.insert(i, preset.name.clone());
-                    }
-                    self.active = Some(preset);
-                    self.emit(
-                        origin,
-                        Target::All,
-                        ServerEvent::Session(self.session.clone()),
-                    );
-                    self.emit(
-                        origin,
-                        Target::All,
-                        ServerEvent::Presets {
-                            names: self.preset_names.clone(),
-                        },
-                    );
-                }
-                Err(e) => self.reply_error(origin, format!("{e:#}")),
+            Command::SavePreset { name } => match self.room_for(&name) {
+                Err(e) => self.reply_error(origin, e),
+                Ok(()) => self.save_preset(origin, &name).await,
             },
             // Explicit request: re-read the directory and refresh the cache.
             Command::ListPresets => match self.store.list().await {
@@ -1081,6 +1110,56 @@ mod tests {
             Some(Param::MainVol { db: -6.0 }),
             "mapped params are forwarded with their effective value"
         );
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn new_presets_stop_at_the_cap_but_overwrites_still_work() {
+        let (h, _link, dir) = setup("cap").await;
+        tokio::fs::create_dir_all(dir.join("presets"))
+            .await
+            .unwrap();
+        let state = MotuState::new(Topology::default());
+        let text =
+            serde_json::json!({ "schema_version": 2, "name": "x", "state": state }).to_string();
+        for i in 0..MAX_PRESETS {
+            tokio::fs::write(dir.join("presets").join(format!("p{i:03}.json")), &text)
+                .await
+                .unwrap();
+        }
+        let mut rx = h.subscribe();
+        let o = Origin::Web(9);
+        h.command(o, Command::ListPresets).await.unwrap();
+        let ServerEvent::Presets { names } = next(&mut rx).await.event else {
+            panic!("presets")
+        };
+        assert_eq!(names.len(), MAX_PRESETS);
+        for cmd in [
+            Command::SavePreset {
+                name: "one-more".into(),
+            },
+            Command::ImportPreset {
+                name: "one-more".into(),
+                text: text.clone(),
+            },
+        ] {
+            h.command(o, cmd).await.unwrap();
+            let ServerEvent::Error { message } = next(&mut rx).await.event else {
+                panic!("error")
+            };
+            assert!(message.contains("already 200 presets"), "{message}");
+        }
+        assert!(!dir.join("presets").join("one-more.json").exists());
+        // Overwriting an existing name is fine.
+        h.command(
+            o,
+            Command::SavePreset {
+                name: "p000".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(next(&mut rx).await.event, ServerEvent::Session(_)));
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 

@@ -363,6 +363,13 @@ impl OscBridge {
         link: &mut Link,
         engine: &EngineHandle,
     ) -> bool {
+        // Feedback goes back to the sender: a forged source address outside the local network
+        // would make this bridge send state dumps to a stranger (the same fence as the
+        // configured targets).
+        if !crate::plug::is_local_addr(peer.ip()) {
+            tracing::debug!(%peer, "OSC datagram from outside the local network dropped");
+            return true;
+        }
         let Some(packet) = decode_guarded(data) else {
             tracing::debug!(%peer, "undecodable or too deeply nested OSC packet");
             return true;
