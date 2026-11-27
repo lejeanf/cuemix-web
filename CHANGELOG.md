@@ -12,6 +12,11 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-26
+
+Stricter input checking everywhere the server accepts text or numbers, and one
+Advanced settings dialog behind ⋯.
+
 ### Added
 - `design/vectors/protocol.json`: one sample of every WebSocket message, written by the
   server's own types (`tests/protocol_vectors.rs`). vitest checks `protocol.ts` and the
@@ -22,14 +27,6 @@ need attention. Preset files carry `schema_version`; see
 - npm never runs package install scripts (`frontend/.npmrc`, and `npm ci --ignore-scripts`
   in CI): the usual way a compromised package runs code on a build machine. No package in
   the lock needs one.
-
-Compatibility: no change to presets, `config.toml` or the protocol.
-
-## [0.7.1] - 2026-11-26
-
-Stricter input checking everywhere the server accepts text or numbers.
-
-### Security
 - Every request body (update install, pre-release switch, `POST /api/v1/command`) is
   checked before it is read: size limit, `Content-Type: application/json` when
   there is a body, valid UTF-8 and no control characters. It is then read into a
@@ -39,14 +36,15 @@ Stricter input checking everywhere the server accepts text or numbers.
   `POST /api/v1/command` now requires `Content-Type: application/json` (in
   Shortcuts, set the request body to JSON).
 - WebSocket commands get the same checks: message size, control characters, and
-  one shared validator for preset names, imported preset text (256 KiB at most),
+  one shared validator for preset names, imported preset text (240 KiB at most),
   channel labels, speaker plug settings and OSC settings. Labels can no longer
   contain invisible or text-reversing characters.
-- Speaker plug and custom URLs: only plain ASCII letters, digits and
-  `- . _ ~ / ? & = : , + ;` (and `%XX`) are accepted, at most 2048 characters;
-  host names follow the usual label rules (253 characters at most). Spaces, line
-  breaks, `@`, `#`, backslashes and non-ASCII look-alikes are refused, so a URL
-  can never add lines to the request sent to the plug.
+- Speaker plug and custom URLs: the path and query accept only plain ASCII
+  letters, digits, `- . _ ~ / ? & = : , + ; ! $ ' ( ) * @` and `%XX`, at most
+  2048 characters; host names follow the usual label rules (253 characters at
+  most), and a login before the host (`user@host`) is refused. Spaces, line
+  breaks, `#`, backslashes and non-ASCII look-alikes are refused, so a URL can
+  never add lines to the request sent to the plug.
 - OSC: addresses and the OSC settings form only accept digits for ports and
   indices, bounded text and no control characters; incoming OSC messages are
   length-limited, and preset names received over OSC follow the preset rules.
