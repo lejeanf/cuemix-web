@@ -78,3 +78,34 @@ describe('speaker plug host and form validation', () => {
     expect(errorSince({ seq: 4, message: 'bad host' }, 3)).toBe('bad host');
   });
 });
+
+describe('speaker plug hostile input', () => {
+  const bs = String.fromCharCode(92);
+  it('refuses framing characters, non-ASCII and over-long text in custom URLs', () => {
+    const bad = [
+      'http://192.0.2.1/on\r\nX-Evil: 1',
+      'http://192.0.2.1/on\nGET /x',
+      'http://192.0.2.1/on HTTP/1.1',
+      'http://192.0.2.1/on\u0085x',
+      'http://192.0.2.1/on x',
+      'http://192.0.2.1/on‮x',
+      'http://192.0.2.1/on／x',
+      'http://192.0.2.1/café',
+      'http://192.0.2.1/on@evil.example',
+      `http://192.0.2.1/on${bs}x`,
+      'http://192.0.2.1/on%zz',
+      'http://192.0.2.1/on%0',
+      'http://192.0.2.1/on"x',
+      `http://192.0.2.1/${'a'.repeat(2100)}`,
+      'http://192.0.2.1:+80/',
+      'http://-x.example/',
+      'http://a..example/',
+      `http://${'a'.repeat(64)}.example/`,
+    ];
+    for (const u of bad) expect(isValidHttpUrl(u), JSON.stringify(u)).toBe(false);
+    expect(isValidHttpUrl('http://192.0.2.1/cm?cmnd=Power%0D%0AOn')).toBe(true);
+  });
+  it('refuses odd hosts', () => {
+    for (const h of ['a\nb', 'a\0', 'plug．example', 'plug.example‮', 'a..b', 'a.-b', 'a'.repeat(254)]) expect(isValidHost(h), JSON.stringify(h)).toBe(false);
+  });
+});

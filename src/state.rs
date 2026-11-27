@@ -867,6 +867,45 @@ pub enum Command {
     },
 }
 
+/// Largest preset file text a client may import (the WebSocket message limit).
+pub const IMPORT_TEXT_MAX: usize = 256 * 1024;
+
+impl Command {
+    /// Checks every string a client sent, before anything is done with it (WebSocket, short
+    /// HTTP API and OSC all go through here, then again inside the engine). Numbers and
+    /// indices of [`Command::Set`] are checked by [`MotuState::apply`]: non-finite values and
+    /// out-of-range indices are refused, finite values are clamped.
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::LoadPreset { name } | Self::SavePreset { name } => {
+                crate::presets::validate_name(name).map_err(|e| format!("{e:#}"))
+            }
+            Self::ImportPreset { name, text } => {
+                crate::presets::validate_name(name).map_err(|e| format!("{e:#}"))?;
+                if text.len() > IMPORT_TEXT_MAX {
+                    return Err(format!(
+                        "preset file is larger than {} KiB",
+                        IMPORT_TEXT_MAX / 1024
+                    ));
+                }
+                if text.contains('\0') {
+                    return Err("preset file must not contain NUL characters".into());
+                }
+                Ok(())
+            }
+            Self::SetLabel { label, .. } => label.as_ref().map_or(Ok(()), ChannelLabel::validate),
+            Self::SetSpeakerPlug { settings } => settings.validate_text(),
+            Self::SetOscSettings { settings } => settings.validate().map(|_| ()),
+            Self::Set(_)
+            | Self::ListPresets
+            | Self::MeasureStart
+            | Self::MeasureStop
+            | Self::Power { .. }
+            | Self::TestSpeakerPlug { .. } => Ok(()),
+        }
+    }
+}
+
 /// Everything the core broadcasts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -1790,11 +1829,25 @@ impl Preset {
 /// Maximum label name length (characters).
 pub const LABEL_NAME_MAX: usize = 64;
 
+/// Invisible characters that reorder or hide text (bidi overrides, isolates and marks,
+/// zero-width space, byte-order mark): refused in names shown to other people.
+fn is_spoofing_char(c: char) -> bool {
+    matches!(c,
+        '\u{061C}' | '\u{200B}' | '\u{200E}' | '\u{200F}'
+        | '\u{202A}'..='\u{202E}' | '\u{2060}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+}
+
 impl ChannelLabel {
     /// Name 1–64 chars without control characters; colour `#RRGGBB` if set.
     pub fn validate(&self) -> Result<(), String> {
         let n = self.name.chars().count();
-        if n == 0 || n > LABEL_NAME_MAX || self.name.chars().any(char::is_control) {
+        if n == 0
+            || n > LABEL_NAME_MAX
+            || self
+                .name
+                .chars()
+                .any(|c| c.is_control() || is_spoofing_char(c))
+        {
             return Err(format!(
                 "label name must be 1-{LABEL_NAME_MAX} printable characters"
             ));
@@ -2537,5 +2590,141 @@ mod dsp_param_tests {
         fixed.gates.clear();
         fixed.reset_dsp();
         assert!(fixed.check_shape().is_ok());
+    }
+
+    #[test]
+    fn command_validation_refuses_hostile_strings() {
+        let name = |n: &str| Command::LoadPreset { name: n.into() };
+        assert!(name("Live set 1").validate().is_ok());
+        for bad in [
+            "",
+            "../x",
+            "a/b",
+            "a\0b",
+            ".hidden",
+            "\u{ff0f}",
+            "\u{202e}x",
+        ] {
+            assert!(name(bad).validate().is_err(), "{bad:?}");
+            assert!(
+                Command::SavePreset { name: bad.into() }.validate().is_err(),
+                "{bad:?}"
+            );
+            assert!(
+                Command::ImportPreset {
+                    name: bad.into(),
+                    text: "{}".into()
+                }
+                .validate()
+                .is_err(),
+                "{bad:?}"
+            );
+        }
+        let import = |text: String| Command::ImportPreset {
+            name: "ok".into(),
+            text,
+        };
+        assert!(import("{}".into()).validate().is_ok());
+        assert!(import("a\0b".into()).validate().is_err());
+        assert!(import("x".repeat(IMPORT_TEXT_MAX + 1)).validate().is_err());
+        assert!(import("x".repeat(IMPORT_TEXT_MAX)).validate().is_ok());
+
+        let label = |n: &str, c: Option<&str>| Command::SetLabel {
+            ch: 0,
+            label: Some(ChannelLabel {
+                name: n.into(),
+                color: c.map(str::to_owned),
+            }),
+        };
+        assert!(label("Kick", Some("#06B6D4")).validate().is_ok());
+        assert!(label("Gu\u{ee}tare", None).validate().is_ok());
+        for bad in [
+            "",
+            "a\nb",
+            "a\0",
+            "\u{202e}cba",
+            "a\u{200b}b",
+            "\u{feff}x",
+            "\u{2066}x",
+        ] {
+            assert!(label(bad, None).validate().is_err(), "{bad:?}");
+        }
+        assert!(label(&"x".repeat(65), None).validate().is_err());
+        for bad in [
+            "red",
+            "#12345",
+            "#GGGGGG",
+            "#06B6D4\n",
+            "url(x)",
+            "#06B6D4;x",
+        ] {
+            assert!(label("ok", Some(bad)).validate().is_err(), "{bad:?}");
+        }
+        assert!(Command::SetLabel { ch: 0, label: None }.validate().is_ok());
+
+        let plug = |f: fn(&mut SpeakerPlugSettings)| {
+            let mut s = SpeakerPlugSettings::default();
+            f(&mut s);
+            Command::SetSpeakerPlug { settings: s }.validate()
+        };
+        assert!(plug(|_| {}).is_ok());
+        assert!(plug(|s| s.host = "a\r\nX: 1".into()).is_err());
+        assert!(plug(|s| s.on_url = "x".repeat(5000)).is_err());
+        let osc = |listen: &str| Command::SetOscSettings {
+            settings: OscSettings {
+                listen: listen.into(),
+                targets: vec![],
+            },
+        };
+        assert!(osc("0.0.0.0:8000").validate().is_ok());
+        assert!(osc("0.0.0.0:8000\r\n").validate().is_err());
+    }
+
+    #[test]
+    fn numbers_from_clients_are_finite_and_in_range() {
+        let mut st = MotuState::default();
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for p in [
+                Param::MainVol { db: bad },
+                Param::PhonesVol { db: bad },
+                Param::PreampGain { ch: 0, db: bad },
+                Param::OutputTrim { ch: 0, db: bad },
+                Param::MixPan {
+                    bus: 0,
+                    ch: 0,
+                    value: bad,
+                },
+            ] {
+                assert!(
+                    matches!(st.apply(&p), Err(StateError::NonFinite(_))),
+                    "{p:?}"
+                );
+            }
+        }
+        // Huge finite values are clamped, never stored as is.
+        let huge = st.apply(&Param::MainVol { db: 1e308 }).unwrap();
+        assert!(matches!(huge, Some(Param::MainVol { db }) if db <= 0.0) || huge.is_none());
+        let low = st.apply(&Param::PreampGain { ch: 0, db: -1e308 }).unwrap();
+        assert!(matches!(low, Some(Param::PreampGain { db, .. }) if db >= 0.0) || low.is_none());
+        // Huge indices are refused; the JSON types refuse negatives and wrong types.
+        assert!(st
+            .apply(&Param::Phantom {
+                ch: u16::MAX,
+                on: true
+            })
+            .is_err());
+        for bad in [
+            r#"{"cmd":"set","param":"phantom","ch":-1,"on":true}"#,
+            r#"{"cmd":"set","param":"phantom","ch":70000,"on":true}"#,
+            r#"{"cmd":"set","param":"phantom","ch":1.5,"on":true}"#,
+            r#"{"cmd":"set","param":"main_vol","db":"loud"}"#,
+            r#"{"cmd":"set","param":"main_vol","db":null}"#,
+            r#"{"cmd":"nope"}"#,
+            r#"{"cmd":["set"]}"#,
+            "[]",
+            "null",
+        ] {
+            assert!(serde_json::from_str::<Command>(bad).is_err(), "{bad}");
+        }
     }
 }

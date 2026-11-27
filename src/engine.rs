@@ -772,6 +772,10 @@ impl Engine {
     }
 
     async fn on_command(&mut self, origin: Origin, command: Command) {
+        // Last line of defence: whatever the entry point (WebSocket, HTTP API, OSC) already did.
+        if let Err(e) = command.validate() {
+            return self.reply_error(origin, e);
+        }
         match command {
             Command::MeasureStart => self.on_measure(origin, MeasureRequest::Start),
             Command::MeasureStop => self.on_measure(origin, MeasureRequest::Stop),

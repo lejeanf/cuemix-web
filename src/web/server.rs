@@ -301,6 +301,25 @@ async fn ws_handler(
         })
 }
 
+/// One text frame to a checked [`Command`]: size, no control characters (NUL, escape, ... only
+/// JSON whitespace is allowed), the typed parse, then [`Command::validate`]. The error is the
+/// text of the `error` event.
+fn parse_ws_command(text: &str) -> Result<Command, String> {
+    if text.len() > MAX_MESSAGE_BYTES {
+        return Err(format!("message is larger than {MAX_MESSAGE_BYTES} bytes"));
+    }
+    if text
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+    {
+        return Err("invalid command: control characters are not allowed".into());
+    }
+    let command: Command =
+        serde_json::from_str(text).map_err(|e| format!("invalid command: {e}"))?;
+    command.validate()?;
+    Ok(command)
+}
+
 /// A WebSocket write failed or timed out; the session must end.
 #[derive(Debug, PartialEq, Eq)]
 struct SendFailed;
@@ -354,14 +373,14 @@ async fn session(mut socket: WebSocket, engine: EngineHandle, me: Origin) {
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
                 match msg {
-                    Message::Text(text) => match serde_json::from_str::<Command>(text.as_str()) {
+                    Message::Text(text) => match parse_ws_command(text.as_str()) {
                         Ok(cmd) => {
                             if engine.command(me, cmd).await.is_err() {
                                 break;
                             }
                         }
                         Err(e) => {
-                            let err = ServerEvent::Error { message: format!("invalid command: {e}") };
+                            let err = ServerEvent::Error { message: e };
                             if send_event(&mut socket, &err).await.is_err() {
                                 break;
                             }
@@ -531,5 +550,35 @@ mod tests {
         )
         .await;
         assert_eq!(r, Err(SendFailed));
+    }
+
+    #[test]
+    fn websocket_frames_are_checked_before_dispatch() {
+        assert!(parse_ws_command(r#"{"cmd":"list_presets"}"#).is_ok());
+        assert!(parse_ws_command("{\"cmd\":\n\"list_presets\"}").is_ok());
+        for bad in [
+            "",
+            "null",
+            "[]",
+            "{}",
+            r#"{"cmd":"list_presets"} x"#,
+            r#"{"cmd":"load_preset","name":"../x"}"#,
+            r#"{"cmd":"load_preset","name":"a/b"}"#,
+            r#"{"cmd":"save_preset","name":"a\u0000b"}"#,
+            r#"{"cmd":"save_preset","name":"\u202egnp"}"#,
+            r#"{"cmd":"import_preset","name":"..","text":"{}"}"#,
+            r#"{"cmd":"set_label","ch":0,"label":{"name":"a\u202eb","color":null}}"#,
+            r#"{"cmd":"set_label","ch":0,"label":{"name":"ok","color":"red"}}"#,
+            r#"{"cmd":"set","param":"main_vol","db":"x"}"#,
+            "{\"cmd\":\"list_presets\"}\0",
+            "{\"cmd\":\"list_\x1bpresets\"}",
+        ] {
+            assert!(parse_ws_command(bad).is_err(), "{bad:?}");
+        }
+        let big = format!(
+            r#"{{"cmd":"import_preset","name":"x","text":"{}"}}"#,
+            "a".repeat(MAX_MESSAGE_BYTES)
+        );
+        assert!(parse_ws_command(&big).is_err());
     }
 }

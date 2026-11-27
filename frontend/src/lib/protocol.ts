@@ -322,7 +322,8 @@ export const TRIM_MIN_DB = -100;
 export const PREAMP_GAIN_MAX_DB = 74;
 export const LINE_GAIN_MAX_DB = 20;
 export const LABEL_NAME_MAX = 64;
-export const PRESET_NAME_RE = /^[A-Za-z0-9 _.-]{1,64}$/;
+/** Same rule as src/presets.rs validate_name: 1-64 of letters, digits, space, _ - .; no leading dot or space, no trailing space. */
+export const PRESET_NAME_RE = /^(?![ .])(?!.* $)[A-Za-z0-9 _.-]{1,64}$/;
 
 /** Provisional ranges (src/state.rs dsp_limits), wide so MOTU values are never distorted. */
 export const DSP_LIMITS = {

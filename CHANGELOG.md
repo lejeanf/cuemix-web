@@ -25,6 +25,34 @@ need attention. Preset files carry `schema_version`; see
 
 Compatibility: no change to presets, `config.toml` or the protocol.
 
+## [0.7.1] - 2026-11-26
+
+Stricter input checking everywhere the server accepts text or numbers.
+
+### Security
+- Every request body (update install, pre-release switch, `POST /api/v1/command`) is
+  checked before it is read: size limit, `Content-Type: application/json` when
+  there is a body, valid UTF-8 and no control characters. It is then read into a
+  fixed set of fields; unknown fields and wrong types are refused with a clear
+  error. `POST /api/v1/command` now requires `Content-Type: application/json`
+  (Shortcuts and most apps already send it).
+- WebSocket commands get the same checks: message size, control characters, and
+  one shared validator for preset names, imported preset text (256 KiB at most),
+  channel labels, speaker plug settings and OSC settings. Labels can no longer
+  contain invisible or text-reversing characters.
+- Speaker plug and custom URLs: only plain ASCII letters, digits and
+  `- . _ ~ / ? & = : , + ;` (and `%XX`) are accepted, at most 2048 characters;
+  host names follow the usual label rules (253 characters at most). Spaces, line
+  breaks, `@`, `#`, backslashes and non-ASCII look-alikes are refused, so a URL
+  can never add lines to the request sent to the plug.
+- OSC: addresses and the OSC settings form only accept digits for ports and
+  indices, bounded text and no control characters; incoming OSC messages are
+  length-limited, and preset names received over OSC follow the preset rules.
+- Saved channel labels that were edited by hand into something the UI would
+  refuse (odd colours, control characters) are ignored when the server starts.
+- The web forms check the same rules before sending (preset names, labels,
+  speaker plug URLs); the server stays the authority.
+
 ## [0.7.0] - 2026-11-26
 
 OSC and version settings in the Advanced menu, and open tabs follow updates.

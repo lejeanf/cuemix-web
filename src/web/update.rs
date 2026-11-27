@@ -22,9 +22,10 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::body::{check_json_content_type, parse_json};
 use super::server::{AppState, WebConfig};
 
 /// Header the UI sends with the install request. A plain cross-site form
@@ -353,19 +354,31 @@ fn refuse(status: StatusCode, message: &str) -> (StatusCode, String) {
     (status, message.to_owned())
 }
 
+/// Body of `PUT /api/update/prefs`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrefsBody {
+    show_prerelease: bool,
+}
+
+/// Body of `POST /api/update`: a release tag, or nothing (the newest of the channel).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallBody {
+    version: Option<String>,
+}
+
 /// Body of `PUT /api/update/prefs`: `{"show_prerelease":bool}`.
 pub(super) async fn save_prefs(cfg: &WebConfig, body: &[u8]) -> (StatusCode, String) {
-    let parsed: Result<Value, _> = serde_json::from_slice(body);
-    let Some(show) = parsed
-        .ok()
-        .and_then(|v| v.get("show_prerelease").and_then(Value::as_bool))
-    else {
-        return refuse(
-            StatusCode::BAD_REQUEST,
-            "expected {\"show_prerelease\": true|false}",
-        );
+    let PrefsBody { show_prerelease } = match parse_json(
+        body,
+        MAX_BODY_BYTES,
+        "expected {\"show_prerelease\": true|false}",
+    ) {
+        Ok(b) => b,
+        Err(refused) => return refused,
     };
-    let text = json!({ "show_prerelease": show }).to_string();
+    let text = json!({ "show_prerelease": show_prerelease }).to_string();
     if let Some(parent) = cfg.update_prefs_file.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
@@ -388,6 +401,9 @@ pub(super) async fn put_prefs(
 ) -> Response {
     if !headers.contains_key(INSTALL_HEADER) {
         return (StatusCode::FORBIDDEN, "missing x-cuemix-update header").into_response();
+    }
+    if let Err(refused) = check_json_content_type(&headers) {
+        return refused.into_response();
     }
     let (code, text) = save_prefs(&app.cfg, &body).await;
     let mut response = (code, text).into_response();
@@ -451,21 +467,13 @@ pub(super) async fn queue_install(
     let version: Option<String> = if body.iter().all(u8::is_ascii_whitespace) {
         None
     } else {
-        let parsed: Result<Value, _> = serde_json::from_slice(body);
-        match parsed.ok().filter(Value::is_object) {
-            Some(v) => match v.get("version") {
-                None | Some(Value::Null) => None,
-                Some(Value::String(tag)) => Some(tag.clone()),
-                Some(_) => {
-                    return refuse(StatusCode::BAD_REQUEST, "\"version\" must be a release tag")
-                }
-            },
-            None => {
-                return refuse(
-                    StatusCode::BAD_REQUEST,
-                    "expected {\"version\": \"vX.Y.Z\"} or no body",
-                )
-            }
+        match parse_json::<InstallBody>(
+            body,
+            MAX_BODY_BYTES,
+            "expected {\"version\": \"vX.Y.Z\"} or no body",
+        ) {
+            Ok(b) => b.version,
+            Err(refused) => return refused,
         }
     };
     let content = match &version {
@@ -528,6 +536,12 @@ pub(super) async fn install(
 ) -> Response {
     if !headers.contains_key(INSTALL_HEADER) {
         return (StatusCode::FORBIDDEN, "missing x-cuemix-update header").into_response();
+    }
+    // No body is fine (newest of the channel); a body must say it is JSON.
+    if !body.iter().all(u8::is_ascii_whitespace) {
+        if let Err(refused) = check_json_content_type(&headers) {
+            return refused.into_response();
+        }
     }
     queue_install(&app.cfg, &app.gate, &body)
         .await
@@ -1112,6 +1126,175 @@ mod tests {
             202
         );
         assert_eq!(http(addr, "POST", "/api/update", true, "").await.0, 429);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn hostile_bodies_are_refused_before_anything_is_written() {
+        let (cfg, dir) = setup("hostile", Some(status_text("0.6.0", true))).await;
+        for bad in [
+            &b"{\"show_prerelease\":true,\"x\":1}"[..],
+            br#"{"show_prerelease":"true"}"#,
+            br#"{"show_prerelease":1}"#,
+            br#"{"show_prerelease":null}"#,
+            b"{}",
+            b"[]",
+            b"null",
+            b"",
+            b"{\"show_prerelease\":true}\0",
+            b"\xff\xfe",
+            b"{\"show_prerelease\":\ttrue}\x1b",
+        ] {
+            let (code, _) = save_prefs(&cfg, bad).await;
+            assert_eq!(code.as_u16() / 100, 4, "{}", String::from_utf8_lossy(bad));
+        }
+        assert!(!cfg.update_prefs_file.exists());
+        let big = vec![b' '; MAX_BODY_BYTES + 1];
+        assert_eq!(
+            save_prefs(&cfg, &big).await.0,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+
+        let gate = Cooldown::new(std::time::Duration::ZERO);
+        for bad in [
+            &br#"{"version":"v0.5.1","extra":true}"#[..],
+            br#"{"version":5}"#,
+            br#"{"version":["v0.5.1"]}"#,
+            br#"{"version":"v0.5.1\n"}"#,
+            br#"{"version":"v0.5.1\u0000"}"#,
+            br#"{"version":"v0.5.1\r\nX: 1"}"#,
+            br#"{"version":"v0.5.1/../../x"}"#,
+            br#"{"version":"v0.5.1 "}"#,
+            br#"{"version":"V0.5.1"}"#,
+            br#"{"version":"v0.5"}"#,
+            br#"{"version":"v0.5.1-"}"#,
+            br#"{"version":"v0.5.1;rm -rf /"}"#,
+            br#"{"version":"v0.5.1$(id)"}"#,
+            "{\"version\":\"v0.5.\u{ff11}\"}".as_bytes(),
+            "{\"version\":\"v0.5.1\u{202e}\"}".as_bytes(),
+            b"{\"version\":\"v0.5.1\"}\0",
+            br#"[]"#,
+            br#""v0.5.1""#,
+            b"v0.5.1",
+            b"\xff",
+        ] {
+            let (code, _) = queue_install(&cfg, &gate, bad).await;
+            assert_eq!(code.as_u16() / 100, 4, "{}", String::from_utf8_lossy(bad));
+        }
+        let long = format!(r#"{{"version":"v{}.0.0"}}"#, "9".repeat(80));
+        assert_eq!(
+            queue_install(&cfg, &gate, long.as_bytes()).await.0,
+            StatusCode::BAD_REQUEST
+        );
+        assert!(!cfg.update.request_file.exists());
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[test]
+    fn tags_are_ascii_anchored_and_bounded() {
+        for bad in [
+            "v1.2.3\n",
+            "v1.2.3 ",
+            " v1.2.3",
+            "v1.2.3\0",
+            "v1.2.3-\n",
+            "v1.2.3-a_b",
+            "v1.2.3-a/b",
+            "v1.2.3+build",
+            "v1.2",
+            "v1.2.3.4",
+            "v1..3",
+            "v+1.2.3",
+            "v1.2.\u{ff13}",
+            "v1.2.3-\u{202e}",
+            "V1.2.3",
+            "1.2.3",
+        ] {
+            assert!(!valid_tag(bad), "{bad:?}");
+        }
+        assert!(valid_tag("v1.2.3") && valid_tag("v0.7.1-alpha.2"));
+        let at_limit = format!("v1.2.3-{}", "a".repeat(MAX_TAG_BYTES - 7));
+        assert_eq!(at_limit.len(), MAX_TAG_BYTES);
+        assert!(valid_tag(&at_limit));
+        assert!(!valid_tag(&format!("{at_limit}a")));
+    }
+
+    /// Raw request with a chosen `Content-Type` (none when `ct` is `None`).
+    async fn http_ct(
+        addr: std::net::SocketAddr,
+        method: &str,
+        path: &str,
+        ct: Option<&str>,
+        body: &str,
+    ) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let ct = ct
+            .map(|c| format!("content-type: {c}\r\n"))
+            .unwrap_or_default();
+        let req = format!(
+            "{method} {path} HTTP/1.1\r\nhost: {addr}\r\nx-cuemix-update: 1\r\n{ct}content-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        s.write_all(req.as_bytes()).await.unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).await.unwrap();
+        out.split_whitespace()
+            .nth(1)
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(0)
+    }
+
+    #[tokio::test]
+    async fn bodies_need_a_json_content_type() {
+        let (cfg, dir) = setup("ctype", Some(status_text("0.6.0", true))).await;
+        let (engine, _link, _task) = crate::engine::start(crate::engine::EngineConfig::for_dir(
+            crate::state::Topology::default(),
+            &dir,
+        ))
+        .await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (_trigger, shutdown) = crate::engine::shutdown_channel();
+        tokio::spawn(super::super::server::serve(
+            listener,
+            engine,
+            cfg.clone(),
+            shutdown,
+        ));
+
+        let prefs = r#"{"show_prerelease":true}"#;
+        for ct in [
+            None,
+            Some("text/plain"),
+            Some("application/x-www-form-urlencoded"),
+            Some("multipart/form-data; boundary=x"),
+        ] {
+            assert_eq!(
+                http_ct(addr, "PUT", "/api/update/prefs", ct, prefs).await,
+                415,
+                "{ct:?}"
+            );
+            assert_eq!(
+                http_ct(addr, "POST", "/api/update", ct, r#"{"version":"v0.5.1"}"#).await,
+                415,
+                "{ct:?}"
+            );
+        }
+        assert!(!cfg.update_prefs_file.exists() && !cfg.update.request_file.exists());
+        assert_eq!(
+            http_ct(
+                addr,
+                "PUT",
+                "/api/update/prefs",
+                Some("application/json; charset=utf-8"),
+                prefs
+            )
+            .await,
+            200
+        );
+        // No body: no content type needed, the newest of the channel is requested.
+        assert_eq!(http_ct(addr, "POST", "/api/update", None, "").await, 202);
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 }

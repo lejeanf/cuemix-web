@@ -110,6 +110,7 @@
     try {
       // Compact it: the WebSocket accepts up to 256 KiB per message.
       const text = JSON.stringify(JSON.parse(await file.text()));
+      if (text.length > 240_000) throw new Error('too large');
       store.importPreset(presetNameFromFile(file.name), text);
       open = '';
     } catch {

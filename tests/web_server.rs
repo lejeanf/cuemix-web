@@ -429,7 +429,14 @@ async fn post(
     body: &str,
     headers: &[(&str, &str)],
 ) -> Result<(u16, Value), Box<dyn std::error::Error>> {
-    let r = http_request(h.addr, "POST", "/api/v1/command", headers, Some(body)).await?;
+    let mut all: Vec<(&str, &str)> = headers.to_vec();
+    if !all
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+    {
+        all.push(("Content-Type", "application/json"));
+    }
+    let r = http_request(h.addr, "POST", "/api/v1/command", &all, Some(body)).await?;
     let v = serde_json::from_slice(&r.body).unwrap_or(Value::Null);
     Ok((r.status, v))
 }
@@ -665,5 +672,42 @@ async fn ws_power_and_speaker_plug_commands() -> Result<(), Box<dyn std::error::
             break;
         }
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn api_command_refuses_hostile_bodies() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("api-hostile").await?;
+    let ok = r#"{"cmd":"set","param":"main_vol","db":-3}"#;
+    // Wrong or missing content type.
+    for ct in [
+        "text/plain",
+        "application/x-www-form-urlencoded",
+        "multipart/form-data",
+    ] {
+        assert_eq!(post(&h, ok, &[("Content-Type", ct)]).await?.0, 415, "{ct}");
+    }
+    let r = http_request(h.addr, "POST", "/api/v1/command", &[], Some(ok)).await?;
+    assert_eq!(r.status, 415);
+    // Empty body, oversized body, non-JSON, wrong types, hostile preset names.
+    assert_eq!(post(&h, "", &[]).await?.0, 400);
+    let big = format!(r#"{{"cmd":"list_presets","pad":"{}"}}"#, "x".repeat(20_000));
+    assert_eq!(post(&h, &big, &[]).await?.0, 413);
+    for body in [
+        "not json",
+        "[]",
+        r#"{"cmd":"set","param":"main_vol","db":"-3"}"#,
+        r#"{"cmd":"load_preset","name":"../../etc/passwd"}"#,
+        r#"{"cmd":"load_preset","name":"a\u0000b"}"#,
+        r#"{"cmd":"load_preset","name":"\u202egnp"}"#,
+        r#"{"cmd":"load_preset","name":""}"#,
+    ] {
+        let (status, v) = post(&h, body, &[]).await?;
+        assert_eq!(status, 400, "{body}");
+        assert_eq!(v["ok"], false, "{body}");
+    }
+    // The state did not move.
+    let s: Value = serde_json::from_slice(&http_get(h.addr, "/api/v1/summary").await?.body)?;
+    assert_ne!(s["main"]["db"], -3.0);
     Ok(())
 }

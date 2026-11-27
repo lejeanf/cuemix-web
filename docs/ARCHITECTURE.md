@@ -503,6 +503,20 @@ Trois acteurs, chacun avec ses droits :
   `X-Forwarded-For` : entrée la plus à droite, seulement si `trust_forwarded_headers` (défaut `false`).
 * `/api/v1/*` : même contrôle `Origin` que `/ws` ; commandes limitées à `main_vol`, `phones_vol`, `power`,
   `load_preset` (le test de pièce reste lié à son WebSocket) ; corps ≤ 16 KiB.
+* **Couche de validation des entrées (0.7.1)** : tout ce qui entre est vérifié *avant* usage, puis relu
+  dans des structures typées (`deny_unknown_fields`), jamais dans un `serde_json::Value`.
+  `web/body.rs` : taille, `Content-Type: application/json` (si corps), UTF-8, aucun caractère de
+  contrôle (hors espaces JSON), puis le parse typé (413/415/400). `/api/v1/command` exige un corps JSON ;
+  `POST /api/update` accepte l'absence de corps. `Command::validate()` (`state.rs`) est appelée par
+  `/ws`, `/api/v1/command`, le pont OSC (`/preset/load`) **et** à l'entrée de `Engine::on_command` :
+  noms de présets, texte d'import ≤ 256 KiB sans NUL, étiquettes (pas de contrôles ni de caractères bidi/
+  largeur nulle, couleur `#RRGGBB`), textes de la prise et des réglages OSC. Les nombres des
+  `Command::Set` restent contrôlés par `MotuState::apply` (non fini → refus, indice hors plage → refus,
+  valeur finie → bornée). Prise : `plug::parse_url` n'accepte que l'ASCII non réservé `-._~/?&=:,+;` et
+  `%XX` (≤ 2048), noms d'hôte par étiquettes (≤ 253) ; la requête GET écrite à la main ne peut donc jamais
+  contenir CR/LF/espace. OSC : adresse ≤ 128 octets, ≤ 4 arguments, indices et ports en chiffres seulement.
+  Fichiers relus (`labels.json`, `power.json`, `osc.json`, `speaker-plug.json`, statut de mise à jour) :
+  contenu invalide → ignoré/valeurs par défaut. Le front reproduit les règles (formulaires), le serveur fait foi.
 * **Prise enceintes** : le serveur reçoit une adresse à contacter, donc il est borné — `http://` en GET
   uniquement, sans redirection ni identifiants, délai court, réponse lue sur 8 KiB au plus, et toute
   adresse résolue doit être privée, lien-local ou de bouclage (à l'enregistrement **et** à chaque envoi,
