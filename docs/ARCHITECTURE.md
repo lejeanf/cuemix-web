@@ -364,6 +364,16 @@ est idempotent ; plages dans `state::dsp_limits` (provisoires, larges ; miroir T
 loi de fader : `frontend/src/lib/fader.ts`, portage exact de `motu::fader`). Le serveur ne renvoie pas un `changed` au client
 qui l'a provoqué ; `meters` est limité à 60/s par client (la source en produit ≈ 30/s). Messages entrants ≤ 256 KiB (un fichier de réglages importé fait ≈ 20 Ko). `import_preset` enregistre le JSON reçu (même format qu'un fichier de preset, toute version lisible) sous `<name>.json` puis le rappelle comme `load_preset`.
 
+**Vecteurs de protocole** (`design/vectors/protocol.json`, généré, jamais édité à la main) : un
+exemple de chaque `Param`, `Command` et `ServerEvent`, sérialisé par les types Rust eux-mêmes
+(`tests/protocol_vectors.rs`, qui refuse de compiler tant qu'une nouvelle variante n'a pas son
+exemple), plus l'état obtenu en appliquant tous les `Param` (`after_params`). Côté web,
+`frontend/src/lib/protocol.test.ts` vérifie que les commandes et événements typés par
+`protocol.ts` sont identiques à ces JSON, que le réducteur traite chaque `Param` et chaque événement,
+et qu'il aboutit au même état que le serveur. Un changement de protocole échoue donc d'un côté ou de
+l'autre au lieu de dériver. Régénérer : `UPDATE_VECTORS=1 cargo test --test protocol_vectors`, puis
+relire le diff. Le futur client iOS peut s'appuyer sur le même fichier.
+
 ### 3.6 Table OSC (UDP `:8000`, indices **1-based**)
 
 | Adresse | Arg. | `Param` (conversion) |
@@ -473,6 +483,10 @@ Trois acteurs, chacun avec ses droits :
 
 * Ordre **non négociable** : `frontend` (`npm ci && npm run build`) **puis** `cargo build`
   (`rust-embed` sans `allow_missing` : pas de binaire sans UI).
+* npm n'exécute jamais les scripts d'installation des paquets (`frontend/.npmrc` :
+  `ignore-scripts=true`, et `npm ci --ignore-scripts` en CI) : c'est la voie habituelle d'un paquet
+  compromis pour exécuter du code sur la machine de build. Aucun paquet du lock n'en a besoin
+  (seul `fsevents`, optionnel et macOS uniquement, en déclare un).
 * `.cargo/config.toml` : résolution compatible MSRV 1.85 (`cargo update` choisit des versions compatibles).
 * `ci.yml` : frontend → rust (fmt, clippy `-D warnings`, tests) · msrv · shell (shellcheck) · gitleaks + RFC1918.
 * `security.yml` : `cargo audit` · `npm audit` · dependency-review (PR) · CodeQL ; actions tierces épinglées par SHA.
