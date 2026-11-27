@@ -103,6 +103,22 @@ jobs:
         run: for f in deploy/*.sh; do bash -n "$f"; done
       - name: shellcheck (preinstalled on ubuntu-latest)
         run: shellcheck --version && shellcheck -x deploy/*.sh
+      - name: One release signing key everywhere
+        # The updater pins the public key of deploy/minisign.pub; the release job checks every
+        # signature against that file.
+        run: |
+          set -euo pipefail
+          if [[ ! -f deploy/minisign.pub ]]; then
+            echo "::error file=deploy/minisign.pub::deploy/minisign.pub is missing: generate the release key (README, Releases)"
+            exit 1
+          fi
+          file="$(sed -n '2p' deploy/minisign.pub | tr -d '[:space:]')"
+          root="$(sed -n 's/^MINISIGN_PUBKEY="\([^"]*\)"/\1/p' deploy/cuemix-update.sh)"
+          if [[ ! "${file}" =~ ^RW[A-Za-z0-9+/]{52}=*$ || "${file}" != "${root}" ]]; then
+            echo "::error::MINISIGN_PUBKEY in deploy/cuemix-update.sh must equal the key in deploy/minisign.pub"
+            exit 1
+          fi
+          echo "release key: ${file}"
       - name: One version floor everywhere
         # The oldest installable release is written in three places; they must agree.
         run: |

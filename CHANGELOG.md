@@ -62,6 +62,14 @@ code more rights than it needs.
   checked against its published sha256, the Docker base image is pinned by digest, and a
   manual run of the release workflow builds but never publishes.
 
+- **Signed releases**: every release file (tarballs, `.deb`, `min-version`) is signed with
+  minisign in a separate release job that only a protected `release` environment (required
+  reviewer) can run, and that runs no third-party build code. `cuemix-update`, `linux-setup.sh`
+  and the Proxmox provisioning refuse a download that is not signed by the key in
+  `deploy/minisign.pub` under its exact file name (so a signed file cannot be passed off as
+  another tag or architecture). An unsigned or altered `min-version` is ignored. minisign
+  runs unprivileged.
+
 ### Fixed
 - The update notice no longer offers an older release when the root updater is older than the
   web server (it reported "update available" for any different version).
@@ -72,6 +80,9 @@ code more rights than it needs.
   `[web] allowed_hosts` in `config.toml` before updating, or the UI answers 421. The accepted
   names are logged at startup.
 - The Version dialog no longer lists releases older than v0.7.2.
+- `cuemix-update` now needs `minisign` (Debian 12 has it; `proxmox-setup.sh --update` and
+  `linux-setup.sh` install it). Ubuntu 22.04 has no package: install it from upstream.
+- Releases from v0.7.2 on are signed; nothing older can be installed anyway (floor v0.7.2).
 - The new systemd sandbox was checked on a regular systemd host, not yet inside a Proxmox
   LXC container. If `cuemix-web` does not start after `proxmox-setup.sh --update`,
   `journalctl -u cuemix-web` names the directive; report it.
