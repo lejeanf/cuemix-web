@@ -1242,7 +1242,7 @@ mod tests {
         let mut rx = h.subscribe();
         let o = Origin::Web(9);
         h.command(o, Command::ListPresets).await.unwrap();
-        let ServerEvent::Presets { names } = next(&mut rx).await.event else {
+        let ServerEvent::Presets { names, .. } = next(&mut rx).await.event else {
             panic!("presets")
         };
         assert_eq!(names.len(), MAX_PRESETS);
