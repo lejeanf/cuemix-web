@@ -222,10 +222,16 @@ export type Command =
   | { cmd: 'save_preset'; name: string }
   | { cmd: 'import_preset'; name: string; text: string }
   | { cmd: 'list_presets' }
+  | { cmd: 'delete_preset'; name: string }
+  /** Refused when `to` is taken. */
+  | { cmd: 'rename_preset'; name: string; to: string }
+  | { cmd: 'set_preset_in_simple'; name: string; show: boolean }
   | { cmd: 'set_label'; ch: number; label: ChannelLabel | null }
   | { cmd: 'measure_start' }
   | { cmd: 'measure_stop' }
   | { cmd: 'power'; channel: PowerChannel; on: boolean }
+  /** While off: the level the next On fades back to (whole dB; the minimum clears it). */
+  | { cmd: 'set_return_level'; channel: PowerChannel; db: number }
   | { cmd: 'set_speaker_plug'; settings: SpeakerPlugSettings }
   | { cmd: 'test_speaker_plug'; on: boolean }
   | { cmd: 'set_osc_settings'; settings: OscSettings };
@@ -236,7 +242,8 @@ export type ServerEvent =
   | { event: 'changed'; params: Param[] }
   | { event: 'status'; connection: ConnectionStatus }
   | ({ event: 'session' } & SessionInfo)
-  | { event: 'presets'; names: string[] }
+  /** `hidden`: presets the Simple view leaves out (absent on older servers). */
+  | { event: 'presets'; names: string[]; hidden?: string[] }
   | ({ event: 'labels' } & Labels)
   | { event: 'meters'; levels: number[] }
   /** Raw meter frame from the MOTU (prop 6000), for the meter probe. */
@@ -263,6 +270,8 @@ export interface ChannelPower {
   on: boolean;
   /** Server-side fade (or plug warm-up) in progress. */
   fading: FadeDirection | null;
+  /** Whole dB an On fades back to, while off or fading out; null while on. Absent on servers before it was added. */
+  return_db?: number | null;
 }
 export interface PowerInfo {
   main: ChannelPower & { /** null = no plug enabled. */ plug: PlugState | null };

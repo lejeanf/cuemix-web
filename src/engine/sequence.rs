@@ -267,10 +267,17 @@ impl Engine {
                 (main && matches!(self.power.stage, Stage::PlugOn | Stage::Warmup { .. }))
                     .then_some(FadeDir::In)
             });
-        ChannelPower {
+        let p = ChannelPower {
             on: !power::is_off(self.level(channel)),
             fading,
             plug: (main && self.plug_enabled()).then_some(self.plug.state),
+            return_db: None,
+        };
+        // Off (or on its way there): say where an On would bring it back to.
+        ChannelPower {
+            return_db: (!p.intent())
+                .then(|| power::return_level(self.power.remembered.get(channel))),
+            ..p
         }
     }
 
@@ -297,6 +304,7 @@ impl Engine {
                 on: p.on,
                 fading: p.fading,
                 plug: p.plug,
+                return_db: p.return_db,
             }
         };
         let device = self.session.device.as_ref();
@@ -511,6 +519,21 @@ impl Engine {
     }
 
     /// The `power` command.
+    /// A drag on an off channel's knob: the level its next On fades back to. Unlike the
+    /// levels remembered at Off, this one is the user's explicit choice, so it is kept in any
+    /// mode (demo included). Ignored while the channel is on or heading on.
+    pub(super) fn on_return_level(&mut self, channel: PowerChannel, db: f64) {
+        if self.channel_power(channel).intent() {
+            return;
+        }
+        let v = db.round();
+        let new = power::valid_remembered(v).then_some(v);
+        if self.power.remembered.get(channel) != new {
+            self.power.remembered.set(channel, new);
+            self.power.dirty = true;
+        }
+    }
+
     pub(super) fn on_power(&mut self, channel: PowerChannel, on: bool) {
         let main = channel == PowerChannel::Main;
         let plug_wanted = main && self.plug_enabled();
@@ -1361,8 +1384,8 @@ mod tests {
             serde_json::to_value(ServerEvent::Power { main, phones }).unwrap(),
             serde_json::json!({
                 "event": "power",
-                "main": {"on": true, "fading": null, "plug": null},
-                "phones": {"on": true, "fading": null, "plug": null}
+                "main": {"on": true, "fading": null, "plug": null, "return_db": null},
+                "phones": {"on": true, "fading": null, "plug": null, "return_db": null}
             })
         );
         // Phones fade the same way and are independent of Main.
@@ -1379,8 +1402,45 @@ mod tests {
         let saved = r.saved().await;
         assert_eq!(saved.phones, Some(-30.0));
         assert_eq!(saved.main, None);
+        // Off: clients are told where On goes back to; Main (on) has nothing to say.
+        let (main, phones) = r.power_event().await;
+        assert_eq!((phones.return_db, main.return_db), (Some(-30.0), None));
         // Phones never use the plug.
         assert!(r.fake.calls().is_empty());
+        r.cleanup().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_drag_while_off_sets_the_return_level_not_the_volume() {
+        let mut r = rig("return", None).await;
+        let ret = |c: PowerChannel, db: f64| Command::SetReturnLevel { channel: c, db };
+        // On: ignored, nothing to return to.
+        r.h.command(Origin::Web(1), ret(PowerChannel::Phones, -25.0))
+            .await
+            .unwrap();
+        r.set(Param::PhonesVol { db: -30.0 }).await;
+        r.until(|e| matches!(e, ServerEvent::Changed { .. })).await;
+        r.power(PowerChannel::Phones, false).await;
+        r.collect_until_power(|_, p| !p.on && p.fading.is_none())
+            .await;
+        // Off: the drag picks the level On comes back to; the channel stays off.
+        r.h.command(Origin::Web(1), ret(PowerChannel::Phones, -24.6))
+            .await
+            .unwrap();
+        r.collect_until_power(|_, p| p.return_db == Some(-25.0))
+            .await;
+        assert_eq!(r.saved().await.phones, Some(-25.0));
+        let (_, phones) = r.power_event().await;
+        assert!(!phones.on);
+        // At the minimum the choice is cleared: On goes to the safe level.
+        r.h.command(Origin::Web(1), ret(PowerChannel::Phones, TRIM_MIN_DB))
+            .await
+            .unwrap();
+        r.collect_until_power(|_, p| p.return_db == Some(power::FADE_SAFE_DB))
+            .await;
+        // Out of range is refused before the engine.
+        assert!(ret(PowerChannel::Main, 3.0).validate().is_err());
+        assert!(ret(PowerChannel::Main, f64::NAN).validate().is_err());
         r.cleanup().await;
     }
 

@@ -837,6 +837,20 @@ pub enum Command {
     },
     /// Ask for a [`ServerEvent::Presets`] listing.
     ListPresets,
+    /// Delete `<presets_dir>/<name>.json` (and its Simple view flag).
+    DeletePreset {
+        name: String,
+    },
+    /// Rename a preset; refused when `to` is taken. Its Simple view flag follows it.
+    RenamePreset {
+        name: String,
+        to: String,
+    },
+    /// Show or hide a preset in the Simple view's list (the Advanced view lists every preset).
+    SetPresetInSimple {
+        name: String,
+        show: bool,
+    },
     /// Rename / recolour a mixer input (`None` clears it) — persisted in `labels.json`.
     SetLabel {
         ch: u16,
@@ -852,6 +866,13 @@ pub enum Command {
     Power {
         channel: PowerChannel,
         on: bool,
+    },
+    /// While a channel is off (or fading out): choose the level its next On fades back to
+    /// (a drag on the off channel's knob). Whole dB; at the minimum it clears the choice (On
+    /// then goes to the safe level). Ignored while the channel is on or fading in.
+    SetReturnLevel {
+        channel: PowerChannel,
+        db: f64,
     },
     /// Validate, save and broadcast the speaker plug settings.
     SetSpeakerPlug {
@@ -877,8 +898,15 @@ impl Command {
     /// out-of-range indices are refused, finite values are clamped.
     pub fn validate(&self) -> Result<(), String> {
         match self {
-            Self::LoadPreset { name } | Self::SavePreset { name } => {
+            Self::LoadPreset { name }
+            | Self::SavePreset { name }
+            | Self::DeletePreset { name }
+            | Self::SetPresetInSimple { name, .. } => {
                 crate::presets::validate_name(name).map_err(|e| format!("{e:#}"))
+            }
+            Self::RenamePreset { name, to } => {
+                crate::presets::validate_name(name).map_err(|e| format!("{e:#}"))?;
+                crate::presets::validate_name(to).map_err(|e| format!("{e:#}"))
             }
             Self::ImportPreset { name, text } => {
                 crate::presets::validate_name(name).map_err(|e| format!("{e:#}"))?;
@@ -902,6 +930,15 @@ impl Command {
             | Self::MeasureStop
             | Self::Power { .. }
             | Self::TestSpeakerPlug { .. } => Ok(()),
+            Self::SetReturnLevel { db, .. } => {
+                if db.is_finite() && (TRIM_MIN_DB..=0.0).contains(db) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "return level must be between {TRIM_MIN_DB} and 0 dB"
+                    ))
+                }
+            }
         }
     }
 }
@@ -922,7 +959,12 @@ pub enum ServerEvent {
     /// Session metadata (active preset, `● Modifié` flag).
     Session(SessionInfo),
     /// Available preset names (sorted).
-    Presets { names: Vec<String> },
+    Presets {
+        names: Vec<String>,
+        /// Presets the Simple view leaves out (a subset of `names`). An older client ignores it.
+        #[serde(default)]
+        hidden: Vec<String>,
+    },
     /// Full label set (sent on connect and after each change).
     Labels(Labels),
     /// Meter levels, linear peak `0.0..=1.0`, one per meter point (layout from

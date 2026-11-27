@@ -573,6 +573,25 @@
           "192.0.2.10:9001"
         ]
       }
+    },
+    {
+      "channel": "phones",
+      "cmd": "set_return_level",
+      "db": -24.0
+    },
+    {
+      "cmd": "delete_preset",
+      "name": "Old"
+    },
+    {
+      "cmd": "rename_preset",
+      "name": "Live",
+      "to": "Live 2"
+    },
+    {
+      "cmd": "set_preset_in_simple",
+      "name": "Studio",
+      "show": false
     }
   ],
   "events": [
@@ -1136,6 +1155,9 @@
     },
     {
       "event": "presets",
+      "hidden": [
+        "Studio"
+      ],
       "names": [
         "Live",
         "Studio"
@@ -1188,12 +1210,14 @@
       "main": {
         "fading": "out",
         "on": true,
-        "plug": "on"
+        "plug": "on",
+        "return_db": -18.0
       },
       "phones": {
         "fading": null,
         "on": false,
-        "plug": null
+        "plug": null,
+        "return_db": -70.0
       }
     },
     {

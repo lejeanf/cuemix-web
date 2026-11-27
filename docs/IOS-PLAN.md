@@ -106,8 +106,20 @@ Limits of the web view, handled in phase 8:
     web does on narrow screens.
   - No double-tap reset on the volume knobs (the web Simple view has none; a volume must never
     jump up).
+  - Knob curve from `design/vectors/volume-knob.json` (most of the travel covers the top 40 dB,
+    like the web knobs and sliders).
+  - An off channel reads "Off" and "returns to −18 dB" from `return_db` in the `power` event;
+    turning its knob while off sends `set_return_level` (grey needle) and leaves it off, as on
+    the web.
+  - During a fade the on/off button keeps the colour of where it is going, with a moving bar;
+    the speaker plug warm-up is amber with a countdown.
+  - Meters: ticks at −40, −18 and −6 dBFS and a clip mark that stays until tapped.
+  - Preset picker: a sheet with one Load button per preset, listing only the presets not in
+    `hidden` (the `presets` event; set from the web Presets panel, `set_preset_in_simple`).
+  - Night mode: the second token set (`[data-theme='night']` on the web), a manual switch as on
+    the web; "Keep screen on" maps to `isIdleTimerDisabled` while the view is in front.
 - **Advanced view**: the server's web UI in a `WKWebView`, opened with `?embed` (its own
-  Simple/Advanced toggle and status dot hidden, safe areas respected). Native tabs at the bottom
+  Simple/Advanced toggle, status dot and phone bottom tab bar hidden, safe areas respected). Native tabs at the bottom
   open each page (Mixer, Input, Output, …).
 - **Settings**: the server address (typed once, `https://` only), a connection test, the server
   version, and the update badge when a server update is available (as in the web UI).
@@ -177,8 +189,10 @@ Everything ships as **cuemix-web 0.6.0** (phase 1), with the usual release steps
 Controls and intents run for a few seconds in the background; opening a WebSocket and waiting for
 the full snapshot is too slow for that. New routes:
 
-- `GET /api/v1/summary`: Monitor and Phones level, their on/off and fading state, active preset,
-  preset list, MOTU status, server version.
+- `GET /api/v1/summary`: Monitor and Phones level, their on/off and fading state, the level On returns to (`return_db`), active preset,
+  preset list, MOTU status, server version. The preset list is every preset: the Simple view
+  flag (`hidden`) is only in the WebSocket `presets` event so far, so a preset control or widget
+  that should follow it needs `hidden` added to the summary first.
 - `POST /api/v1/command`: only the commands quick access needs: set `main_vol` / `phones_vol`,
   `power`, `load_preset`. Everything else is refused (400). In particular the room test can never
   start from it: a test is tied to the WebSocket client that started it. Clients must send
@@ -222,7 +236,10 @@ to; a Control Center toggle could not run a fade at all. So:
 - **On/off is derived from the level** (at the minimum = off), so raising the volume from anywhere
   turns it back on naturally. Fading state comes from the engine.
 - **New event** `power { main: {on, fading}, phones: {on, fading} }`, sent with the initial
-  events on connect and on every change. It is not part of the device state, so it never sets the
+  events on connect and on every change. Since the UI review each channel also carries
+  `return_db` (the whole-dB level On fades back to while off or fading out, `null` while on), and
+  `set_return_level { channel, db }` sets it while the channel is off (ignored while on; kept in
+  `power.json`). It is not part of the device state, so it never sets the
   "Modified" indicator and never lands in a preset file.
 - **OSC**: `/mix/main/power` and `/controlroom/phones/power` (following the existing
   `/mix/main/vol` and `/controlroom/phones/vol`), with feedback and dump support.
@@ -336,7 +353,11 @@ view** (and the look of controls and widgets) against the **web Simple view**. F
 keep them together.
 
 **1. One design source, generated for both.** `design/tokens.json` holds the colours (the blue
-`#3b93e0`, greys, meter green/yellow/red), radii, spacing, font sizes and knob geometry (270° arc,
+`#3b93e0`, greys, meter green/yellow/red and tick, error and current-row colours), in two sets:
+the default dark theme and **Night** (the web's `:root[data-theme='night']` block, dimmed
+lights with text kept at 4.5:1 or more). Since the UI review every web colour comes from an
+`app.css` token (except shadows, the label palette and the EQ band colours, which are data), so
+the generator only has to write the two blocks. Also radii, spacing, font sizes and knob geometry (270° arc,
 track and arc widths, drag travel). A script generates the `:root` block of
 `frontend/src/app.css`, a `tokens.ts`, and `Tokens.swift`. It keeps the existing CSS names
 (`--cyan` stays the name of the blue, `--card`, `--meter-gradient`…), so no web component changes.
@@ -350,7 +371,7 @@ string catalogue. Text built by functions (such as EQ band rows) stays hand-writ
 checked by the vectors below.
 
 **3. One behaviour, checked by shared test vectors.** JSON test cases run by vitest on the web and
-by Swift tests in the app: knob drag distance → value, wheel and arrow steps, "no reset on volume
+by Swift tests in the app: knob drag distance → value (the volume curve is in `design/vectors/volume-knob.json`), wheel and arrow steps, "no reset on volume
 knobs", dB text formatting, meter decoding and colours. The fade curve vectors run in `cargo test`
 (the only place the fade runs). If one side changes a behaviour without the other, its tests fail.
 
@@ -361,8 +382,10 @@ knobs", dB text formatting, meter decoding and colours. The fade curve vectors r
 | `Remote.svelte` (Simple view) | `SimpleView.swift` | layout, knobs, meters, on/off, presets (room test button from phase 8) |
 | `Knob.svelte` | `KnobView.swift` | look, drag, accessibility |
 | `Meter.svelte` | `MeterView.swift` | colours, scale, peak hold |
-| `TopBar.svelte` status dot | app status dot | states and colours |
-| web tabs (phone width) | native bottom tabs | order, names, icons |
+| `PresetPicker.svelte` | preset sheet | Load per preset, `hidden` filter, current preset |
+| `TopBar.svelte` status dot and Demo pill | app status dot | states and colours |
+| `TopBar.svelte` moon button, `theme.ts` | Night switch | token set, manual choice |
+| `.bnav` in `App.svelte` (phone width) | native bottom tabs | order, names, icons (Mixer, Input, Output, Reverb) |
 
 The CI rule starts in phase 5, when both sides exist. It pairs **paths** (not whole stores): a PR
 that changes one side of a pair without the other fails unless it carries the label `parity:web-only`
@@ -386,7 +409,9 @@ tab bar matches the app's in order, names and icons, not in glass effect.
 **What this changes on the web side:**
 
 - On phone-width screens, a bottom tab bar replaces the top tabs (Q11). Desktop keeps the top tabs.
-- `?embed` (for the app's web view): own top bar parts hidden, safe areas respected.
+  Done in the UI review (Mixer, Input, Output, Reverb, with icons).
+- `?embed` (for the app's web view): own top bar parts and the bottom tab bar hidden, safe areas
+  respected.
 - The rule for agents: **one feature, one PR, both surfaces.**
 
 ## 7. Building without switching to your Mac
@@ -487,7 +512,7 @@ unlocking, live values return within 2 s.
 
 | # | Phase | Delivers | Done when | Est. |
 |---|---|---|---|---|
-| 8 | Advanced view | Native bottom tabs opening the web pages (`?embed`), phone-width web bottom tabs, room test with the microphone, web view `/ws` paused when hidden | Every Advanced feature works in the app; a room test completes on your iPhone | 2–3 |
+| 8 | Advanced view | Native bottom tabs opening the web pages (`?embed`; the phone-width web bottom tabs already exist), room test with the microphone, web view `/ws` paused when hidden | Every Advanced feature works in the app; a room test completes on your iPhone | 2–3 |
 | 9 | Polish (+ widget push if chosen) | §8 checks, accessibility pass, icon (two or three proposals for you to pick) | Targets met; audit clean | 1–2 |
 | 10 | Release | `ios-v1.0.0`; README, ARCHITECTURE, CHANGELOG | You accept | 1 |
 | 11 | After 1.0 | iPad layout; Apple Watch app | Planned separately | — |
