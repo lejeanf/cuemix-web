@@ -44,8 +44,8 @@ export function isValidHost(host: string): boolean {
   return name.length <= MAX_HOST_LEN && name.split('.').every((l) => l.length >= 1 && l.length <= 63 && !l.startsWith('-') && !l.endsWith('-'));
 }
 
-// Path and query as the server allows them: unreserved characters, / ? & = : , + ; and %XX.
-const PATH_RE = /^(?:[A-Za-z0-9._~/?&=:,+;-]|%[0-9A-Fa-f]{2})*$/;
+// Path and query as the server allows them: unreserved characters, sub-delimiters, / ? & : @ and %XX.
+const PATH_RE = /^(?:[A-Za-z0-9._~/?&=:,+;!$'()*@-]|%[0-9A-Fa-f]{2})*$/;
 
 /** `http://host[:port][/path][?query]` the way the server parses it: no login, no fragment, no spaces. */
 export function isValidHttpUrl(url: string): boolean {

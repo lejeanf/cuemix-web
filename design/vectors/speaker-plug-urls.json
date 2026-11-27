@@ -9,7 +9,8 @@
     { "kind": "shelly_rpc", "host": "[2001:db8::1]", "switch_id": 0, "on": "http://[2001:db8::1]/rpc/Switch.Set?id=0&on=true", "off": "http://[2001:db8::1]/rpc/Switch.Set?id=0&on=false" },
     { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/on", "off_url": "http://192.0.2.13/off", "on": "http://192.0.2.13/on", "off": "http://192.0.2.13/off" },
     { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/on?x=a%20b&y=1,2;3", "off_url": "http://192.0.2.13:8080/off", "on": "http://192.0.2.13/on?x=a%20b&y=1,2;3", "off": "http://192.0.2.13:8080/off" },
-    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://plug-2.example:8080/on", "off_url": "http://plug-1.example/off", "on": "http://plug-2.example:8080/on", "off": "http://plug-1.example/off" }
+    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://plug-2.example:8080/on", "off_url": "http://plug-1.example/off", "on": "http://plug-2.example:8080/on", "off": "http://plug-1.example/off" },
+    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://plug.example/api?cmd=set(1)&a=b*c!$'x@y", "off_url": "http://plug.example/off", "on": "http://plug.example/api?cmd=set(1)&a=b*c!$'x@y", "off": "http://plug.example/off" }
   ],
   "invalid": [
     { "kind": "shelly_rpc", "host": "", "switch_id": 0, "why": "empty host" },
@@ -44,7 +45,6 @@
     { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/on\uff0fx", "off_url": "http://192.0.2.13/off", "why": "full-width slash" },
     { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/\u202eno", "off_url": "http://192.0.2.13/off", "why": "right-to-left override in path" },
     { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/caf\u00e9", "off_url": "http://192.0.2.13/off", "why": "non-ASCII in path (must be %XX)" },
-    { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/on@evil.example", "off_url": "http://192.0.2.13/off", "why": "at sign in path" },
     { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/on\\x", "off_url": "http://192.0.2.13/off", "why": "backslash in path" },
     { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/on%zz", "off_url": "http://192.0.2.13/off", "why": "bad percent escape" },
     { "kind": "custom", "host": "", "switch_id": 0, "on_url": "http://192.0.2.13/on%0", "off_url": "http://192.0.2.13/off", "why": "truncated percent escape" },

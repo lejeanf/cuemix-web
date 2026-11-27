@@ -334,7 +334,7 @@ accepté) et répondent avec `Cache-Control: no-store`.
 `POST /api/v1/command` — corps JSON = **la même `Command` que `/ws`**, limitée à
 `{"cmd":"set","param":"main_vol","db":-12}`, `{"cmd":"set","param":"phones_vol","db":-30}`,
 `{"cmd":"power","channel":"main","on":true}` et `{"cmd":"load_preset","name":"live"}` (corps ≤ 16 KiB,
-sinon 413). Réponses : `200 {"ok":true}` ; sinon `{"ok":false,"error":"…"}` avec **400** (JSON invalide,
+sinon 413 ; `Content-Type: application/json` obligatoire, sinon 415). Réponses : `200 {"ok":true}` ; sinon `{"ok":false,"error":"…"}` avec **400** (JSON invalide,
 commande non permise — dont `measure_start`, qui reste lié au client WebSocket qui l'a lancé —,
 valeur ou nom refusé par le moteur), **404** (préset inexistant), **403** (`Origin`), **503**
 (moteur arrêté). Le changement est diffusé à tous les clients comme d'habitude (origine `System`).
@@ -504,7 +504,8 @@ Trois acteurs, chacun avec ses droits :
 * `/api/v1/*` : même contrôle `Origin` que `/ws` ; commandes limitées à `main_vol`, `phones_vol`, `power`,
   `load_preset` (le test de pièce reste lié à son WebSocket) ; corps ≤ 16 KiB.
 * **Couche de validation des entrées (0.7.1)** : tout ce qui entre est vérifié *avant* usage, puis relu
-  dans des structures typées (`deny_unknown_fields`), jamais dans un `serde_json::Value`.
+  dans des structures typées, jamais dans un `serde_json::Value` (`deny_unknown_fields` pour les corps
+  de mise à jour et les réglages prise/OSC ; les `Command`/`Param` sont typées mais tolèrent les champs en trop).
   `web/body.rs` : taille, `Content-Type: application/json` (si corps), UTF-8, aucun caractère de
   contrôle (hors espaces JSON), puis le parse typé (413/415/400). `/api/v1/command` exige un corps JSON ;
   `POST /api/update` accepte l'absence de corps. `Command::validate()` (`state.rs`) est appelée par
@@ -516,7 +517,8 @@ Trois acteurs, chacun avec ses droits :
   `%XX` (≤ 2048), noms d'hôte par étiquettes (≤ 253) ; la requête GET écrite à la main ne peut donc jamais
   contenir CR/LF/espace. OSC : adresse ≤ 128 octets, ≤ 4 arguments, indices et ports en chiffres seulement.
   Fichiers relus (`labels.json`, `power.json`, `osc.json`, `speaker-plug.json`, statut de mise à jour) :
-  contenu invalide → ignoré/valeurs par défaut. Le front reproduit les règles (formulaires), le serveur fait foi.
+  contenu invalide → ignoré/valeurs par défaut. Limites connues : caractères de contrôle C1 dans le texte
+  d'import (rejeté plus loin par le parse du préset) et noms réservés Windows (sans effet sous Linux). Le front reproduit les règles (formulaires), le serveur fait foi.
 * **Prise enceintes** : le serveur reçoit une adresse à contacter, donc il est borné — `http://` en GET
   uniquement, sans redirection ni identifiants, délai court, réponse lue sur 8 KiB au plus, et toute
   adresse résolue doit être privée, lien-local ou de bouclage (à l'enregistrement **et** à chaque envoi,

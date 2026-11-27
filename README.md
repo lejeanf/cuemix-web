@@ -307,7 +307,7 @@ How an update stays safe:
 
 - Never commit `config.toml`, `*.local.toml`, `deploy/*.env`, `.env`, keys, or `data/` contents (labels and presets). All are git-ignored, and `make check-secrets` / CI run gitleaks with a rule that blocks RFC1918 addresses.
 - Committed examples use only `192.0.2.x` (documentation range), `127.0.0.1`, and link-local `169.254.x.x`. Put real addresses only in local, git-ignored files.
-- Input is validated at every entry point (HTTP bodies, WebSocket and OSC commands, preset names, speaker plug URLs, OSC addresses): strict allowlists, size limits, no control characters, and unknown JSON fields are refused. Details in `docs/ARCHITECTURE.md` §6.
+- Input is validated at every entry point (HTTP bodies, WebSocket and OSC commands, preset names, speaker plug URLs, OSC addresses): strict allowlists, size limits, no control characters, and wrong types are refused (unknown JSON fields too, in update requests and plug/OSC settings). Details in `docs/ARCHITECTURE.md` §6.
 - The server runs as a non-root user, and production code avoids `unwrap`/`expect` (enforced by a clippy lint).
 - The web UI's npm packages are build-time only, and npm never runs their install scripts (`frontend/.npmrc` sets `ignore-scripts=true`; CI also passes `--ignore-scripts`). CI audits both dependency trees (`cargo audit`, `npm audit`).
 

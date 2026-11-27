@@ -235,8 +235,10 @@ fn valid_host_name(host: &str) -> bool {
         })
 }
 
-/// Path and query: RFC 3986 unreserved characters, `/ ? & = : , + ;` and well-formed `%XX`.
-/// Nothing else ever reaches the request line (no space, `@`, `#`, `\`, control or non-ASCII).
+/// Path and query: RFC 3986 unreserved characters, the sub-delimiters `! $ ' ( ) * + , ; =`,
+/// `/ ? & : @` and well-formed `%XX` (the authority was split off before, so `@` here is plain
+/// data). Nothing else ever reaches the request line (no space, `#`, `\`, `"`, `<`, `>`,
+/// control or non-ASCII character).
 fn valid_path_and_query(tail: &str) -> bool {
     let bytes = tail.as_bytes();
     let mut i = 0;
@@ -251,7 +253,8 @@ fn valid_path_and_query(tail: &str) -> bool {
                 continue;
             }
             b if b.is_ascii_alphanumeric() => {}
-            b'-' | b'.' | b'_' | b'~' | b'/' | b'?' | b'&' | b'=' | b':' | b',' | b'+' | b';' => {}
+            b'-' | b'.' | b'_' | b'~' | b'/' | b'?' | b'&' | b'=' | b':' | b',' | b'+' | b';'
+            | b'!' | b'$' | b'\'' | b'(' | b')' | b'*' | b'@' => {}
             _ => return false,
         }
         i += 1;
@@ -867,7 +870,6 @@ mod tests {
             "http://192.0.2.1/on\u{ff0f}x",
             "http://192.0.2.1\u{ff0f}on",
             "http://192.0.2.1/caf\u{e9}",
-            "http://192.0.2.1/on@evil.example",
             "http://192.0.2.1/on\\x",
             "http://192.0.2.1/on%",
             "http://192.0.2.1/on%g0",
@@ -891,6 +893,15 @@ mod tests {
         assert!(parse_url(&long_label).is_err(), "label of 64");
         let huge_name = format!("http://{}/", vec!["a".repeat(60); 5].join("."));
         assert!(parse_url(&huge_name).is_err(), "name above 253");
+        // Sub-delimiters and `@` after the authority are plain data (saved by 0.7.0 already).
+        let t = parse_url("http://plug.example/api?cmd=set(1)&a=b*c!$'x@y").unwrap();
+        assert_eq!(t.host, "plug.example");
+        assert_eq!(t.path, "/api?cmd=set(1)&a=b*c!$'x@y");
+        assert!(parse_url("http://192.0.2.1/on@evil.example").is_ok());
+        assert!(
+            parse_url("http://evil.example@192.0.2.1/on").is_err(),
+            "login stays refused"
+        );
         // Percent-encoded text is data, not framing: it is allowed and stays encoded.
         let t = parse_url("http://192.0.2.1/cm?cmnd=Power%0D%0AOn").unwrap();
         assert_eq!(t.path, "/cm?cmnd=Power%0D%0AOn");

@@ -33,9 +33,11 @@ Stricter input checking everywhere the server accepts text or numbers.
 - Every request body (update install, pre-release switch, `POST /api/v1/command`) is
   checked before it is read: size limit, `Content-Type: application/json` when
   there is a body, valid UTF-8 and no control characters. It is then read into a
-  fixed set of fields; unknown fields and wrong types are refused with a clear
-  error. `POST /api/v1/command` now requires `Content-Type: application/json`
-  (Shortcuts and most apps already send it).
+  fixed set of fields; wrong types are refused with a clear error, and so are
+  unknown fields in the update requests and in the speaker plug and OSC
+  settings (commands are typed but tolerate extra fields).
+  `POST /api/v1/command` now requires `Content-Type: application/json` (in
+  Shortcuts, set the request body to JSON).
 - WebSocket commands get the same checks: message size, control characters, and
   one shared validator for preset names, imported preset text (256 KiB at most),
   channel labels, speaker plug settings and OSC settings. Labels can no longer
@@ -52,6 +54,24 @@ Stricter input checking everywhere the server accepts text or numbers.
   refuse (odd colours, control characters) are ignored when the server starts.
 - The web forms check the same rules before sending (preset names, labels,
   speaker plug URLs); the server stays the authority.
+
+### Compatibility
+- `POST /api/v1/command` answers 415 without `Content-Type: application/json`
+  (for example `curl -d` without `-H 'Content-Type: application/json'`).
+  Add the header to scripts and shortcuts that call it.
+- Speaker plug URLs saved by an earlier version that break the new rules
+  (spaces, control or non-ASCII characters, over-long text) disable the plug at
+  start-up, with the reason in the server log. Edit them in the plug panel and
+  save again.
+- Hand-edited `labels.json` entries that the UI would refuse (invalid colour,
+  control characters, unknown channel) are ignored at start-up, and are gone for
+  good after the next label change saves the file.
+- No preset or `config.toml` change.
+
+### Fixed
+- `deploy/proxmox-setup.sh --update` waits (up to 60 s) for an update already
+  running in the container, such as an install started from the web UI, instead
+  of stopping with "another cuemix-update is already running".
 
 ## [0.7.0] - 2026-11-26
 

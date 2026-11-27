@@ -91,7 +91,6 @@ describe('speaker plug hostile input', () => {
       'http://192.0.2.1/on‮x',
       'http://192.0.2.1/on／x',
       'http://192.0.2.1/café',
-      'http://192.0.2.1/on@evil.example',
       `http://192.0.2.1/on${bs}x`,
       'http://192.0.2.1/on%zz',
       'http://192.0.2.1/on%0',
@@ -104,6 +103,8 @@ describe('speaker plug hostile input', () => {
     ];
     for (const u of bad) expect(isValidHttpUrl(u), JSON.stringify(u)).toBe(false);
     expect(isValidHttpUrl('http://192.0.2.1/cm?cmnd=Power%0D%0AOn')).toBe(true);
+    expect(isValidHttpUrl("http://plug.example/api?cmd=set(1)&a=b*c!$'x@y")).toBe(true);
+    expect(isValidHttpUrl('http://evil.example@192.0.2.1/on')).toBe(false);
   });
   it('refuses odd hosts', () => {
     for (const h of ['a\nb', 'a\0', 'plug．example', 'plug.example‮', 'a..b', 'a.-b', 'a'.repeat(254)]) expect(isValidHost(h), JSON.stringify(h)).toBe(false);

@@ -816,7 +816,9 @@ update_container() {
   fi
   run pct push "${ctid}" "${UPDATE_SCRIPT}" /usr/local/sbin/cuemix-update --perms 0755
   push_update_units "${ctid}"
-  run pct exec "${ctid}" -- /usr/local/sbin/cuemix-update "${dry_args[@]}" "${UPDATE_ARGS[@]}"
+  # --wait-lock: an install started from the web UI (or the daily check) may still be
+  # running; wait for it (up to 60 s) instead of failing after the units were refreshed.
+  run pct exec "${ctid}" -- /usr/local/sbin/cuemix-update --wait-lock "${dry_args[@]}" "${UPDATE_ARGS[@]}"
   log_info "Update later with: ./deploy/proxmox-setup.sh --update  (or: pct exec ${ctid} -- cuemix-update)"
 }
 

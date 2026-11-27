@@ -867,8 +867,8 @@ pub enum Command {
     },
 }
 
-/// Largest preset file text a client may import (the WebSocket message limit).
-pub const IMPORT_TEXT_MAX: usize = 256 * 1024;
+/// Largest preset file text a client may import (a little under the 256 KiB WebSocket message limit, which also holds the JSON envelope and escapes).
+pub const IMPORT_TEXT_MAX: usize = 240 * 1024;
 
 impl Command {
     /// Checks every string a client sent, before anything is done with it (WebSocket, short
@@ -1842,6 +1842,7 @@ impl ChannelLabel {
     pub fn validate(&self) -> Result<(), String> {
         let n = self.name.chars().count();
         if n == 0
+            || self.name.trim().is_empty()
             || n > LABEL_NAME_MAX
             || self
                 .name
@@ -2640,6 +2641,8 @@ mod dsp_param_tests {
         assert!(label("Gu\u{ee}tare", None).validate().is_ok());
         for bad in [
             "",
+            "   ",
+            "\t",
             "a\nb",
             "a\0",
             "\u{202e}cba",
