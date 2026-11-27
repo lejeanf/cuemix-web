@@ -5,9 +5,10 @@ on:
     tags: ["v*.*.*"]
   workflow_dispatch:
 
-permissions:
-  contents: write
-  packages: write
+# No token rights by default: each job gets only what it needs. The jobs that run third-party
+# build code (npm packages, crate build scripts) can only read; writing the release and
+# pushing the image happen in jobs that run no such code.
+permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,8 +17,12 @@ jobs:
   frontend:
     name: Frontend build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Check tag matches Cargo.toml version
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -37,11 +42,17 @@ jobs:
             echo "::error file=frontend/package.json::frontend/package.json version ${pkg_version} does not match Cargo.toml version ${cargo_version}. Bump both before releasing."
             exit 1
           fi
+          # The floor this release publishes (deploy/min-version) must not refuse the release itself.
+          floor="$(tr -d '[:space:]' < deploy/min-version)"
+          if [[ ! "${floor}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ "$(printf '%s\n%s\n' "${floor}" "${tag%%-*}" | sort -V | head -n 1)" != "${floor}" ]]; then
+            echo "::error file=deploy/min-version::deploy/min-version (${floor}) must be X.Y.Z and not newer than ${tag}."
+            exit 1
+          fi
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          # No dependency cache in release builds: a cache written by another run must never
+          # end up in a published binary.
       - working-directory: frontend
         run: npm ci --ignore-scripts
       - working-directory: frontend
@@ -66,11 +77,15 @@ jobs:
           - x86_64-unknown-linux-musl
           - aarch64-unknown-linux-musl
           - armv7-unknown-linux-musleabihf
+    permissions:
+      contents: read
     env:
       TARGET: ${{ matrix.target }}
       VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           name: frontend-dist
@@ -79,9 +94,6 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: ${{ matrix.target }}
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.13.0
@@ -127,7 +139,15 @@ jobs:
     name: GitHub Release
     needs: binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      # Only for deploy/min-version (the floor installed updaters read from the newest release).
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: deploy/min-version
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v8
         with:
           pattern: release-*
@@ -141,6 +161,7 @@ jobs:
             release/*.tar.gz
             release/*.deb
             release/*.sha256
+            deploy/min-version
           generate_release_notes: true
           fail_on_unmatched_files: true
           prerelease: ${{ startsWith(github.ref, 'refs/tags/') && contains(github.ref_name, '-') }}
@@ -149,8 +170,13 @@ jobs:
     name: Docker image (ghcr.io)
     needs: binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           name: bin-x86_64-unknown-linux-musl
@@ -190,5 +216,3 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max

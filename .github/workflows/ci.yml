@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -52,6 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           name: frontend-dist
@@ -74,6 +78,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           name: frontend-dist
@@ -91,10 +97,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Syntax check
         run: for f in deploy/*.sh; do bash -n "$f"; done
       - name: shellcheck (preinstalled on ubuntu-latest)
         run: shellcheck --version && shellcheck -x deploy/*.sh
+      - name: One version floor everywhere
+        # The oldest installable release is written in three places; they must agree.
+        run: |
+          set -euo pipefail
+          file="$(tr -d '[:space:]' < deploy/min-version)"
+          server="$(sed -n 's/^pub(super) const MIN_PIN_VERSION: &str = "\([^"]*\)";/\1/p' src/web/update.rs)"
+          root="$(sed -n 's/^MIN_VERSION="\([^"]*\)"/\1/p' deploy/cuemix-update.sh)"
+          echo "deploy/min-version=${file} src/web/update.rs=${server} deploy/cuemix-update.sh=${root}"
+          if [[ -z "${file}" || "${file}" != "${server}" || "${file}" != "${root}" ]]; then
+            echo "::error::the version floor differs between deploy/min-version, src/web/update.rs and deploy/cuemix-update.sh"
+            exit 1
+          fi
 
   secrets:
     name: Secret scan (gitleaks + RFC1918)
@@ -102,6 +122,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Install gitleaks (pinned release)
         env:

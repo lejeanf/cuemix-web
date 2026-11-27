@@ -1,6 +1,6 @@
 [package]
 name = "cuemix-web"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 rust-version = "1.85"
 description = "Standalone web & bidirectional OSC controller for the MOTU UltraLite-mk5"

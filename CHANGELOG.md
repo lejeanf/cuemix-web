@@ -12,6 +12,47 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-27
+
+Fixes from a security review: a web page could control the mixer through DNS rebinding,
+releases could be downgraded to vulnerable versions, and the release pipeline gave build
+code more rights than it needs.
+
+### Security
+- **DNS rebinding**: the server now answers only for host names an outside site cannot own:
+  IP addresses, `localhost`, `*.local`, the mDNS name, and the new `[web] allowed_hosts` list.
+  Any other `Host` (or trusted `X-Forwarded-Host`) gets 421 before any route runs. Before,
+  a page whose own domain was pointed at the server sent matching `Host` and `Origin` headers
+  and could drive the mixer, change the plug and OSC targets, and queue installs.
+- `/api/update`, `/api/update/install` and `/api/update/prefs` also refuse cross-site
+  `Origin` headers (403), like `/ws` and `/api/v1`.
+- Security headers on every response: a Content-Security-Policy (scripts from this server
+  only, no framing, WebSocket only to this server), `X-Frame-Options: DENY` (clickjacking),
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+  `Cross-Origin-Opener-Policy: same-origin`.
+- **Security floor**: neither the UI nor the root updater installs a release older than
+  v0.7.2. Older releases would bring back the hole above or bugs fixed since. The newest
+  release publishes its floor (`min-version` asset): installed updaters can only raise their
+  own with it, and the status file passes it to the UI (`min_version`). A root shell can still
+  run `cuemix-update --version vX.Y.Z --force`. The floor lives in `src/web/update.rs`,
+  `deploy/cuemix-update.sh` and `deploy/min-version`; CI checks they agree.
+- `cuemix-update` never runs a binary it has only downloaded as root: the `--version` check
+  runs as `nobody` (`setpriv`, no new privileges, empty environment). Only the `cuemix-web`
+  member is unpacked from the tarball, and a symlink there is refused.
+- Release workflow: no token rights by default. Jobs that run third-party build code get
+  `contents: read` only, `publish` alone may write the release and `docker` alone may push the
+  image. No checkout keeps the token in `.git/config`, and release builds use no caches.
+
+### Compatibility
+- If you reach the UI by a name that is not an IP address, `localhost`, `*.local` or the mDNS
+  name (for example a reverse proxy's public name or a router DNS name), add it to
+  `[web] allowed_hosts` in `config.toml` before updating, or the UI answers 421. The accepted
+  names are logged at startup.
+- The Version dialog no longer lists releases older than v0.7.2.
+- The root-side changes (floor, unprivileged version check) arrive with
+  `sudo deploy/proxmox-setup.sh --update` (or `deploy/linux-setup.sh`), like every change to
+  `cuemix-update`. The in-app updater only replaces the binary.
+
 ## [0.7.1] - 2026-11-26
 
 Stricter input checking everywhere the server accepts text or numbers, and one
