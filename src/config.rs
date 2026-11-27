@@ -105,6 +105,12 @@ pub struct Storage {
     pub power_file: PathBuf,
     /// Speaker plug settings saved from the UI; overrides `[speaker_plug]`.
     pub speaker_plug_file: PathBuf,
+    /// OSC listen address and feedback targets saved from the UI; overrides
+    /// `[network] osc_listen` / `osc_feedback_targets`.
+    pub osc_file: PathBuf,
+    /// Update preferences saved from the UI (`{"show_prerelease":bool}`); when absent,
+    /// `[update] channel` decides the default.
+    pub update_prefs_file: PathBuf,
 }
 
 impl Default for Storage {
@@ -114,6 +120,8 @@ impl Default for Storage {
             labels_file: PathBuf::from("/var/lib/cuemix-web/labels.json"),
             power_file: PathBuf::from("/var/lib/cuemix-web/power.json"),
             speaker_plug_file: PathBuf::from("/var/lib/cuemix-web/speaker-plug.json"),
+            osc_file: PathBuf::from("/var/lib/cuemix-web/osc.json"),
+            update_prefs_file: PathBuf::from("/var/lib/cuemix-web/update-prefs.json"),
         }
     }
 }
@@ -126,11 +134,13 @@ impl Default for Storage {
 #[serde(default)]
 pub struct Update {
     /// `stable` (published releases) or `prerelease` (newest release,
-    /// alphas included). Read by `cuemix-update`.
+    /// alphas included). Read by `cuemix-update`; since 0.7.0 only the default of the UI's
+    /// "show pre-releases" switch (`[storage] update_prefs_file` wins once saved).
     pub channel: String,
     /// Written by `cuemix-update --check --status-file` (daily timer).
     pub status_file: PathBuf,
-    /// Created by the UI to ask for an install (content ignored).
+    /// Created by the UI to ask for an install; empty (newest of the channel) or one release
+    /// tag (`v0.5.2`, at most 64 bytes), validated again by the root side.
     pub request_file: PathBuf,
     /// Exit status of the last requested install.
     pub result_file: PathBuf,
@@ -378,6 +388,29 @@ speaker_plug_file = \"/tmp/s.json\"
             d.storage.speaker_plug_file,
             PathBuf::from("/var/lib/cuemix-web/speaker-plug.json")
         );
+    }
+
+    #[test]
+    fn osc_and_update_prefs_storage_keys() {
+        let d = Config::default();
+        assert_eq!(
+            d.storage.osc_file,
+            PathBuf::from("/var/lib/cuemix-web/osc.json")
+        );
+        assert_eq!(
+            d.storage.update_prefs_file,
+            PathBuf::from("/var/lib/cuemix-web/update-prefs.json")
+        );
+        let (cfg, unknown) = Config::parse_with_warnings(
+            "[storage]
+osc_file = \"/tmp/o.json\"
+update_prefs_file = \"/tmp/u.json\"
+",
+        )
+        .unwrap_or_default();
+        assert!(unknown.is_empty(), "{unknown:?}");
+        assert_eq!(cfg.storage.osc_file, PathBuf::from("/tmp/o.json"));
+        assert_eq!(cfg.storage.update_prefs_file, PathBuf::from("/tmp/u.json"));
     }
 
     #[test]

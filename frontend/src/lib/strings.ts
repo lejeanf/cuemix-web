@@ -83,6 +83,8 @@ export const S = {
   fadingOut: 'Fading out…',
   menu: 'More',
   plugMenuItem: 'Speaker plug…',
+  oscMenuItem: 'OSC…',
+  versionMenuItem: 'Version…',
   plugState: { off: 'Speaker plug off', on: 'Speaker plug on', warming: 'Speaker plug warming up', error: 'Speaker plug error', unknown: 'Speaker plug state unknown' },
   plug: {
     title: 'Speaker plug',
@@ -128,6 +130,85 @@ export const S = {
       offDelay: 'Off delay must be between 0 and 5 seconds.',
       timeout: 'Timeout must be between 0.5 and 10 seconds.',
     },
+  },
+  dialog: { save: 'Save', saving: 'Saving…', saved: 'Saved', cancel: 'Cancel', close: 'Close', noServer: 'Not connected to the server.' },
+  osc: {
+    title: 'OSC remote control',
+    help: 'The server listens for OSC messages (for example from TouchOSC) on the address below, and sends feedback to the devices listed as targets.',
+    listen: 'Listen on (host:port)',
+    listenPlaceholder: '0.0.0.0:8000',
+    listenHint: 'Use 0.0.0.0 to accept messages from every network interface. The port must be 1024 or higher.',
+    targets: 'Feedback targets',
+    targetsHelp: 'Targets are the devices that receive feedback, such as a tablet running TouchOSC. They must be on your home network.',
+    targetPlaceholder: 'tablet.local:9000',
+    targetLabel: (n: number) => `Target ${n} (host:port)`,
+    addTarget: 'Add target',
+    removeTarget: (n: number) => `Remove target ${n}`,
+    maxTargets: 'Up to 8 targets.',
+    noTargets: 'No targets: no feedback is sent.',
+    listening: 'Listening',
+    notListening: 'Not listening',
+    serverError: 'Server',
+    errors: {
+      listenEmpty: 'Enter the address to listen on, for example 0.0.0.0:8000.',
+      listenFormat: 'Use an IP address and port, for example 0.0.0.0:8000 or [::]:8000 (a host name is not accepted here).',
+      listenAddr: 'Use an address of this machine: 0.0.0.0, ::, 127.0.0.1, ::1 or one of its addresses (no multicast or broadcast).',
+      v6target: 'This listener is IPv4, so an IPv6 target cannot be reached. Use an IPv4 address or name, or listen on [::]:port.',
+      format: 'Use host:port, for example tablet.local:9000 (no http://, no path, no spaces).',
+      listenPort: 'The listen port must be between 1024 and 65535.',
+      targetPort: 'The port must be between 1 and 65535.',
+      tooMany: 'At most 8 targets.',
+      duplicate: (n: number) => `Same as target ${n}: each target can be listed once.`,
+    },
+  },
+  update: {
+    installing: 'Installing… the page reconnects when the new version is running.',
+    installingVersion: (v: string | null) => (v ? `Installing ${v}…` : 'Installing…'),
+    requestFailed: 'Request failed',
+    loading: 'Loading…',
+    badgeUpdating: 'Updating…',
+    badgeAvailable: (v: string) => `v${v} available`,
+    badgeFailed: 'Update failed',
+    popTitle: 'Software update',
+    installedChannel: (v: string, ch: string) => `Installed: v${v} · channel: ${ch}`,
+    latest: 'Latest',
+    releaseNotes: 'release notes',
+    checked: (when: string) => `checked ${when}`,
+    installBtn: (v: string) => `Install v${v}`,
+    restartNote: 'The service restarts (a few seconds without control; audio keeps playing). The download is checked (sha256) and a version that does not start is rolled back automatically.',
+    lastResult: (outcome: string, code: number, version: string | null, at: string) => {
+      const v = version ? ` of ${version}` : '';
+      const when = at ? `, ${at}` : '';
+      switch (outcome) {
+        case 'rolled_back':
+          return `Last install${v} failed and was rolled back to the previous version${when}.`;
+        case 'rollback_failed':
+          return `Last install${v} failed and the rollback failed too${when}. Check the service on the host.`;
+        case 'busy':
+          return `Last install${v} was refused: another update was already running${when}.`;
+        default:
+          return `Last install${v} failed (code ${code})${when}.`;
+      }
+    },
+    reloadNotice: 'New version available — reloading when you close this panel',
+  },
+  version: {
+    title: 'Version',
+    installed: 'Installed',
+    latest: 'Latest',
+    pre: 'pre-release',
+    showPre: 'Show pre-releases',
+    install: 'Install',
+    installLatest: (v: string) => `Install latest (v${v})`,
+    upToDate: 'You are on the latest version.',
+    noReleases: 'No releases found yet. The server checks for new releases a few times a day.',
+    notEnabled: 'Updates are not set up on this server.',
+    needsHost: 'Per-version install needs the host update (see README).',
+    olderWarning: (x: string, y: string) =>
+      `Version ${x} is older than the installed ${y}. Settings added after ${x} (for example the speaker plug) stop working until you update again.`,
+    confirmInstall: (v: string) => `Install ${v} anyway`,
+    checked: (when: string) => `Checked ${when}`,
+    safeNote: 'The download is checked (sha256) and a version that does not start is rolled back automatically.',
   },
   roomTest: 'Room test',
   measureRoom: 'Measure room…',

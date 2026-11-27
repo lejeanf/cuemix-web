@@ -1,7 +1,7 @@
 // Client reducer: applies server events (and optimistic local edits) to the
 // client state. It mutates `s` in place (so Svelte's deep $state proxy keeps
 // fine-grained reactivity) and returns it.
-import type { EqBand, Labels, MotuState, Param, PlugResult, PlugState, PowerInfo, ServerEvent, SessionInfo, SpeakerPlugSettings } from './protocol';
+import type { EqBand, Labels, MotuState, OscSettings, Param, PlugResult, PlugState, PowerInfo, ServerEvent, SessionInfo, SpeakerPlugSettings } from './protocol';
 
 export interface Toast {
   id: number;
@@ -17,6 +17,13 @@ export interface PlugInfo {
   state: PlugState;
 }
 
+/** The OSC settings as the server last reported them. */
+export interface OscInfo {
+  settings: OscSettings;
+  listening: boolean;
+  error: string | null;
+}
+
 export interface ClientState {
   state: MotuState | null;
   session: SessionInfo;
@@ -30,6 +37,7 @@ export interface ClientState {
   plug: PlugInfo | null;
   /** Last answer to a plug test, for the settings panel. */
   plugResult: PlugResult | null;
+  osc: OscInfo | null;
   /** Last `error` event, so a panel can show the reply to its own command inline. */
   lastError: { seq: number; message: string } | null;
 }
@@ -46,6 +54,7 @@ export function initialClientState(): ClientState {
     power: null,
     plug: null,
     plugResult: null,
+    osc: null,
     lastError: null,
   };
 }
@@ -294,6 +303,9 @@ export function applyEvent(s: ClientState, ev: ServerEvent): ClientState {
       break;
     case 'speaker_plug_result':
       s.plugResult = { on: ev.on, ok: ev.ok, message: ev.message };
+      break;
+    case 'osc_settings':
+      s.osc = { settings: { listen: ev.settings.listen, targets: [...ev.settings.targets] }, listening: ev.listening, error: ev.error ?? null };
       break;
     case 'notice':
       s.toasts.push({ id: ++s.toastSeq, message: ev.message, level: ev.level });

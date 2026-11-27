@@ -47,6 +47,7 @@ async fn harness(tag: &str) -> Result<Harness, Box<dyn std::error::Error>> {
             trust_forwarded_headers: true,
             allowed_origins: vec!["http://mixer.example.com:8443".to_owned()],
             update: Default::default(),
+            update_prefs_file: Default::default(),
         },
         shutdown,
     ));
@@ -102,8 +103,8 @@ async fn expect_silence(ws: &mut Ws) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn drain_initial(ws: &mut Ws) -> Result<(), Box<dyn std::error::Error>> {
-    // Snapshot, labels, presets, measure, power, speaker plug.
-    for _ in 0..6 {
+    // Snapshot, labels, presets, measure, power, speaker plug, OSC settings.
+    for _ in 0..7 {
         next_json(ws).await?;
     }
     Ok(())
@@ -201,6 +202,12 @@ async fn ws_connect_receives_snapshot_labels_presets_in_order(
     assert_eq!(sp["settings"]["warmup_ms"], 2000);
     assert_eq!(sp["urls"]["on"], "");
     assert_eq!(sp["state"], "unknown");
+    let osc = next_json(&mut ws).await?;
+    assert_eq!(osc["event"], "osc_settings");
+    assert_eq!(osc["settings"]["listen"], "0.0.0.0:8000");
+    assert_eq!(osc["settings"]["targets"], serde_json::json!([]));
+    assert_eq!(osc["listening"], false, "no OSC bridge in this harness");
+    assert_eq!(osc["error"], Value::Null);
     Ok(())
 }
 
@@ -481,6 +488,7 @@ async fn api_command_refuses_everything_else_and_reports_failures(
         r#"{"cmd":"list_presets"}"#,
         r#"{"cmd":"test_speaker_plug","on":true}"#,
         r#"{"cmd":"set_speaker_plug","settings":{}}"#,
+        r#"{"cmd":"set_osc_settings","settings":{"listen":"0.0.0.0:8000","targets":[]}}"#,
         r#"{"cmd":"set_label","ch":0,"label":null}"#,
     ] {
         let (status, v) = post(&h, body, &[]).await?;

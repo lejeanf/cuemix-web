@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::osc::settings::OscSettings;
 use crate::plug::{PlugState, PlugUrls, SpeakerPlugSettings};
 use crate::power::{ChannelPower, PowerChannel};
 
@@ -860,6 +861,10 @@ pub enum Command {
     TestSpeakerPlug {
         on: bool,
     },
+    /// Validate, apply live (rebind, new feedback targets), save and broadcast the OSC settings.
+    SetOscSettings {
+        settings: OscSettings,
+    },
 }
 
 /// Everything the core broadcasts.
@@ -909,6 +914,14 @@ pub enum ServerEvent {
     },
     /// Answer to `TestSpeakerPlug`, to the requesting client only.
     SpeakerPlugResult { on: bool, ok: bool, message: String },
+    /// OSC listen address and feedback targets in force (on connect and on every change).
+    /// `listening`: the UDP socket is bound. `error`: why the saved settings were not used
+    /// at startup, `null` when fine.
+    OscSettings {
+        settings: OscSettings,
+        listening: bool,
+        error: Option<String>,
+    },
     /// Something the user should know about (broadcast).
     Notice { level: NoticeLevel, message: String },
     /// Request rejected; delivered only to the requesting client.

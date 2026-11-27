@@ -22,6 +22,8 @@
   );
 
   --scrim: #0009;
+  --shadow-pop: 0 8px 24px #000a;
+  --on-accent: #111; /* text on a solid accent button */
   --field: #0d0e11;
   --warn-bg: #3a2a08;
   --warn-text: #fde68a;

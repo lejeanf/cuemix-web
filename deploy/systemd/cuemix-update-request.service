@@ -4,10 +4,14 @@ Documentation=https://github.com/lejeanf/cuemix-web
 
 [Service]
 Type=oneshot
-# Remove the request first so the path unit does not fire again.
-ExecStartPre=/bin/rm -f /var/lib/cuemix-web/update-request
-# Installs the newest release of the configured channel (sha256 check,
-# health check, automatic rollback), then records its exit code for the UI
-# and refreshes the status.
-ExecStart=/bin/sh -c '/usr/local/sbin/cuemix-update; echo "$? $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" > /var/lib/cuemix-web/update-result; chmod 0644 /var/lib/cuemix-web/update-result'
-ExecStartPost=-/usr/local/sbin/cuemix-update --check --status-file /var/lib/cuemix-web/update-status.json
+# An install waits for the lock, downloads, restarts and health-checks: generous, but never forever.
+TimeoutStartSec=15min
+# The request file is written by the unprivileged web service: cuemix-update reads it as
+# untrusted input (64 bytes at most; empty = newest release of the channel, or one release
+# tag such as v0.6.0, older ones included), removes it, installs (sha256 check, health check,
+# automatic rollback), records the exit code for the UI in update-result and refreshes
+# update-status.json (both built in the root-only /var/lib/cuemix-update, then renamed into
+# place). Its content never goes through a shell.
+ExecStart=/usr/local/sbin/cuemix-update --run-request /var/lib/cuemix-web/update-request --result-file /var/lib/cuemix-web/update-result --status-file /var/lib/cuemix-web/update-status.json
+# Safety net: whatever happened, the request is gone so the path unit does not fire again.
+ExecStopPost=-/bin/rm -f /var/lib/cuemix-web/update-request

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import Dialog from './Dialog.svelte';
   import { store } from '../lib/store.svelte';
   import { S } from '../lib/strings';
   import type { PlugKind, SpeakerPlugSettings } from '../lib/protocol';
@@ -100,59 +101,16 @@
   function close() {
     store.plugOpen = false;
   }
-  // The backdrop closes the panel only for a full click on it (press and release), never mid-edit.
-  let downOnBack = false;
-
-  let dlg: HTMLElement;
-  let first: HTMLInputElement;
   onMount(() => {
-    const prev = document.activeElement as HTMLElement | null;
     store.c.plugResult = null;
-    first?.focus();
-    return () => {
-      // The menu item that opened us is gone by now: go back to the menu button.
-      const to = prev && prev.isConnected && prev !== document.body ? prev : document.querySelector<HTMLElement>('[data-more-menu]');
-      to?.focus?.();
-    };
   });
-  function key(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      close();
-    } else if (e.key === 'Tab' && dlg) {
-      // Keep focus inside the dialog.
-      const f = [...dlg.querySelectorAll<HTMLElement>('input, select, button')].filter((x) => !(x as HTMLInputElement).disabled);
-      if (!f.length) return;
-      const a = f[0];
-      const z = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === a) {
-        e.preventDefault();
-        z.focus();
-      } else if (!e.shiftKey && document.activeElement === z) {
-        e.preventDefault();
-        a.focus();
-      }
-    }
-  }
 </script>
 
-<svelte:window onkeydown={key} />
-
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div
-  class="back"
-  onpointerdown={(e) => (downOnBack = e.target === e.currentTarget)}
-  onclick={(e) => {
-    if (downOnBack && e.target === e.currentTarget && !dirty) close();
-    downOnBack = false;
-  }}
->
-  <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="plug-title" bind:this={dlg}>
-    <h2 id="plug-title">{S.plug.title}</h2>
+<Dialog title={S.plug.title} titleId="plug-title" {dirty} onclose={close}>
     <p class="note">{S.plug.help}</p>
 
     <label class="sw">
-      <input type="checkbox" role="switch" bind:this={first} bind:checked={draft.enabled} />
+      <input type="checkbox" role="switch" bind:checked={draft.enabled} />
       <span>{S.plug.enabled}</span>
     </label>
     {#if plugState}<small class="st {plugState}" role="status">{S.plugState[plugState]}</small>{/if}
@@ -215,47 +173,9 @@
       <button type="button" class="primary" disabled={!store.ready || problem !== null || !dirty || saving} onclick={save}>{saving ? S.plug.saving : S.plug.save}</button>
       <button type="button" onclick={close}>{dirty ? S.plug.cancel : S.plug.close}</button>
     </div>
-  </div>
-</div>
+</Dialog>
 
 <style>
-  .back {
-    position: fixed;
-    inset: 0;
-    z-index: 55;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    overflow-y: auto;
-    background: var(--scrim);
-    padding: calc(12px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px))
-      max(12px, env(safe-area-inset-left, 0px));
-    box-sizing: border-box;
-  }
-  .dlg {
-    width: min(420px, 100%);
-    margin: auto 0;
-    padding: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 24px #000a;
-    box-sizing: border-box;
-  }
-  h2 {
-    margin: 0;
-    font-size: 16px;
-  }
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 12px;
-    color: var(--text-dim);
-  }
   label.sw {
     flex-direction: row;
     align-items: center;
@@ -293,29 +213,6 @@
     width: 84px;
     flex: none;
   }
-  select,
-  input[type='text'],
-  input[type='number'] {
-    min-height: 36px;
-    background: var(--field);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0 8px;
-    /* 16px: iOS Safari zooms the page when a smaller field is focused */
-    font: inherit;
-    font-size: 16px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-  [aria-invalid='true'] {
-    border-color: var(--red);
-  }
-  .note {
-    margin: 0;
-    font-size: 12px;
-    color: var(--text-dim);
-  }
   .prev {
     display: flex;
     flex-direction: column;
@@ -340,42 +237,8 @@
     font-weight: 600;
     margin-right: 4px;
   }
-  .err {
-    color: var(--red);
-  }
-  .ok {
-    color: var(--meter-green);
-  }
-  .warn {
-    color: var(--amber);
-  }
-  .msgs {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-height: 16px;
-  }
-  .tests,
-  .row {
+  .tests {
     display: flex;
     gap: 8px;
-  }
-  .tests button,
-  .row button {
-    flex: 1;
-    min-height: 40px;
-    background: var(--bg-alt);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .row .primary {
-    border-color: var(--cyan);
-    color: var(--cyan);
-  }
-  button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
   }
 </style>

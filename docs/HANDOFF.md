@@ -130,7 +130,7 @@ Toutes les commandes sont bidirectionnelles (le serveur renvoie le feedback OSC 
 * **Fichiers strictement inscrits dans `.gitignore` :**
   * `config.toml` et `*.local.toml`
   * `deploy/*.env` (sauf `*.env.example`)
-  * `data/presets/*.json`, `data/labels.json`, `data/power.json` et `data/speaker-plug.json`
+  * `data/presets/*.json`, `data/labels.json`, `data/power.json`, `data/speaker-plug.json`, `data/osc.json` et `data/update-prefs.json`
   * `.env`, `*.pem`, `*.key`
 * **Audit CI Anti-Fuite :** Un job GitHub Actions (`gitleaks` + vérification par expressions régulières) bloque automatiquement toute Pull Request contenant des IP privées réelles, clés ou secrets.
 

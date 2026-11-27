@@ -13,6 +13,9 @@
   import Remote from './components/Remote.svelte';
   import RoomTest from './components/RoomTest.svelte';
   import SpeakerPlug from './components/SpeakerPlug.svelte';
+  import OscPanel from './components/OscPanel.svelte';
+  import VersionPanel from './components/VersionPanel.svelte';
+  import { updates } from './lib/updates.svelte';
 
   onMount(() => {
     store.start();
@@ -26,9 +29,15 @@
   $effect(() => {
     if (!tabs.includes(store.tab)) store.tab = 'mixer';
   });
+  // A reload that waited for an open panel goes ahead once it is closed.
+  $effect(() => {
+    if (!store.panelOpen && store.reloadWaiting) store.checkStale();
+  });
+  // A drop and reconnect during an install means the new version is running.
+  $effect(() => updates.noteSocket(store.socketOpen));
 </script>
 
-<div class="app">
+<div class="app" inert={store.panelOpen}>
   <TopBar>
     {#if !store.simple}
     <div class="tabs" role="tablist" aria-label="Views">
@@ -67,20 +76,29 @@
     <ControlRoom />
     <DspPanel />
   {/if}
+</div>
 
-  {#if store.roomOpen}
-    <RoomTest />
-  {/if}
+<!-- Panels and toasts sit outside the (inert while a panel is open) app. -->
+{#if store.roomOpen}
+  <RoomTest />
+{/if}
 
-  {#if store.plugOpen}
-    <SpeakerPlug />
-  {/if}
+{#if store.plugOpen}
+  <SpeakerPlug />
+{/if}
 
-  <div class="toasts" aria-live="polite">
-    {#each store.c.toasts as t (t.id)}
-      <button class="toast" class:warning={t.level === 'warning'} class:info={t.level === 'info'} onclick={() => store.dismissToast(t.id)}>{t.message}</button>
-    {/each}
-  </div>
+{#if store.oscOpen}
+  <OscPanel />
+{/if}
+
+{#if store.versionOpen}
+  <VersionPanel />
+{/if}
+
+<div class="toasts" aria-live="polite">
+  {#each store.c.toasts as t (t.id)}
+    <button class="toast" class:warning={t.level === 'warning'} class:info={t.level === 'info'} onclick={() => store.dismissToast(t.id)}>{t.message}</button>
+  {/each}
 </div>
 
 <style>

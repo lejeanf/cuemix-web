@@ -116,6 +116,9 @@ mod tests {
             Command::SetSpeakerPlug {
                 settings: Default::default(),
             },
+            Command::SetOscSettings {
+                settings: Default::default(),
+            },
         ] {
             assert!(!allowed(&refused), "{refused:?}");
         }

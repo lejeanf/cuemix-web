@@ -9,13 +9,15 @@
 #
 # Updates are never automatic: an hourly timer only *checks* (--check
 # --status-file), and an install runs when a person asks for it, from a shell
-# or from the web UI's Install button (which only creates a request file that
-# the root unit cuemix-update-request.path turns into a run of this script).
-# The configuration is never modified; in /var/lib/cuemix-web only the status
-# and result files below are written.
+# or from the web UI (which only writes a request file, empty or holding one
+# release tag, that the root unit cuemix-update-request.path turns into
+# `cuemix-update --run-request`: the file is untrusted input, see
+# do_run_request). The configuration is never modified; in /var/lib/cuemix-web
+# only the status and result files are written.
 #
 # Usage: sudo cuemix-update [--check | --rollback] [--pre | --version vX.Y.Z[-pre]]
 #                           [--force] [--dry-run] [--help]
+#        sudo cuemix-update --run-request FILE --result-file FILE [--status-file FILE]
 
 set -euo pipefail
 
@@ -32,6 +34,25 @@ SERVICE="cuemix-web"
 DEFAULT_PORT=8080
 HEALTH_TIMEOUT=15
 LOCK_FILE="/run/cuemix-update.lock"
+# Root-only directory where every file this script publishes is built (see atomic_publish).
+# The web service's state directory is writable by that unprivileged user, so root never
+# creates or writes a file there, it only renames finished files into it.
+PRIVATE_DIR="/var/lib/cuemix-update"
+# Oldest release the web UI may ask for (older ones predate the update units and /api/health).
+MIN_PIN_MAJOR=0
+MIN_PIN_MINOR=5
+# Seconds to wait for another cuemix-update to finish (--wait-lock, used by --run-request).
+LOCK_WAIT=0
+# Capabilities this updater adds to the status file ("features"): the web UI only offers
+# what the root side can do. pin = --run-request installs the tag the request file holds.
+FEATURES='"pin"'
+# Release tag syntax accepted from the request file and listed in the status file.
+TAG_RE='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+# The request file is untrusted input (written by the unprivileged web service).
+REQUEST_MAX_BYTES=64
+# Releases asked from GitHub, and kept in the status file.
+RELEASES_FETCH=30
+RELEASES_KEEP=20
 
 # Exit codes (see --help).
 EXIT_UPDATE_AVAILABLE=10
@@ -48,6 +69,12 @@ FORCE=0
 PIN_SET=0
 PIN=""
 STATUS_FILE=""
+RUN_REQUEST=""
+RESULT_FILE=""
+REQUEST_TAG=""
+RELEASES_JSON="[]"
+LATEST_STABLE=""
+LATEST_PRE=""
 CHANNEL=""
 TAG=""
 VERSION=""
@@ -91,7 +118,7 @@ run() {
   "$@"
 }
 
-# Invoked indirectly via `trap cleanup EXIT` below.
+# Invoked indirectly via `trap cleanup EXIT` (set in main).
 # shellcheck disable=SC2329
 cleanup() {
   # Keep the exit status of the script (the last command here must not change it).
@@ -101,7 +128,6 @@ cleanup() {
   fi
   exit "${rc}"
 }
-trap cleanup EXIT
 
 usage() {
   cat <<'USAGE'
@@ -118,12 +144,25 @@ Options:
   --check                 Print installed and available versions, change nothing.
                           Exit 0 when up to date, 10 when an update is available.
   --pre                   Consider pre-releases too (newest release overall).
-                          Default: [update] channel in config.toml
-                          ("stable", or "prerelease" which implies --pre).
-  --status-file PATH      With --check: also write the result as JSON to PATH
-                          (read by the web UI).
-  --version vX.Y.Z[-pre]  Install this exact release tag.
+                          Default: [update] channel in config.toml ("stable", or
+                          "prerelease" which implies --pre).
+  --status-file PATH      With --check (or --run-request): also write the result as
+                          JSON to PATH (read by the web UI): installed and latest
+                          versions, the newest releases, and the "features" this
+                          updater supports.
+  --version vX.Y.Z[-pre]  Install this exact release tag, newer or older than the
+                          installed one (older = a downgrade; the same sha256,
+                          health check and rollback apply).
+  --run-request FILE      What the web UI's request unit runs: FILE is untrusted
+                          input written by the unprivileged web service. At most
+                          64 bytes: empty (newest release of the channel) or one
+                          release tag vX.Y.Z[-pre]; anything else is refused. FILE
+                          is removed, the install runs, and the exit code is
+                          written to --result-file.
+  --result-file PATH      With --run-request: "CODE TIMESTAMP [TAG]" is written here.
   --force                 Reinstall even when that version is already installed.
+  --wait-lock             Wait up to 60 s for another cuemix-update to finish instead
+                          of exiting with code 4 (used by --run-request).
   --rollback              Restore the previous binary (cuemix-web.prev).
   -n, --dry-run           Print what would happen, change nothing.
   -h, --help              Show this help and exit.
@@ -155,6 +194,7 @@ parse_args() {
       --rollback) ROLLBACK=1 ;;
       --pre) PRE=1 ;;
       --force) FORCE=1 ;;
+      --wait-lock) LOCK_WAIT=60 ;;
       --version)
         [[ $# -ge 2 ]] || fail "${EXIT_USAGE}" "--version requires a tag, e.g. --version v0.2.0"
         PIN="$2"
@@ -165,6 +205,16 @@ parse_args() {
       --status-file)
         [[ $# -ge 2 ]] || fail "${EXIT_USAGE}" "--status-file requires a path"
         STATUS_FILE="$2"
+        shift
+        ;;
+      --run-request)
+        [[ $# -ge 2 ]] || fail "${EXIT_USAGE}" "--run-request requires a path"
+        RUN_REQUEST="$2"
+        shift
+        ;;
+      --result-file)
+        [[ $# -ge 2 ]] || fail "${EXIT_USAGE}" "--result-file requires a path"
+        RESULT_FILE="$2"
         shift
         ;;
       *) log_err "unknown option: $1"; usage >&2; exit "${EXIT_USAGE}" ;;
@@ -183,8 +233,16 @@ validate_args() {
   if [[ "${CHECK}" -eq 1 && "${FORCE}" -eq 1 ]]; then
     fail "${EXIT_USAGE}" "--force has no effect with --check"
   fi
-  if [[ -n "${STATUS_FILE}" && "${CHECK}" -eq 0 ]]; then
-    fail "${EXIT_USAGE}" "--status-file only works with --check"
+  if [[ -n "${STATUS_FILE}" && "${CHECK}" -eq 0 && -z "${RUN_REQUEST}" ]]; then
+    fail "${EXIT_USAGE}" "--status-file only works with --check or --run-request"
+  fi
+  if [[ -n "${RUN_REQUEST}" ]]; then
+    if [[ "${CHECK}" -eq 1 || "${ROLLBACK}" -eq 1 || "${PRE}" -eq 1 || "${PIN_SET}" -eq 1 || "${FORCE}" -eq 1 || "${DRY_RUN}" -eq 1 ]]; then
+      fail "${EXIT_USAGE}" "--run-request cannot be combined with --check, --rollback, --pre, --version, --force or --dry-run"
+    fi
+    [[ -n "${RESULT_FILE}" ]] || fail "${EXIT_USAGE}" "--run-request requires --result-file"
+  elif [[ -n "${RESULT_FILE}" ]]; then
+    fail "${EXIT_USAGE}" "--result-file only works with --run-request"
   fi
   if [[ "${PIN_SET}" -eq 1 ]]; then
     [[ "${PIN}" == v* ]] || PIN="v${PIN}"
@@ -201,14 +259,18 @@ require_root() {
 
 require_commands() {
   local cmd
-  for cmd in curl sha256sum tar install mv systemctl flock timeout; do
+  for cmd in curl sha256sum tar install mv systemctl flock timeout mktemp awk head tr wc; do
     command -v "${cmd}" >/dev/null 2>&1 || die "required command not found: ${cmd}"
   done
 }
 
 acquire_lock() {
   exec 9>"${LOCK_FILE}" || die "cannot open lock file ${LOCK_FILE}"
-  flock -n 9 || fail "${EXIT_LOCKED}" "another cuemix-update is already running (lock: ${LOCK_FILE})"
+  if [[ "${LOCK_WAIT}" -gt 0 ]]; then
+    flock -w "${LOCK_WAIT}" 9 || fail "${EXIT_LOCKED}" "another cuemix-update is still running after ${LOCK_WAIT}s (lock: ${LOCK_FILE})"
+  else
+    flock -n 9 || fail "${EXIT_LOCKED}" "another cuemix-update is already running (lock: ${LOCK_FILE})"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -264,7 +326,9 @@ config_channel() {
   esac
 }
 
-# apply_channel : the config's channel decides --pre unless the command line did.
+# apply_channel : the config's channel decides --pre unless the command line did. The web
+# UI's pre-release switch (update-prefs.json, writable by the web user) is never read here:
+# it only changes what the UI offers, and the install it asks for names its tag.
 apply_channel() {
   CHANNEL="$(config_channel)"
   if [[ "${PRE}" -eq 0 && "${PIN_SET}" -eq 0 && "${CHANNEL}" == "prerelease" ]]; then
@@ -275,21 +339,62 @@ apply_channel() {
   fi
 }
 
+# json_tag TAG : TAG as a JSON string, or null when empty (TAG is already validated).
+json_tag() {
+  if [[ -n "$1" ]]; then
+    printf '"%s"' "$1"
+  else
+    printf 'null'
+  fi
+}
+
+# private_dir : make sure PRIVATE_DIR exists and can be trusted: a real directory (not a
+# symlink), owned by the user running this script (root), not writable by anyone else.
+private_dir() {
+  if [[ ! -e "${PRIVATE_DIR}" && ! -L "${PRIVATE_DIR}" ]]; then
+    mkdir -m 0700 -- "${PRIVATE_DIR}" || die "cannot create ${PRIVATE_DIR}"
+  fi
+  if [[ -L "${PRIVATE_DIR}" || ! -d "${PRIVATE_DIR}" ]]; then
+    die "${PRIVATE_DIR} must be a real directory"
+  fi
+  if [[ "$(stat -c %u -- "${PRIVATE_DIR}")" != "$(id -u)" ]] || (( 0$(stat -c %a -- "${PRIVATE_DIR}") & 022 )); then
+    die "${PRIVATE_DIR} must be owned by the user running this script and not writable by others"
+  fi
+}
+
+# atomic_publish FILE TEXT : publish TEXT as FILE, world-readable. The file is built in
+# PRIVATE_DIR (a directory only this script's user can touch, on the same filesystem as the
+# web service's state directory), then moved over FILE with mv -fT. FILE's own directory is
+# writable by the unprivileged web user, so nothing is ever created, written or chmod-ed
+# there by root: a rename replaces whatever sits at FILE (a planted symlink included, which
+# is replaced, not followed) and -T refuses to move into a planted directory.
+atomic_publish() {
+  local file="$1" text="$2" tmp=""
+  private_dir
+  tmp="$(mktemp "${PRIVATE_DIR}/publish.XXXXXX")" || die "cannot create a temporary file in ${PRIVATE_DIR}"
+  if ! { printf '%s\n' "${text}" >"${tmp}" && chmod 0644 -- "${tmp}" && mv -fT -- "${tmp}" "${file}"; }; then
+    rm -f -- "${tmp}"
+    die "cannot publish ${file}"
+  fi
+}
+
 # write_status INSTALLED AVAILABLE : JSON for the web UI, written atomically,
-# world-readable. Every value is a validated version or a fixed word.
+# world-readable. Every value is a validated version, tag or timestamp, or a fixed word.
+# "features" tells the UI what this updater can do (see FEATURES); "releases",
+# "latest_stable" and "latest_pre" come from fetch_releases.
 write_status() {
-  local installed="$1" available="$2" update="false" tmp=""
+  local installed="$1" available="$2" update="false" json=""
   [[ -n "${STATUS_FILE}" ]] || return 0
+  [[ "${installed}" =~ ^[0-9A-Za-z.+-]+$ ]] || installed="unknown"
   [[ "${installed}" != "${available}" ]] && update="true"
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     dry "would write ${STATUS_FILE}"
     return 0
   fi
-  tmp="${STATUS_FILE}.tmp"
-  printf '{"installed":"%s","latest":"%s","tag":"%s","channel":"%s","update_available":%s,"checked_at":"%s","release_url":"%s/%s"}\n' \
-    "${installed}" "${VERSION}" "${TAG}" "${CHANNEL}" "${update}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${RELEASE_PAGE}" "${TAG}" >"${tmp}"
-  chmod 0644 "${tmp}"
-  mv -f -- "${tmp}" "${STATUS_FILE}"
+  json="$(printf '{"installed":"%s","latest":"%s","tag":"%s","channel":"%s","update_available":%s,"checked_at":"%s","release_url":"%s/%s","features":[%s],"latest_stable":%s,"latest_pre":%s,"releases":%s}' \
+    "${installed}" "${VERSION}" "${TAG}" "${CHANNEL}" "${update}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${RELEASE_PAGE}" "${TAG}" \
+    "${FEATURES}" "$(json_tag "${LATEST_STABLE}")" "$(json_tag "${LATEST_PRE}")" "${RELEASES_JSON}")"
+  atomic_publish "${STATUS_FILE}" "${json}"
 }
 
 # ---------------------------------------------------------------------------
@@ -317,6 +422,63 @@ resolve_target() {
   [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] \
     || die "unexpected release tag from GitHub: ${TAG}"
   VERSION="${TAG#v}"
+}
+
+# fetch_releases : the newest published releases (drafts excluded), newest first, for the
+# status file. Sets RELEASES_JSON (a JSON array of at most RELEASES_KEEP objects),
+# LATEST_STABLE and LATEST_PRE (the newest tag of each kind, or empty). Never fails the
+# check: without a list the status carries an empty one and the UI offers no choice.
+#
+# No jq: the GitHub API pretty-prints, one key per line, with the keys of a release at an
+# indent of four spaces and everything nested (author, assets) deeper, so awk reads the
+# top-level keys by their indent. Every field is validated again before it is written.
+fetch_releases() {
+  local json="" rows="" tag="" pre="" published="" published_json="" items="" count=0
+  RELEASES_JSON="[]"
+  LATEST_STABLE=""
+  LATEST_PRE=""
+  if ! json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "${API_BASE}/releases?per_page=${RELEASES_FETCH}" 2>/dev/null)"; then
+    log_warn "could not list the releases from GitHub; the status will not offer a version choice"
+    return 0
+  fi
+  rows="$(printf '%s\n' "${json}" | awk '
+    /^  \{[[:space:]]*$/ { tag = ""; draft = "false"; pre = "false"; pub = ""; next }
+    /^    "tag_name": *"/ { v = $0; sub(/^    "tag_name": *"/, "", v); sub(/".*$/, "", v); tag = v; next }
+    /^    "draft": *(true|false)/ { draft = ($0 ~ /true/) ? "true" : "false"; next }
+    /^    "prerelease": *(true|false)/ { pre = ($0 ~ /true/) ? "true" : "false"; next }
+    /^    "published_at": *"/ { v = $0; sub(/^    "published_at": *"/, "", v); sub(/".*$/, "", v); pub = v; next }
+    /^  \},?[[:space:]]*$/ { if (tag != "" && draft == "false") printf "%s\t%s\t%s\n", tag, pre, pub; tag = "" }
+  ' || true)"
+  if [[ -z "${rows}" ]]; then
+    log_warn "no release found in the GitHub list; the status will not offer a version choice"
+    return 0
+  fi
+  while IFS=$'\t' read -r tag pre published; do
+    [[ "${tag}" =~ ${TAG_RE} ]] || continue
+    tag_pinnable "${tag}" || continue
+    if [[ "${pre}" == "true" || "${tag}" == *-* ]]; then
+      pre="true"
+    else
+      pre="false"
+    fi
+    if [[ "${published}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+      published_json="\"${published}\""
+    else
+      published_json="null"
+    fi
+    if [[ "${pre}" == "true" ]]; then
+      [[ -n "${LATEST_PRE}" ]] || LATEST_PRE="${tag}"
+    else
+      [[ -n "${LATEST_STABLE}" ]] || LATEST_STABLE="${tag}"
+    fi
+    if (( count < RELEASES_KEEP )); then
+      [[ -z "${items}" ]] || items+=","
+      items+="$(printf '{"tag":"%s","version":"%s","prerelease":%s,"published_at":%s}' "${tag}" "${tag#v}" "${pre}" "${published_json}")"
+      count=$((count + 1))
+    fi
+  done <<<"${rows}"
+  RELEASES_JSON="[${items}]"
+  log_info "listed ${count} releases (latest stable: ${LATEST_STABLE:-none}, latest pre-release: ${LATEST_PRE:-none})"
 }
 
 detect_target() {
@@ -460,6 +622,9 @@ do_check() {
   current="$(installed_version)"
   resolve_target
   log_info "installed: ${current}   available: ${VERSION} (${TAG}, channel ${CHANNEL})"
+  if [[ -n "${STATUS_FILE}" ]]; then
+    fetch_releases
+  fi
   write_status "${current}" "${VERSION}"
   if [[ "${current}" == "${VERSION}" ]]; then
     log_info "up to date"
@@ -473,6 +638,99 @@ do_check() {
   fi
   log_info "update available; install it with: ${hint}"
   exit "${EXIT_UPDATE_AVAILABLE}"
+}
+
+# tag_pinnable TAG : the tag is at least vMIN_PIN_MAJOR.MIN_PIN_MINOR.0.
+tag_pinnable() {
+  local rest="${1#v}" major="" minor=""
+  major="${rest%%.*}"
+  rest="${rest#*.}"
+  minor="${rest%%.*}"
+  (( 10#${major} > MIN_PIN_MAJOR || ( 10#${major} == MIN_PIN_MAJOR && 10#${minor} >= MIN_PIN_MINOR ) ))
+}
+
+# read_request FILE : check the request file the unprivileged web service wrote, and set
+# REQUEST_TAG to the release tag it holds ("" = no tag: newest release of the channel).
+# The file is untrusted input. It is opened once, by dd, with O_NOFOLLOW and O_NONBLOCK (a
+# symlink is refused and a FIFO planted in the meantime cannot block root) under a 5 s
+# timeout, and only REQUEST_MAX_BYTES + 1 bytes are ever read. It must hold nothing but a
+# tag that matches TAG_RE (surrounding whitespace allowed) and is at least v0.5.0. Anything
+# else is refused (return 1), and the log never repeats what the file contained.
+read_request() {
+  local file="$1" raw=""
+  REQUEST_TAG=""
+  if [[ -L "${file}" || ! -f "${file}" ]]; then
+    log_err "update request refused: it is not a regular file"
+    return 1
+  fi
+  # The trailing x keeps trailing newlines through the command substitution, so the length
+  # is the real one. Whatever is not a character a tag may hold becomes "?" (NUL included).
+  raw="$({ timeout 5 dd if="${file}" iflag=nofollow,nonblock bs=$((REQUEST_MAX_BYTES + 1)) count=1 status=none 2>/dev/null | LC_ALL=C tr -c 'A-Za-z0-9.\n\r\t -' '?'; } || true; printf x)"
+  raw="${raw%x}"
+  if (( ${#raw} > REQUEST_MAX_BYTES )); then
+    log_err "update request refused: larger than ${REQUEST_MAX_BYTES} bytes"
+    return 1
+  fi
+  raw="${raw#"${raw%%[![:space:]]*}"}"
+  raw="${raw%"${raw##*[![:space:]]}"}"
+  if [[ -z "${raw}" ]]; then
+    return 0
+  fi
+  if [[ ! "${raw}" =~ ${TAG_RE} ]]; then
+    log_err "update request refused: it does not hold exactly one release tag (vX.Y.Z[-pre])"
+    return 1
+  fi
+  if ! tag_pinnable "${raw}"; then
+    log_err "update request refused: only releases from v${MIN_PIN_MAJOR}.${MIN_PIN_MINOR}.0 can be requested"
+    return 1
+  fi
+  REQUEST_TAG="${raw}"
+}
+
+# write_result CODE TAG : "CODE TIMESTAMP [TAG]" for the web UI (exit code of the install).
+write_result() {
+  local text=""
+  text="$1 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [[ -n "$2" ]]; then
+    text+=" $2"
+  fi
+  atomic_publish "${RESULT_FILE}" "${text}"
+}
+
+# do_run_request : what cuemix-update-request.service runs. The request file is read,
+# validated and removed first (the path unit fires again as long as it exists), then this
+# script installs: with the requested tag (a downgrade is allowed), or, for an empty file,
+# the newest release of the channel. The tag only ever reaches the child as one argument
+# after --version, never through a shell. The exit code goes to RESULT_FILE, and the status
+# is refreshed so the UI sees the new version. A refused request installs nothing.
+do_run_request() {
+  local self="" rc=0 ok=1
+  local -a args=()
+  self="$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [[ -n "${self}" && -x "${self}" ]] || self="$0"
+  if [[ ! -e "${RUN_REQUEST}" && ! -L "${RUN_REQUEST}" ]]; then
+    log_info "no update request at ${RUN_REQUEST}; nothing to do"
+    exit 0
+  fi
+  read_request "${RUN_REQUEST}" || ok=0
+  # A directory (or anything rm cannot remove) must not stop the result from being recorded.
+  rm -f -- "${RUN_REQUEST}" 2>/dev/null || true
+  if [[ "${ok}" -eq 1 ]]; then
+    if [[ -n "${REQUEST_TAG}" ]]; then
+      args=(--version "${REQUEST_TAG}")
+      log_info "update requested from the web UI: ${REQUEST_TAG}"
+    else
+      log_info "update requested from the web UI: newest release of the channel"
+    fi
+    "${self}" --wait-lock ${args[@]+"${args[@]}"} || rc=$?
+  else
+    rc="${EXIT_USAGE}"
+  fi
+  write_result "${rc}" "${REQUEST_TAG}"
+  if [[ -n "${STATUS_FILE}" ]]; then
+    "${self}" --wait-lock --check --status-file "${STATUS_FILE}" || true
+  fi
+  exit 0
 }
 
 do_rollback() {
@@ -539,10 +797,14 @@ do_update() {
 }
 
 main() {
+  trap cleanup EXIT
   parse_args "$@"
   validate_args
   require_root "$@"
   require_commands
+  if [[ -n "${RUN_REQUEST}" ]]; then
+    do_run_request
+  fi
   acquire_lock
   apply_channel
 
@@ -559,4 +821,7 @@ main() {
   fi
 }
 
-main "$@"
+# Not when sourced (the tests call the functions above).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

@@ -9,7 +9,7 @@
 # Run as root from a checkout of this repository. Idempotent: existing config
 # is never overwritten.
 #
-# Usage: sudo deploy/linux-setup.sh [--dry-run] [--uninstall] [--help]
+# Usage: sudo deploy/linux-setup.sh [--dry-run] [--uninstall] [--refresh-updater] [--help]
 
 set -euo pipefail
 
@@ -43,6 +43,7 @@ OSC_PORT="8000"
 
 DRY_RUN=0
 UNINSTALL=0
+REFRESH_UPDATER=0
 WORKDIR=""
 TARGET=""
 TAG=""
@@ -93,10 +94,15 @@ Debian/Ubuntu), creates the cuemix service user, config and state directories,
 the systemd unit, and the MOTU udev rule (assigns 169.254.254.1/16 on hotplug).
 
 Usage:
-  sudo deploy/linux-setup.sh [--dry-run] [--uninstall] [--help]
+  sudo deploy/linux-setup.sh [--dry-run] [--uninstall] [--refresh-updater] [--help]
 
 Options:
   -n, --dry-run   Print every action without changing the system.
+  --refresh-updater
+                  Only reinstall cuemix-update and the update units of this
+                  checkout (needed once after a web-UI update to 0.7.0, which
+                  replaces the binary but not these root-side files), reload
+                  systemd and run a release check. Touches nothing else.
   -u, --uninstall Remove the service, binary, udev rule, helper, user and the
                   NetworkManager exception. /etc/cuemix-web and
                   /var/lib/cuemix-web are kept. Packages are not removed.
@@ -119,6 +125,7 @@ parse_args() {
       -h|--help) usage; exit 0 ;;
       -n|--dry-run) DRY_RUN=1 ;;
       -u|--uninstall) UNINSTALL=1 ;;
+      --refresh-updater) REFRESH_UPDATER=1 ;;
       *) log_err "unknown option: $1"; usage >&2; exit 2 ;;
     esac
     shift
@@ -153,7 +160,7 @@ require_commands() {
   for cmd in systemctl install sha256sum; do
     command -v "${cmd}" >/dev/null 2>&1 || die "required command not found: ${cmd} (is systemd present?)"
   done
-  if [[ "${UNINSTALL}" -eq 0 ]]; then
+  if [[ "${UNINSTALL}" -eq 0 && "${REFRESH_UPDATER}" -eq 0 ]]; then
     for cmd in curl tar useradd udevadm ip; do
       command -v "${cmd}" >/dev/null 2>&1 || die "required command not found: ${cmd}"
     done
@@ -496,6 +503,18 @@ main() {
 
   if [[ "${UNINSTALL}" -eq 1 ]]; then
     uninstall
+    return 0
+  fi
+
+  if [[ "${REFRESH_UPDATER}" -eq 1 ]]; then
+    [[ -f "${UPDATER_SRC}" ]] || die "missing ${UPDATER_SRC} (run from a repository checkout)"
+    local u
+    for u in "${UPDATE_UNITS[@]}"; do
+      [[ -f "${SCRIPT_DIR}/systemd/${u}" ]] || die "missing ${SCRIPT_DIR}/systemd/${u} (run from a repository checkout)"
+    done
+    install_updater
+    install_update_units
+    log_info "cuemix-update and the update units are refreshed; the web UI sees the new capabilities after the release check (a few seconds)"
     return 0
   fi
 

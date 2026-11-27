@@ -25,6 +25,9 @@ port = 1280
 # The OSC listen address is set in [network] (osc_listen).
 # Feedback targets (osc_feedback_targets) must use 127.0.0.1 or 192.0.2.x example
 # addresses only in committed files; real controller addresses belong in config.toml.
+# Since 0.7.0 the Advanced menu's "OSC..." entry changes both live and saves them to
+# [storage] osc_file, which then overrides osc_listen / osc_feedback_targets (delete that
+# file to go back to these values). Targets must be on the local network.
 
 [engine]
 # Maximum messages per second sent to the MOTU (per-parameter throttle).
@@ -43,6 +46,10 @@ labels_file = "/var/lib/cuemix-web/labels.json"
 power_file = "/var/lib/cuemix-web/power.json"
 # Speaker plug settings saved from the Advanced menu (override [speaker_plug] below).
 speaker_plug_file = "/var/lib/cuemix-web/speaker-plug.json"
+# OSC listen address and feedback targets saved from the Advanced menu (override [network] above).
+osc_file = "/var/lib/cuemix-web/osc.json"
+# "Show pre-releases" switch of the Version dialog; without this file, [update] channel decides.
+update_prefs_file = "/var/lib/cuemix-web/update-prefs.json"
 
 [web]
 # Use X-Forwarded-For (rightmost entry) for client IPs in logs. Enable only behind
@@ -53,14 +60,17 @@ trust_forwarded_headers = false
 allowed_origins = []
 
 [update]
-# Release channel followed by cuemix-update and the web UI's update notice:
+# Default of the "Show pre-releases" switch (Advanced menu, "Version..."), used until
+# the switch has been saved once (then update_prefs_file wins):
 #   "stable"     = published releases (vX.Y.Z)
 #   "prerelease" = the newest release, alphas/betas included (vX.Y.Z-alpha.N)
-# Nothing is installed automatically: a daily timer only checks, and an
+# Nothing is installed automatically: an hourly timer only checks, and an
 # install runs when someone presses Install in the UI or runs cuemix-update.
 channel = "stable"
 # Files shared with the root update units (deploy/systemd); defaults shown.
 status_file = "/var/lib/cuemix-web/update-status.json"
+# Written by the UI to ask for an install: empty (newest release) or one release tag.
+# The root side validates it strictly (64 bytes, vX.Y.Z[-pre]) before using it.
 request_file = "/var/lib/cuemix-web/update-request"
 result_file = "/var/lib/cuemix-web/update-result"
 

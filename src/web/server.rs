@@ -28,7 +28,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::extract::{ConnectInfo, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use futures_util::{Sink, SinkExt};
 use rust_embed::RustEmbed;
@@ -61,6 +61,8 @@ pub struct WebConfig {
     /// Extra origins (`scheme://host[:port]`) allowed to open `/ws`.
     pub allowed_origins: Vec<String>,
     pub update: crate::config::Update,
+    /// `{"show_prerelease":bool}` saved from the UI (`[storage] update_prefs_file`).
+    pub update_prefs_file: std::path::PathBuf,
 }
 
 impl WebConfig {
@@ -69,6 +71,7 @@ impl WebConfig {
             trust_forwarded_headers: cfg.web.trust_forwarded_headers,
             allowed_origins: cfg.web.allowed_origins.clone(),
             update: cfg.update.clone(),
+            update_prefs_file: cfg.storage.update_prefs_file.clone(),
         }
     }
 }
@@ -77,6 +80,8 @@ impl WebConfig {
 pub(super) struct AppState {
     pub(super) engine: EngineHandle,
     pub(super) cfg: WebConfig,
+    /// Spacing of accepted install requests.
+    pub(super) gate: std::sync::Arc<super::update::Cooldown>,
 }
 
 /// Build the router (HTTP + WebSocket).
@@ -93,10 +98,30 @@ pub fn router(engine: EngineHandle, cfg: WebConfig) -> Router {
             "/api/measure/noise.wav",
             get(crate::measure::noise::handler),
         )
-        .route("/api/update", get(super::update::status))
-        .route("/api/update/install", post(super::update::install))
+        .route(
+            "/api/update",
+            get(super::update::status)
+                .post(super::update::install)
+                .layer(DefaultBodyLimit::max(super::update::MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/update/install",
+            post(super::update::install)
+                .layer(DefaultBodyLimit::max(super::update::MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/update/prefs",
+            put(super::update::put_prefs)
+                .layer(DefaultBodyLimit::max(super::update::MAX_BODY_BYTES)),
+        )
         .fallback(get(static_handler))
-        .with_state(AppState { engine, cfg })
+        .with_state(AppState {
+            engine,
+            cfg,
+            gate: std::sync::Arc::new(super::update::Cooldown::new(
+                super::update::INSTALL_COOLDOWN,
+            )),
+        })
 }
 
 /// Serve until `shutdown` fires.
@@ -423,6 +448,7 @@ mod tests {
             trust_forwarded_headers: false,
             allowed_origins: vec!["https://Mixer.Example.com".into()],
             update: Default::default(),
+            update_prefs_file: Default::default(),
         };
         let ok = |p: &[(&'static str, &'static str)]| origin_allowed(&hm(p), &cfg);
         assert!(ok(&[("host", "pi.local:8080")]));

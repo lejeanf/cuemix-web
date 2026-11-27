@@ -28,7 +28,8 @@ Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8 (Q3) and [`d
 
 - Web UI for mixes, channel faders, pan, mute/solo, preamps (gain, +48 V, pad, phase), digital inputs, input DSP (EQ, compressor, gate), output trims and EQ (with presets such as *Voice clarity* or *Night*), reverb, control room and clock, with level meters everywhere.
 - Presets stored on the server, plus **Export to file / Import file** to keep or share every setting as one JSON file.
-- Update notice in the UI, by release channel (stable or pre-release), with a user-triggered **Install** (see [Updating](#updating)).
+- Update notice in the UI, with a user-triggered **Install**, and a **Version…** dialog to install any published release, older ones included (see [Updating](#updating)).
+- **OSC…** dialog (Advanced view, ⋯ menu): change the OSC listen address and the feedback targets live, without editing `config.toml` or restarting (see [OSC settings](#osc-settings)).
 - Bidirectional OSC over UDP `:8000` with 1-based indices (TouchOSC / QLab friendly), with feedback to every controller.
 - One state core: all changes go through a single `Param` type, are clamped, then broadcast to Web and OSC clients. The engine never echoes a change back to the client that sent it.
 - Native units in state, presets and JSON (`gain` for mix faders, `db` for main, phones and preamps). The `0..1` fader position exists only at the edges: OSC and the UI fader.
@@ -97,7 +98,7 @@ Environment overrides:
 |---|---|
 | `CUEMIX_CONFIG` | Path of the config file (step 2 above) |
 | `CUEMIX_HTTP_BIND` | `[network] http_bind` (HTTP/WebSocket listen address) |
-| `CUEMIX_OSC_LISTEN` | `[network] osc_listen` (UDP OSC listen address) |
+| `CUEMIX_OSC_LISTEN` | `[network] osc_listen` (UDP OSC listen address; a saved `osc.json` wins, see [OSC settings](#osc-settings)) |
 | `CUEMIX_MOTU_IP` | `[motu] ip` (device address; empty means auto-discovery) |
 
 Main sections of `config.example.toml`: `[network]` (listen addresses, feedback targets, MOTU interface, mDNS name), `[motu]` (device IP and WebSocket port), `[engine]` (throttle, sync policy, offline fallback), `[storage]` (presets and labels paths), `[web]` (trust of `X-Forwarded-*` headers), `[measure]` (room test, see below).
@@ -198,6 +199,14 @@ Bridge behaviour:
 - Feedback (`changed`) goes to the configured feedback targets and registered peers, **except the sender** (no echo).
 - Bundles are split at 8 KiB.
 - Not sent over OSC: `presets`, `labels`, `meters`, `status`, `session`, `error`.
+
+### OSC settings
+
+**⋯ → OSC…** in the Advanced view sets where the bridge listens and who receives feedback. Changes apply immediately and are saved to `/var/lib/cuemix-web/osc.json` (`[storage] osc_file`), which then overrides `[network] osc_listen` and `osc_feedback_targets` (and `CUEMIX_OSC_LISTEN`); delete the file to go back to `config.toml`.
+
+- **Listen**: `host:port` such as `0.0.0.0:8000`; the host is `0.0.0.0`, `::`, a loopback address or an address of this machine; the port is 1024–65535. The server binds the new socket first: if that fails (port in use, address not on this machine) the old one keeps listening and the UI shows the error. Peers that were registered by their messages are forgotten after a change of listen address and register again when they write to the new port.
+- **Targets**: up to 8 of `ip:port`, `[v6]:port` or `name:port` (port 1–65535). Every resolved address must be private, link-local or loopback (the same rule as the speaker plug). A target that is added right away receives a full state dump; one that is removed stops receiving feedback. Names are resolved when the settings are applied and at startup.
+- If the saved file is unreadable, invalid or cannot be bound at startup, the server logs a warning, uses `config.toml` and shows the reason in the OSC dialog. A target *name* that does not resolve yet (network not up at boot) does not discard the saved settings: the listen address and the other targets are kept, the reason is shown, and the name is tried again every minute (it receives a full dump once it resolves). A failed live change is shown the same way until the next one succeeds.
 - Non-finite floats (NaN, inf) are rejected before conversion. Index `0`, a non-numeric index, or an out-of-range index is rejected.
 
 Boolean inputs accept `int` (non-zero is on), `float` (`>= 0.5` is on), or `T`/`F`. Feedback sends booleans as `int` 0/1 and continuous values as `float`.
@@ -257,15 +266,19 @@ Both scripts are idempotent: an existing `config.toml` is never overwritten. The
 
 Updates are never automatic. The running version is shown at the bottom right of the web UI and by `cuemix-web --version`. Release notes: [GitHub Releases](https://github.com/lejeanf/cuemix-web/releases) and [`CHANGELOG.md`](CHANGELOG.md).
 
-**From the web UI.** The setup scripts install two small root systemd units next to the service. `cuemix-update-check.timer` checks GitHub every hour and writes the result to `/var/lib/cuemix-web/update-status.json`. When a newer release exists in the configured channel, the Advanced view shows **vX available** next to the version (the page re-reads the result every 10 minutes and on reconnect; `pct exec <CTID> -- systemctl start cuemix-update-check.service` checks right away), with the release notes and an **Install** button. Pressing it only creates `/var/lib/cuemix-web/update-request`; `cuemix-update-request.path` sees that file and runs `cuemix-update` as root, with every safety check below, and the page reconnects to the new version. The web service itself stays unprivileged and never downloads anything.
+**From the web UI.** The setup scripts install two small root systemd units next to the service. `cuemix-update-check.timer` checks GitHub every hour and writes the result, with the list of the newest releases, to `/var/lib/cuemix-web/update-status.json`. When a newer release exists, the Advanced view shows **vX available** next to the version (the page re-reads the result every 10 minutes and on reconnect; `pct exec <CTID> -- systemctl start cuemix-update-check.service` checks right away), with the release notes and an **Install** button. Pressing it only writes `/var/lib/cuemix-web/update-request` (empty, or one release tag); `cuemix-update-request.path` sees that file and runs `cuemix-update --run-request` as root, with every safety check below, and the page reconnects to the new version. The web service itself stays unprivileged and never downloads anything.
 
-**Channels** are chosen in `config.toml`, not in the UI (anyone who can open the UI could otherwise switch a device to pre-releases):
+**Choosing a version.** **⋯ → Version…** lists the releases (pre-releases only when the switch is on), marks the installed and the latest one, and has an **Install** button per row. Installing an older release is allowed and goes through the same checks (sha256, health check, automatic rollback); the UI warns that settings added after that version (for example the speaker plug) stop working until you update again. The request file is treated as untrusted input by the root side: read once, at most 64 bytes, one tag matching `vX.Y.Z[-pre]` (v0.5.0 or newer) or nothing, never passed through a shell, and the web service only writes tags found in the status file's release list. A second install within 30 s of the first is refused (429).
+
+**Pre-releases** are a switch in the Version dialog, saved server-side in `/var/lib/cuemix-web/update-prefs.json` (`[storage] update_prefs_file`). It affects only what the UI offers (the update notice and the list); the root-side updater never reads it, and an install request always names its tag. Nothing is installed without a click. Until the switch has been saved once, `[update] channel` gives its default:
 
 ```toml
 [update]
 channel = "stable"        # published releases (vX.Y.Z)
 # channel = "prerelease"  # newest release, alphas/betas included (vX.Y.Z-alpha.N)
 ```
+
+**Existing installs need one refresh.** The in-app updater replaces the binary only; `cuemix-update` and the systemd units are installed by the setup scripts. After updating from 0.6.x to 0.7.0 through the UI, the version list stays hidden (the UI keeps its plain **Install**) until you refresh them once: Proxmox VE, on the host, `sudo deploy/proxmox-setup.sh --update`; Raspberry Pi / Linux, in your checkout, `sudo deploy/linux-setup.sh --refresh-updater`.
 
 **From a shell.** **Raspberry Pi / Linux** (installed by `linux-setup.sh`):
 

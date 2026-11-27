@@ -14,6 +14,7 @@ use anyhow::Context;
 use rosc::{OscBundle, OscMessage, OscPacket, OscTime};
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use crate::engine::{EngineHandle, Envelope, Origin, Shutdown};
@@ -156,10 +157,31 @@ struct Link {
     power: Option<(ChannelPower, ChannelPower)>,
 }
 
+/// What the engine asks of a running bridge: new (already checked and resolved) settings.
+#[derive(Debug)]
+pub struct OscApply {
+    pub listen: SocketAddr,
+    pub targets: Vec<SocketAddr>,
+    /// What came of it. An `error` leaves the bridge as it was (the old socket keeps listening).
+    pub reply: oneshot::Sender<ApplyOutcome>,
+}
+
+/// The bridge's answer to an [`OscApply`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplyOutcome {
+    /// A real socket is bound (false only when an old socket could not be taken back).
+    pub listening: bool,
+    pub error: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct OscBridge {
     socket: UdpSocket,
+    /// The address `socket` was asked to bind (a port of 0 stays 0 here).
+    listen: SocketAddr,
     targets: Vec<SocketAddr>,
+    /// `socket` is a placeholder: the old address could not be taken back after a failed move.
+    degraded: bool,
 }
 
 impl OscBridge {
@@ -172,7 +194,9 @@ impl OscBridge {
             .with_context(|| format!("cannot bind OSC socket on {listen}"))?;
         Ok(Self {
             socket,
+            listen,
             targets: feedback_targets,
+            degraded: false,
         })
     }
 
@@ -180,9 +204,13 @@ impl OscBridge {
         self.socket.local_addr()
     }
 
-    pub async fn run(self, engine: EngineHandle, mut shutdown: Shutdown) -> anyhow::Result<()> {
+    pub async fn run(mut self, engine: EngineHandle, mut shutdown: Shutdown) -> anyhow::Result<()> {
         // Subscribe before anything else so no event is missed.
         let mut events = engine.subscribe();
+        let (ctl_tx, mut ctl) = mpsc::channel::<OscApply>(2);
+        if engine.osc_attach(ctl_tx).await.is_err() {
+            return Ok(());
+        }
         let mut link = Link::default();
         if let Ok(initial) = engine.initial_events().await {
             link.power = initial.iter().find_map(power_of);
@@ -230,10 +258,101 @@ impl OscBridge {
                     }
                 }
                 _ = tick.tick() => link.peers.expire(Instant::now()),
+                Some(apply) = ctl.recv() => {
+                    let result = self.apply(apply.listen, apply.targets, &mut link, &engine).await;
+                    let _ = apply.reply.send(result);
+                }
             }
         }
         tracing::debug!("OSC bridge stopped");
         Ok(())
+    }
+
+    /// Live change of the settings: rebind first (the old socket stays when that fails), then
+    /// swap the targets and send a full dump to the ones that are new.
+    async fn apply(
+        &mut self,
+        listen: SocketAddr,
+        targets: Vec<SocketAddr>,
+        link: &mut Link,
+        engine: &EngineHandle,
+    ) -> ApplyOutcome {
+        if listen != self.listen || self.degraded {
+            if let Err(error) = self.rebind(listen).await {
+                return ApplyOutcome {
+                    listening: !self.degraded,
+                    error: Some(error),
+                };
+            }
+            // Peers learned the old port; they enrol again when they send to the new one.
+            link.peers.seen.clear();
+            link.dumps.pending.clear();
+            tracing::info!(addr = ?self.socket.local_addr().ok(), "OSC bridge rebound");
+        }
+        let added: Vec<SocketAddr> = targets
+            .iter()
+            .filter(|t| !self.targets.contains(t))
+            .copied()
+            .collect();
+        self.targets = targets;
+        if !added.is_empty() {
+            if let Some((dump, power)) = Self::dump(engine).await {
+                link.power = power.or(link.power);
+                for to in added {
+                    self.send_all(&dump, to).await;
+                }
+            }
+        }
+        ApplyOutcome {
+            listening: true,
+            error: None,
+        }
+    }
+
+    /// Bind `listen`, then switch to it. Binding the new socket first keeps the old one when
+    /// the new one fails. The exception is a socket on the same port (for example
+    /// `0.0.0.0:8000` to `127.0.0.1:8000`), which the system refuses while the old one is
+    /// open: it is released for the attempt and taken back if that fails too.
+    async fn rebind(&mut self, listen: SocketAddr) -> Result<(), String> {
+        let fail = |e: std::io::Error| format!("cannot listen on {listen}: {e}");
+        match UdpSocket::bind(listen).await {
+            Ok(socket) => {
+                self.socket = socket;
+                self.listen = listen;
+                self.degraded = false;
+                Ok(())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && !self.degraded => {
+                let same_port = self
+                    .socket
+                    .local_addr()
+                    .is_ok_and(|a| a.port() == listen.port());
+                if !same_port {
+                    return Err(fail(e));
+                }
+                let placeholder = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+                    .await
+                    .map_err(fail)?;
+                drop(std::mem::replace(&mut self.socket, placeholder));
+                match UdpSocket::bind(listen).await {
+                    Ok(socket) => {
+                        self.socket = socket;
+                        self.listen = listen;
+                        self.degraded = false;
+                        Ok(())
+                    }
+                    Err(e) => {
+                        match UdpSocket::bind(self.listen).await {
+                            Ok(old) => self.socket = old,
+                            // Only the placeholder is left: not listening on anything useful.
+                            Err(_) => self.degraded = true,
+                        }
+                        Err(fail(e))
+                    }
+                }
+            }
+            Err(e) => Err(fail(e)),
+        }
     }
 
     /// Handle one datagram; returns `false` when the engine is gone.
@@ -360,6 +479,13 @@ impl OscBridge {
     }
 
     async fn send_all(&self, datagrams: &[Vec<u8>], to: SocketAddr) {
+        // An IPv6 socket reaches an IPv4 target through its IPv4-mapped form.
+        let to = match (self.socket.local_addr(), to) {
+            (Ok(local), SocketAddr::V4(v4)) if local.is_ipv6() => {
+                SocketAddr::new(v4.ip().to_ipv6_mapped().into(), v4.port())
+            }
+            _ => to,
+        };
         for d in datagrams {
             if let Err(e) = self.socket.send_to(d, to).await {
                 tracing::debug!(%to, error = %e, "OSC send failed");

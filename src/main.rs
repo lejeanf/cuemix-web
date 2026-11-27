@@ -11,7 +11,7 @@ use cuemix_web::config::Config;
 use cuemix_web::engine::{self, EngineConfig};
 use cuemix_web::measure;
 use cuemix_web::motu::client::{self, ClientConfig};
-use cuemix_web::osc::bridge::OscBridge;
+use cuemix_web::osc::settings::start_bridge;
 use cuemix_web::state::Topology;
 use cuemix_web::web::server::{self, WebConfig};
 use cuemix_web::zeroconf;
@@ -85,6 +85,8 @@ async fn main() -> Result<()> {
     }
 
     let topology = Topology::default();
+    // OSC first: the saved settings (osc.json) decide what the engine reports.
+    let osc = start_bridge(&config.storage.osc_file, &config.network).await?;
     let (engine, link, engine_task) = engine::start(EngineConfig {
         topology,
         presets_dir: config.storage.presets_dir.clone(),
@@ -92,19 +94,20 @@ async fn main() -> Result<()> {
         power_file: config.storage.power_file.clone(),
         speaker_plug_file: config.storage.speaker_plug_file.clone(),
         speaker_plug: config.speaker_plug.clone(),
+        osc_file: config.storage.osc_file.clone(),
+        osc: osc.settings.clone(),
+        osc_error: osc.error.clone(),
+        osc_unresolved: osc.unresolved.clone(),
+        osc_retry_every: Duration::from_secs(60),
     })
     .await;
     let (trigger, shutdown) = engine::shutdown_channel();
+    let osc_listen = osc.settings.listen.clone();
 
     // Bind sockets first so configuration errors fail fast.
     let listener = tokio::net::TcpListener::bind(config.network.http_bind)
         .await
         .with_context(|| format!("cannot bind HTTP on {}", config.network.http_bind))?;
-    let osc = OscBridge::bind(
-        config.network.osc_listen,
-        config.network.osc_feedback_targets.clone(),
-    )
-    .await?;
 
     let mut tasks = tokio::task::JoinSet::new();
     tasks.spawn(client::run(
@@ -115,7 +118,7 @@ async fn main() -> Result<()> {
     {
         let (engine, shutdown) = (engine.clone(), shutdown.clone());
         tasks.spawn(async move {
-            if let Err(e) = osc.run(engine, shutdown).await {
+            if let Err(e) = osc.bridge.run(engine, shutdown).await {
                 tracing::error!(error = %e, "OSC bridge stopped");
             }
         });
@@ -148,7 +151,7 @@ async fn main() -> Result<()> {
 
     tracing::info!(
         http = %config.network.http_bind,
-        osc = %config.network.osc_listen,
+        osc = %osc_listen,
         "cuemix-web {} running",
         env!("CARGO_PKG_VERSION")
     );
