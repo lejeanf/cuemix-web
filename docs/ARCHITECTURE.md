@@ -7,7 +7,7 @@
 
 | | |
 |---|---|
-| Version du contrat | `0.3.0` + non publié (0.6.0 : `power`, prise enceintes, `/api/v1`, D29 ; 0.7.0 : réglages OSC en direct `set_osc_settings` / `osc_settings`, choix de version à installer, D30) : DSP / réverbe / horloge à la forme du matériel, lus sur la MOTU (présets schema v2, D19–D23) |
+| Version du contrat | `0.3.0` + non publié (0.6.0 : `power`, prise enceintes, `/api/v1`, D29 ; 0.7.0 : réglages OSC en direct `set_osc_settings` / `osc_settings`, choix de version à installer, D30 ; 0.8.0 : `return_db` et `set_return_level`, `rename_preset` / `delete_preset` / `set_preset_in_simple`, champ `hidden` de l'événement `presets`, D34) : DSP / réverbe / horloge à la forme du matériel, lus sur la MOTU (présets schema v2, D19–D23) |
 | MSRV | Rust `1.85`, édition 2021 (relevée depuis 1.80, décision D18) |
 | Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` (embarqué via `rust-embed`) |
 
@@ -242,6 +242,9 @@ Client → serveur (`Command`, tag `cmd`) :
 {"cmd":"save_preset","name":"live"}
 {"cmd":"import_preset","name":"from file","text":"{\"schema_version\":2,\"state\":{…}}"}
 {"cmd":"list_presets"}
+{"cmd":"delete_preset","name":"old"}
+{"cmd":"rename_preset","name":"live","to":"live 2"}
+{"cmd":"set_preset_in_simple","name":"studio","show":false}
 {"cmd":"set_label","ch":2,"label":{"name":"Vox","color":"#06B6D4"}}
 {"cmd":"measure_start"}
 {"cmd":"measure_stop"}
@@ -259,7 +262,7 @@ Serveur → client (`ServerEvent`, tag `event`) — à la connexion : `snapshot`
 {"event":"changed","params":[{"param":"dim","on":true}]}
 {"event":"status","connection":"online"}
 {"event":"session","active_preset":"live","modified":true,"connection":"online","device":{"model":"UL5E","firmware":"2.0.8+2568","topology":{…},"input_names":["Mic 1",…],"mix_names":["Main 1-2",…],"stereo_inputs":[…],"stereo_buses":[…]}}
-{"event":"presets","names":["default","live"]}
+{"event":"presets","names":["default","live","studio"],"hidden":["studio"]}
 {"event":"labels","channels":{"2":{"name":"Vox","color":"#06B6D4"}}}
 {"event":"meters","levels":[0.0,0.12,…]}
 {"event":"measure","state":"playing","source":[6,7],"until":"2026-11-16T20:15:30Z"}
@@ -611,23 +614,16 @@ Trois acteurs, chacun avec ses droits :
 | D31 | **Plancher de version** (0.7.2) : ni l'interface ni la racine n'installent une release plus ancienne que la dernière qui corrige une faille ou un bug grave (`v0.7.2`, relevable par l'asset `min-version` de la dernière release) ; seul root, en ligne de commande, peut passer outre (`cuemix-update --version vX --force`). Restreint D30 (« y compris plus ancienne ») | Sans plancher, n'importe quel client du réseau (ou une page piégée) pouvait réinstaller une version vulnérable ; le retour arrière rapide reste possible entre versions saines |
 | D32 | **Releases signées (minisign, 0.7.2)** : chaque fichier publié (`.tar.gz`, `.deb`, `min-version`) est signé par un job `sign` séparé, dans l'environnement GitHub protégé `release` (relecteur obligatoire, tags `v*`), qui n'exécute aucun code de build tiers et seul lit `MINISIGN_SECRET_KEY` / `MINISIGN_PASSWORD`. Le commentaire de confiance de chaque signature est `cuemix-web <nom du fichier>` ; le job vérifie tout contre `deploy/minisign.pub` avant publication. `cuemix-update` (clé épinglée `MINISIGN_PUBKEY`, égale à `deploy/minisign.pub`, vérifié par la CI), `linux-setup.sh` et le script de provisionnement Proxmox (clé passée par l'hôte) refusent tout fichier dont la signature est absente, invalide, d'une autre clé ou nomme un autre fichier ; `minisign` tourne sans privilèges. `min-version` non signé : ignoré (plancher intégré). Le sha256 reste vérifié | Le sha256 venait de la même release que le binaire : quiconque pouvait modifier une release (jeton volé, dépendance de build compromise) pouvait modifier les deux. Clé hors des jobs de build, approbation humaine à chaque release ; attestations GitHub écartées (un outil de plus dans le conteneur, dépendance à Sigstore) |
 | D33 | **Jeton admin facultatif** (0.7.2, désactivé par défaut) : `[web] admin_token = "auto"` génère un jeton (fichier 0600) et journalise une fois un lien d'appairage ; `cuemix-web --pair-link` le réaffiche (root). Un appareil appairé (cookie `HttpOnly`, `SameSite=Strict`, ou `Authorization: Bearer`) seul peut : installer une release, changer l'interrupteur des pré-versions (`/api/update*` → 401 sinon), `set_speaker_plug`, `test_speaker_plug`, `set_osc_settings` (erreur au seul client sinon). Le droit d'un WebSocket est fixé à l'ouverture ; l'interface rouvre sa connexion après l'appairage. Faders, présets, marche/arrêt restent ouverts. Révocation : supprimer le fichier et redémarrer | Le réseau domestique compte aussi des invités et des objets connectés : ce qui change le logiciel installé ou les cibles réseau du serveur ne doit pas leur être ouvert, sans imposer une connexion à chaque musicien. Le jeton est dans le fragment de l'URL, jamais dans un journal ni un `Referer` |
+| D34 | **Gestion des présets depuis l'interface** : `delete_preset`, `rename_preset` (refusé si le nouveau nom existe : rien n'est jamais écrasé ; le préset est réécrit sous le nouveau nom, champ `name` compris, puis l'ancien fichier est supprimé) et `set_preset_in_simple`. La liste des présets masqués dans la vue Simple est dans `<presets_dir>/.simple-view.json` (`{"hidden_in_simple":[…]}`), sans nouvelle clé de configuration ; aucun nom de préset ne peut commencer par `.`, donc ce fichier n'apparaît jamais dans la liste. L'événement `presets` porte `hidden` (sous-ensemble de `names`, absent des serveurs antérieurs) ; supprimer le préset actif efface `active_preset` (le son ne change pas), le renommer suit le nouveau nom ; le drapeau suit un renommage et disparaît avec une suppression | Le foyer ne voit dans la vue Simple que les présets utiles ; un fichier à part garde les présets eux-mêmes inchangés (compatibles avec les versions antérieures et avec l'export/import) |
 
 ### Application écran d'accueil (iOS)
 
 - `frontend/public/` (copié tel quel dans `dist/`, donc embarqué par `rust-embed`) : `manifest.json` (`display: standalone`, `start_url: "./?simple"`, `scope: "./"`, couleurs `#121214`), icônes 192/512/maskable, `apple-touch-icon.png`, `icon.svg` (favicon). Tout est en URL **relative** (compatible sous-chemin de reverse proxy). Extension `.json` pour un `Content-Type` sûr côté `rust-embed`. Les icônes sont produites par `frontend/scripts/gen-icons.mjs` (Node seul, sans dépendance), qui régénère aussi `icon.svg`.
 - Zones sûres : `viewport-fit=cover` + barre d'état `black-translucent` ; `env(safe-area-inset-*)` (repli `0px`, donc bureau inchangé) sur TopBar (haut, côtés), vue Simple et ControlRoom (bas), bandeau hors-ligne, toasts, tiroir DSP, RoomTest.
-- `?simple` force la vue Simple pour ce chargement sans l'écrire dans `localStorage` ; priorité : `?simple` > `localStorage` > largeur d'écran. `?embed` seul (réservé à la future vue web de l'app native, où Simple est natif) ouvre la vue Avancée pour ce chargement (non sauvegardée) et masque le bouton Simple/Avancé et le point d'état ; `?embed&simple` ouvre Simple. Logique pure dans `frontend/src/lib/launch.ts`.
+- `?simple` force la vue Simple pour ce chargement sans l'écrire dans `localStorage` ; priorité : `?simple` > `localStorage` > largeur d'écran. `?embed` seul (réservé à la future vue web de l'app native, où Simple est natif) ouvre la vue Avancée pour ce chargement (non sauvegardée) et masque le bouton Simple/Avancé, le point d'état et la barre d'onglets du bas ; `?embed&simple` ouvre Simple. Logique pure dans `frontend/src/lib/launch.ts`.
 - Au retour de veille (`visibilitychange` visible, `pageshow` persisté), `store.reconnectNow()` rouvre la WebSocket immédiatement si elle n'est ni ouverte ni en cours de connexion (une seule tentative à la fois, backoff remis à zéro pour afficher « connexion » et non « hors ligne »). Si la socket paraît ouverte mais que la session est `online`/`demo` (mètres ≈ 30/s) et qu'aucun message n'arrive dans les 2 s suivant le retour au premier plan, elle est détachée sans attendre la fermeture et une nouvelle connexion est ouverte aussitôt. `manifest.json` porte `id: "./"` ; `theme_color` = couleur de la TopBar (`#16181d`), `background_color` = `#121214`.
 
-### Vue Simple : affinages de la revue UX (non publié)
-
-- Courbe des boutons de volume (Monitor, Phones ; vue Simple et vue Sortie) : `volKnobToNorm` / `volKnobFromNorm` (`frontend/src/lib/fader.ts`), c'est-à-dire la loi « trim » des curseurs étirée pour que le plancher (−100 dB) soit au début de l'arc. Vecteurs partagés avec l'app iOS : `design/vectors/volume-knob.json` (vérifiés par vitest). Flèches, molette et lecteur d'écran : pas exact de 1 dB (prop `keyStep` de `Knob.svelte`, avec `curve`).
-- Boutons marche/arrêt : pendant un fondu, couleur de l'état visé et barre animée (immobile avec `prefers-reduced-motion`) ; préchauffage de la prise en ambre avec compte à rebours calculé côté client depuis `warmup_ms` des réglages de la prise et l'instant où l'état `warming` arrive. Sous un canal éteint, « returns to −18 dB » vient du champ `return_db` de l'événement `power` (ligne réservée, pour que le bouton ne bouge pas). Tant que le canal est éteint, son bouton rotatif règle ce niveau de retour au lieu du volume (aiguille et arc gris ; commande `set_return_level`, entiers −99..0 dB, ignorée si le canal est allumé ou en fondu d'entrée ; le serveur le garde dans `power.json` même en démo, car c'est un choix explicite, contrairement au niveau mémorisé à l'arrêt). Option « Keep screen on » (verrou d'écran `navigator.wakeLock`, redemandé à chaque retour au premier plan ; par navigateur, désactivée par défaut, `frontend/src/lib/wakelock.ts`).
-- Canal éteint : « Off » au lieu du plancher sous le bouton (et dans `aria-valuetext`).
-- Présets en vue Simple : ligne « Preset » (préset courant, « ● Modified ») qui ouvre `PresetPicker.svelte` (fenêtre `Dialog`, un bouton Load par préset) ; `store.presetsOpen` compte dans `panelOpen`.
-- Mètres (`meters.ts`) : graduations à −40/−18/−6 dBFS, repère d'écrêtage rouge mémorisé dès qu'une trame atteint ≈ −0,3 dBFS, effacé d'un toucher sur le mètre (les mètres ne servent plus de surface de glissement du bouton).
-
-### Interface : corrections rapides de la revue UX (non publié)
+### Interface : corrections rapides de la revue UX (0.8.0)
 
 - En-tête : commutateur à deux boutons **Simple | Avancé** (`aria-pressed` sur la vue courante, icônes sous 640 px) ; en vue Simple un espaceur pousse les boutons à droite comme en vue Avancée.
 - Mode démo : pastille ambre « Demo » toujours visible (nom accessible « Demo — no MOTU ») ; le rouge reste réservé aux erreurs.
@@ -635,12 +631,33 @@ Trois acteurs, chacun avec ses droits :
 - L'onglet suit le fragment d'URL aussi après le chargement (`hashchange`, `tabFromHash` dans `ui.ts`).
 - Sous 640 px, le panneau Présets est fixé aux deux bords de l'écran (il débordait de 121 px à 375 px) ; les cartes de la vue Entrée se partagent chaque ligne.
 
-### Vue Avancée : disposition (revue UX, non publié)
+### Vue Simple : affinages de la revue UX (0.8.0)
+
+- Courbe des boutons de volume (Monitor, Phones ; vue Simple et vue Sortie) : `volKnobToNorm` / `volKnobFromNorm` (`frontend/src/lib/fader.ts`), c'est-à-dire la loi « trim » des curseurs étirée pour que le plancher (−100 dB) soit au début de l'arc. Vecteurs partagés avec l'app iOS : `design/vectors/volume-knob.json` (vérifiés par vitest). Flèches, molette et lecteur d'écran : pas exact de 1 dB (prop `keyStep` de `Knob.svelte`, avec `curve`).
+- Boutons marche/arrêt : pendant un fondu, couleur de l'état visé et barre animée (immobile avec `prefers-reduced-motion`) ; préchauffage de la prise en ambre avec compte à rebours calculé côté client depuis `warmup_ms` des réglages de la prise et l'instant où l'état `warming` arrive. Sous un canal éteint, « returns to −18 dB » vient du champ `return_db` de l'événement `power` (ligne réservée, pour que le bouton ne bouge pas). Tant que le canal est éteint, son bouton rotatif règle ce niveau de retour au lieu du volume (aiguille et arc gris ; commande `set_return_level`, entiers −99..0 dB, ignorée si le canal est allumé ou en fondu d'entrée ; le serveur le garde dans `power.json` même en démo, car c'est un choix explicite, contrairement au niveau mémorisé à l'arrêt). Option « Keep screen on » (verrou d'écran `navigator.wakeLock`, redemandé à chaque retour au premier plan ; par navigateur, désactivée par défaut, `frontend/src/lib/wakelock.ts`).
+- Canal éteint : « Off » au lieu du plancher sous le bouton (et dans `aria-valuetext`).
+- Présets en vue Simple : ligne « Preset » (préset courant, « ● Modified ») qui ouvre `PresetPicker.svelte` (fenêtre `Dialog`, un bouton Load par préset, seulement les présets absents de `hidden`, voir D34) ; `store.presetsOpen` compte dans `panelOpen`.
+- Mètres (`meters.ts`) : graduations à −40/−18/−6 dBFS, repère d'écrêtage rouge mémorisé dès qu'une trame atteint ≈ −0,3 dBFS, effacé d'un toucher sur le mètre (les mètres ne servent plus de surface de glissement du bouton).
+
+### Vue Avancée : disposition (revue UX, 0.8.0)
 
 - Téléphones (≤ 640 px) : barre d'onglets en bas (`.bnav` dans `App.svelte`, icônes + libellés, même ordre et mêmes noms que l'app iOS, Q11) ; l'en-tête garde une seule ligne (`TopBar` prop `phoneTabs`). Avec `?embed`, pas de barre du bas : les onglets restent dans l'en-tête et l'app native fournit sa barre.
 - Barre Control Room : Monitor et Phones ont chacun un bouton marche/arrêt (commande `power`, état `powerView`) ; sur téléphone, lignes de 40 px et boutons DIM/MONO/A-B/Talkback repliés derrière ⋯. Le niveau principal s'appelle « Monitor » partout ; plus de remise à 0 dB par double-clic sur ce curseur (un volume ne doit jamais sauter vers le haut).
 - Mixer : tranches groupées (`frontend/src/lib/mixerGroups.ts` : Mic, Line, S/PDIF, Optical, Computer, Reverb ; blocs numériques et USB seulement pour la disposition à 32 entrées, sinon « Other ») ; graduation dB à côté du fader Monitor, calculée avec `trimDbToPos` et la géométrie du fader.
 - Téléphones : toasts sous l'en-tête.
+
+### Thème et tactile (revue UX, 0.8.0)
+
+- Toutes les couleurs de l'interface viennent des jetons de `frontend/src/app.css` (nouveaux : `--danger-bg`, `--danger-text`, `--row-active`, `--thumb-hi/lo/edge`, `--grid`, `--grid-strong`, `--axis-text`) ; restent en dur les ombres, les couleurs d'étiquette proposées à l'utilisateur et celles des bandes d'EQ (données). Les mètres (canvas) lisent `--field` et `--meter-*`, graduations (`--meter-tick`) et repère d'écrêtage (`--meter-red`) compris (`refreshMeterPalette` dans `meters.ts`).
+- Mode Nuit : `:root[data-theme='night']` redéfinit les jetons (lumières atténuées, texte ≥ 4,5:1 sur sa carte) ; bouton lune dans l'en-tête, choix par navigateur (`frontend/src/lib/theme.ts`, clé `cuemix.theme`), appliqué dans `main.ts` avant le premier rendu. Base du futur `design/tokens.json` partagé avec iOS.
+- `@media (pointer: coarse)` : cibles d'au moins 44 px de haut dans chaque composant concerné ; la souris garde la disposition dense.
+
+### Captures d'écran (`docs/images/`)
+
+- Prises en mode démo (aucune MOTU, donc mètres vides ; la légende du README le dit) sur un serveur local `127.0.0.1`, avec des présets et libellés d'exemple ; aucune adresse ni nom d'hôte réel ne doit être visible (sinon `.example` / `192.0.2.x`).
+- Bureau, vue Avancée, 1400 × 820 : `webui-mixer.png`, `webui-input.png` (recadrée sur les cartes), `webui-output.png` (préset d'EQ Loudness appliqué).
+- Téléphone, 390 × 844 à 2× : vue Simple (`simple-phone.png`), Monitor éteint avec « returns to −18 dB » (`simple-phone-off.png` ; en démo le niveau mémorisé à l'arrêt n'est pas gardé, il est fixé par `set_return_level`), liste des présets (`simple-phone-presets.png`), mode Nuit (`simple-phone-night.png`), vue Avancée avec la barre d'onglets du bas (`advanced-phone.png`).
+- Vue imposée par `localStorage` (`cuemix.view`, `cuemix.theme`) dans un navigateur sans tête ; à reprendre à chaque changement visible de l'interface.
 
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
 

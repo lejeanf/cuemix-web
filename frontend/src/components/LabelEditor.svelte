@@ -80,7 +80,7 @@
   }
   input {
     min-height: 32px;
-    background: #0d0e11;
+    background: var(--field);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 4px;

@@ -207,7 +207,7 @@
     </section>
   </div>
 
-  {#if store.c.presets.length}
+  {#if store.simplePresets.length || session.active_preset}
     <!-- Opens a list with a Load button per preset: recall is a deliberate second tap. -->
     <button class="preset" disabled={off} aria-haspopup="dialog" onclick={() => (store.presetsOpen = true)}>
       <span class="pk">{S.simple.presetRow}</span>

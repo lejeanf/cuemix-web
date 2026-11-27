@@ -17,7 +17,7 @@
 <Dialog title={S.simple.presetsTitle} titleId="simple-presets-title" onclose={close}>
   <p class="note">{S.simple.presetsNote}</p>
   <ul>
-    {#each store.c.presets as p (p)}
+    {#each store.simplePresets as p (p)}
       {@const cur = p === session.active_preset}
       <li class:cur>
         <span class="nm">{p}{#if cur}<span class="tag">{S.simple.current}{#if session.modified} · {S.modified}{/if}</span>{/if}</span>

@@ -250,7 +250,7 @@
     stroke-linecap: round;
   }
   .track {
-    stroke: #0d0e11;
+    stroke: var(--field);
     stroke-width: 4;
   }
   .arc {
