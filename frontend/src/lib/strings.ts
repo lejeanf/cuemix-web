@@ -81,6 +81,15 @@ export const S = {
   powerOff: 'Off',
   fadingIn: 'Fading in…',
   fadingOut: 'Fading out…',
+  admin: {
+    lockedTitle: 'Read-only on this device',
+    locked:
+      'Installs and the speaker plug and OSC settings need this device to be paired. On the server, as root, run "cuemix-web --config /etc/cuemix-web/config.toml --pair-link" and open the link here.',
+    paired: 'This device is now paired: it can install updates and change these settings.',
+    pairedNote: 'Paired as admin on this device.',
+    pairFailed: (status: number) => (status === 403 ? 'Pairing failed: the link is not valid (any more).' : 'Pairing failed: the server did not answer.'),
+    unpair: 'Unpair this device',
+  },
   advanced: {
     title: 'Advanced settings',
     tabsLabel: 'Settings sections',

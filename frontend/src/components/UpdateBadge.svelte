@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { store } from '../lib/store.svelte';
   import { updates } from '../lib/updates.svelte';
+  import { admin } from '../lib/admin.svelte';
   import { S } from '../lib/strings';
   import { classicLatest, failedResult } from '../lib/update';
 
@@ -66,7 +67,7 @@
         {/if}
         {#if available}
           <p class="dim">{S.update.restartNote}</p>
-          <button class="go" disabled={inProgress} onclick={install}>{inProgress ? S.update.installingVersion(null) : S.update.installBtn(latest ?? '')}</button>
+          <button class="go" disabled={inProgress || admin.locked} title={admin.locked ? S.admin.locked : undefined} onclick={install}>{inProgress ? S.update.installingVersion(null) : S.update.installBtn(latest ?? '')}</button>
         {/if}
         {#if message}<p class="dim">{message}</p>{/if}
       </div>

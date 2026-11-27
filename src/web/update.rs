@@ -434,6 +434,9 @@ pub(super) async fn put_prefs(
     if !headers.contains_key(INSTALL_HEADER) {
         return (StatusCode::FORBIDDEN, "missing x-cuemix-update header").into_response();
     }
+    if !super::admin::is_admin(&headers, &app.cfg) {
+        return (StatusCode::UNAUTHORIZED, super::admin::NOT_PAIRED).into_response();
+    }
     // Same order as `body.rs`: size, then content type (the rest is in `save_prefs`).
     if body.len() > MAX_BODY_BYTES {
         return (StatusCode::PAYLOAD_TOO_LARGE, "body is too large").into_response();
@@ -578,6 +581,9 @@ pub(super) async fn install(
     }
     if !headers.contains_key(INSTALL_HEADER) {
         return (StatusCode::FORBIDDEN, "missing x-cuemix-update header").into_response();
+    }
+    if !super::admin::is_admin(&headers, &app.cfg) {
+        return (StatusCode::UNAUTHORIZED, super::admin::NOT_PAIRED).into_response();
     }
     // No body is fine (newest of the channel); a body must say it is JSON (size is checked first).
     if body.len() > MAX_BODY_BYTES {
