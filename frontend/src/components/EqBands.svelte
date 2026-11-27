@@ -159,7 +159,7 @@
     min-width: 0;
     min-height: 24px;
     padding: 0 4px;
-    background: #0d0e11;
+    background: var(--field);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -225,5 +225,22 @@
   button:disabled,
   input:disabled {
     cursor: not-allowed;
+  }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .ty {
+      width: 40px;
+      height: 40px;
+    }
+    .f input {
+      min-height: 40px;
+    }
+    .pw {
+      width: 40px;
+      height: 40px;
+    }
+    .rows .band {
+      grid-template-columns: 40px repeat(3, minmax(0, 1fr)) 132px;
+    }
   }
 </style>

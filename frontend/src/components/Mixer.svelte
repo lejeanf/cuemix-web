@@ -122,7 +122,7 @@
   .buses button.sel {
     background: var(--cyan);
     border-color: var(--cyan);
-    color: #111;
+    color: var(--on-accent);
     font-weight: 600;
   }
   .row {
@@ -213,6 +213,12 @@
     .scale {
       width: 18px;
       font-size: 9px;
+    }
+  }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .buses button {
+      min-height: 44px;
     }
   }
 </style>

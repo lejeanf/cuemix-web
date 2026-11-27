@@ -198,8 +198,8 @@
   .offline {
     flex: none;
     padding: 6px max(14px, env(safe-area-inset-right, 0px)) 6px max(14px, env(safe-area-inset-left, 0px));
-    background: #3b1212;
-    color: #fecaca;
+    background: var(--danger-bg);
+    color: var(--danger-text);
     font-size: 13px;
   }
   .view {
@@ -242,8 +242,8 @@
     gap: 10px;
     text-align: left;
     padding: 10px 14px;
-    background: #3b1212;
-    color: #fecaca;
+    background: var(--danger-bg);
+    color: var(--danger-text);
     border: 1px solid var(--red);
     border-radius: var(--radius);
     cursor: pointer;

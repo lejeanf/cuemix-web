@@ -131,7 +131,7 @@
 
 <svelte:window onpointerdown={outside} onkeydown={key} />
 
-<header class="top" bind:this={root}>
+<header class="top" class:adv={!store.simple} bind:this={root}>
   <span class="brand">{S.appName}</span>
   {#if !store.simple}<nav class="tabs" class:wideonly={!phoneTabs}>{@render children?.()}</nav>{:else}<span class="grow"></span>{/if}
 
@@ -227,6 +227,9 @@
   </div>
   {/if}
 
+  <button class="btn moon" aria-pressed={store.theme === 'night'} aria-label={S.night.label} title={store.theme === 'night' ? S.night.on : S.night.off} onclick={() => store.setTheme(store.theme === 'night' ? 'dark' : 'night')}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>
+  </button>
   <button class="btn more" data-more-menu bind:this={moreBtn} aria-haspopup="dialog" aria-expanded={store.advancedOpen} aria-label={S.advanced.title} title={S.advanced.title} onclick={() => store.openAdvanced()}>⋯</button>
 
   {#if !store.embed}
@@ -293,6 +296,23 @@
     border-radius: 6px;
     cursor: pointer;
   }
+  .btn.moon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    padding: 0 7px;
+    color: var(--text-dim);
+  }
+  .btn.moon[aria-pressed='true'] {
+    color: var(--amber);
+    border-color: var(--amber);
+  }
+  .btn.moon svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+  }
   .btn.more {
     min-width: 34px;
     padding: 0 8px;
@@ -340,7 +360,7 @@
   select,
   input[type='text'] {
     min-height: 34px;
-    background: #0d0e11;
+    background: var(--field);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -370,7 +390,7 @@
     border-radius: 4px;
   }
   li.active {
-    background: #232733;
+    background: var(--row-active);
   }
   li {
     flex-wrap: wrap;
@@ -625,7 +645,7 @@
       text-overflow: ellipsis;
     }
     .btn {
-      max-width: 120px;
+      max-width: 100px;
     }
     .grow {
       display: none;
@@ -653,6 +673,30 @@
       width: auto;
       max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 66px);
       overflow-y: auto;
+    }
+  }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .btn,
+    .segb,
+    .status {
+      min-height: 44px;
+    }
+    .btn.more,
+    .btn.moon,
+    .status {
+      min-width: 44px;
+    }
+    .ic {
+      width: 44px;
+      height: 44px;
+    }
+  }
+  /* Narrow phones, Advanced view: the buttons need the room, so the name gives way entirely
+     (it still takes the free space, keeping the buttons on the right). */
+  @media (max-width: 420px) {
+    .top.adv .brand {
+      font-size: 0;
     }
   }
 </style>
