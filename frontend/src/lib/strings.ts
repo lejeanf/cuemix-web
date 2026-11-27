@@ -13,8 +13,7 @@ export const S = {
   /** Short status label, always shown in demo mode (the full text is its accessible name). */
   demoShort: 'Demo',
   dismiss: 'Tap to dismiss',
-  night: { on: 'Night mode: on', off: 'Night mode: off', label: 'Night mode (dimmer screen)' },
-  view: { label: 'View', simple: 'Simple', advanced: 'Advanced', simpleHint: 'Volume remote for phones', advancedHint: 'Every control' },
+  view: { simple: 'Simple', advanced: 'Advanced', toSimple: 'Switch to the Simple view', toAdvanced: 'Switch to the Advanced view', simpleHint: 'Volume remote for phones', advancedHint: 'Every control' },
   offlineBanner: 'Offline — reconnecting…',
   tabs: { mixer: 'Mixer', input: 'Input', output: 'Output', reverb: 'Reverb', probe: 'Meter probe' },
   monitoring: 'Monitoring',

@@ -123,7 +123,7 @@ class MeterBank {
   }
 }
 
-/** Meter colours, from the theme tokens (app.css); refreshed when the theme changes. */
+/** Meter colours, from the tokens in app.css (read once at start-up). */
 interface Palette {
   track: string;
   green: string;
@@ -136,11 +136,11 @@ const FALLBACK: Palette = {
   green: '#10B981',
   yellow: '#EAB308',
   red: '#EF4444',
-  tick: 'rgba(255, 255, 255, 0.22)',
+  tick: 'rgba(191, 195, 202, 0.22)',
 };
 let palette: Palette = FALLBACK;
 
-/** Reads the meter colours from the page's CSS variables (call after a theme change). */
+/** Reads the meter colours from the page's CSS variables. */
 export function refreshMeterPalette(): void {
   if (typeof document === 'undefined') return;
   const cs = getComputedStyle(document.documentElement);
