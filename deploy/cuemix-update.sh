@@ -53,7 +53,7 @@ FLOOR=""
 # signature's trusted comment names the file ("cuemix-web <file name>"), so a signed file
 # cannot be passed off under another name, tag or architecture. Empty = this updater was built
 # without a key and refuses to install anything.
-MINISIGN_PUBKEY=""
+MINISIGN_PUBKEY="RWRZOG3ncoQ3MIA1BYQllxc2D4qv0XeyyLMmPiJjd5ksf5WpD3HLh7Jt"
 # Unprivileged account that runs a downloaded binary's --version check.
 CHECK_UID=65534
 CHECK_GID=65534
