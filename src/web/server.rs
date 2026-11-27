@@ -83,6 +83,8 @@ pub struct WebConfig {
     pub allowed_hosts: Vec<String>,
     /// `[network] mdns_hostname` (accepted bare and as `<name>.local`).
     pub mdns_hostname: String,
+    /// The admin token when `[web] admin_token = "auto"` (see [`super::admin`]); `None` = off.
+    pub admin_token: Option<super::admin::AdminToken>,
     pub update: crate::config::Update,
     /// `{"show_prerelease":bool}` saved from the UI (`[storage] update_prefs_file`).
     pub update_prefs_file: std::path::PathBuf,
@@ -95,6 +97,8 @@ impl WebConfig {
             allowed_origins: cfg.web.allowed_origins.clone(),
             allowed_hosts: cfg.web.allowed_hosts.clone(),
             mdns_hostname: cfg.network.mdns_hostname.clone(),
+            // Loaded by `main` (it may have to create the file).
+            admin_token: None,
             update: cfg.update.clone(),
             update_prefs_file: cfg.storage.update_prefs_file.clone(),
         }
@@ -190,6 +194,12 @@ pub fn router(engine: EngineHandle, cfg: WebConfig) -> Router {
             put(super::update::put_prefs)
                 .layer(DefaultBodyLimit::max(super::update::MAX_BODY_BYTES)),
         )
+        .route("/api/admin", get(super::admin::status))
+        .route(
+            "/api/admin/pair",
+            post(super::admin::pair).layer(DefaultBodyLimit::max(super::admin::MAX_BODY_BYTES)),
+        )
+        .route("/api/admin/unpair", post(super::admin::unpair))
         .fallback(get(static_handler))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -600,6 +610,8 @@ async fn ws_handler(
         return StatusCode::FORBIDDEN.into_response();
     }
     let ip = client_ip(peer, &headers, app.cfg.trust_forwarded_headers);
+    // Decided once, at the upgrade (the cookie comes with it).
+    let admin = super::admin::is_admin(&headers, &app.cfg);
     let Some(slot) = app.ws_slots.take(ip) else {
         tracing::info!(%ip, "refused websocket: too many open connections");
         return (StatusCode::SERVICE_UNAVAILABLE, "too many open connections").into_response();
@@ -609,7 +621,7 @@ async fn ws_handler(
         .on_upgrade(move |socket| async move {
             let id = app.engine.next_client_id();
             tracing::info!(client = id, %ip, "websocket connected");
-            session(socket, app.engine, Origin::Web(id)).await;
+            session(socket, app.engine, Origin::Web(id), admin).await;
             drop(slot);
             tracing::info!(client = id, %ip, "websocket disconnected");
         })
@@ -672,7 +684,9 @@ async fn send_initial(socket: &mut WebSocket, engine: &EngineHandle) -> Result<(
     Ok(())
 }
 
-async fn session(mut socket: WebSocket, engine: EngineHandle, me: Origin) {
+/// One WebSocket client. `admin`: the device is paired (or the admin token is off), so it may
+/// send the commands of [`super::admin::needs_admin`].
+async fn session(mut socket: WebSocket, engine: EngineHandle, me: Origin, admin: bool) {
     // Subscribe before the snapshot so nothing is missed in between.
     let mut rx = engine.subscribe();
     if send_initial(&mut socket, &engine).await.is_err() {
@@ -688,6 +702,12 @@ async fn session(mut socket: WebSocket, engine: EngineHandle, me: Origin) {
                 let Some(Ok(msg)) = incoming else { break };
                 match msg {
                     Message::Text(text) => match parse_ws_command(text.as_str()) {
+                        Ok(cmd) if !admin && super::admin::needs_admin(&cmd) => {
+                            let err = ServerEvent::Error { message: super::admin::NOT_PAIRED.into() };
+                            if send_event(&mut socket, &err).await.is_err() {
+                                break;
+                            }
+                        }
                         Ok(cmd) => {
                             if engine.command(me, cmd).await.is_err() {
                                 break;

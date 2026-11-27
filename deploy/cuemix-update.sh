@@ -48,6 +48,12 @@ MIN_VERSION="0.7.2"
 MIN_VERSION_URL="https://github.com/${REPO}/releases/latest/download/min-version"
 # The floor in force (MIN_VERSION, or higher from MIN_VERSION_URL); set by effective_floor.
 FLOOR=""
+# Release signing key (minisign public key, the second line of deploy/minisign.pub; CI checks
+# they are equal). Every release from the floor on is signed in CI by its private key; the
+# signature's trusted comment names the file ("cuemix-web <file name>"), so a signed file
+# cannot be passed off under another name, tag or architecture. Empty = this updater was built
+# without a key and refuses to install anything.
+MINISIGN_PUBKEY="RWRZOG3ncoQ3MIA1BYQllxc2D4qv0XeyyLMmPiJjd5ksf5WpD3HLh7Jt"
 # Unprivileged account that runs a downloaded binary's --version check.
 CHECK_UID=65534
 CHECK_GID=65534
@@ -530,11 +536,23 @@ detect_target() {
   esac
 }
 
-# fetch_asset NAME : download NAME and NAME.sha256 from the release into WORKDIR.
+# fetch_asset NAME : download NAME, NAME.sha256 and NAME.minisig from the release into WORKDIR.
 fetch_asset() {
   local name="$1" url="${RELEASE_BASE}/${TAG}/$1"
   curl -fsSL -o "${WORKDIR}/${name}" "${url}" 2>/dev/null || return 1
   curl -fsSL -o "${WORKDIR}/${name}.sha256" "${url}.sha256" 2>/dev/null || return 1
+  curl -fsSL --max-filesize 4096 -o "${WORKDIR}/${name}.minisig" "${url}.minisig" 2>/dev/null || return 1
+}
+
+# verify_signature FILE NAME : FILE.minisig is a valid signature of FILE by MINISIGN_PUBKEY and
+# its trusted comment is exactly "cuemix-web NAME". minisign runs unprivileged (it parses
+# untrusted input). Returns 1 otherwise.
+verify_signature() {
+  local file="$1" name="$2" comment=""
+  [[ -n "${MINISIGN_PUBKEY}" ]] || { log_err "this cuemix-update has no release signing key"; return 1; }
+  command -v minisign >/dev/null 2>&1 || { log_err "minisign is not installed (apt-get install minisign)"; return 1; }
+  comment="$(unprivileged minisign -V -P "${MINISIGN_PUBKEY}" -m "${file}" -x "${file}.minisig" -Q 2>/dev/null)" || return 1
+  [[ "${comment}" == "cuemix-web ${name}" ]]
 }
 
 # fetch_payload : download the tarball (or the .deb when no tarball is
@@ -548,14 +566,17 @@ fetch_payload() {
     PAYLOAD_KIND="tar"
   else
     log_warn "${tarball} is not available; falling back to the .deb payload"
-    fetch_asset "${deb}" || die "neither ${tarball} nor ${deb} could be downloaded for ${TAG}"
+    fetch_asset "${deb}" || die "neither ${tarball} nor ${deb} (with its .sha256 and .minisig) could be downloaded for ${TAG}"
     PAYLOAD="${deb}"
     PAYLOAD_KIND="deb"
+  fi
+  if ! verify_signature "${WORKDIR}/${PAYLOAD}" "${PAYLOAD}"; then
+    die "signature check failed for ${PAYLOAD}: it was not signed by the cuemix-web release key; nothing was installed"
   fi
   if ! (cd -- "${WORKDIR}" && sha256sum -c "${PAYLOAD}.sha256" >/dev/null); then
     die "sha256 verification failed for ${PAYLOAD}; nothing was installed"
   fi
-  log_info "downloaded and verified ${PAYLOAD}"
+  log_info "downloaded ${PAYLOAD}: signature and sha256 verified"
 }
 
 # extract_payload : unpack the payload and set NEW_SRC to the cuemix-web binary. Only that
@@ -701,14 +722,25 @@ tag_pinnable() {
 }
 
 # effective_floor : set FLOOR to MIN_VERSION, raised to the newest release's published floor
-# (MIN_VERSION_URL) when that one is higher. That file is fetched over HTTPS from the same
-# release as the binaries, read at most 64 bytes and must be one plain X.Y.Z; a missing or
-# malformed file (releases before 0.7.2 have none) keeps MIN_VERSION. Runs once.
+# (MIN_VERSION_URL) when that one is higher. That file must carry a valid release signature
+# (min-version.minisig), is read at most 64 bytes and must be one plain X.Y.Z; a missing,
+# unsigned or malformed file keeps MIN_VERSION. Runs once.
 effective_floor() {
-  local raw=""
+  local raw="" dir=""
   [[ -z "${FLOOR}" ]] || return 0
   FLOOR="${MIN_VERSION}"
-  raw="$(curl -fsSL --max-time 10 --max-filesize 64 "${MIN_VERSION_URL}" 2>/dev/null | head -c 64 | tr -d '[:space:]' || true)"
+  dir="$(mktemp -d)" || return 0
+  chmod 0711 -- "${dir}"
+  if curl -fsSL --max-time 10 --max-filesize 64 -o "${dir}/min-version" "${MIN_VERSION_URL}" 2>/dev/null \
+    && curl -fsSL --max-time 10 --max-filesize 4096 -o "${dir}/min-version.minisig" "${MIN_VERSION_URL}.minisig" 2>/dev/null; then
+    chmod 0644 -- "${dir}/min-version" "${dir}/min-version.minisig"
+    if verify_signature "${dir}/min-version" "min-version"; then
+      raw="$(head -c 64 -- "${dir}/min-version" | tr -d '[:space:]')"
+    else
+      log_warn "the newest release's min-version is not signed by the release key; ignoring it"
+    fi
+  fi
+  rm -rf -- "${dir}"
   raw="${raw#v}"
   if [[ "${raw}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && version_at_least "v${raw}" "${MIN_VERSION}"; then
     FLOOR="${raw}"

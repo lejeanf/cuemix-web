@@ -311,11 +311,25 @@ How an update stays safe:
 - The server runs as a non-root user, and production code avoids `unwrap`/`expect` (enforced by a clippy lint).
 - DNS-rebinding guard: requests must name a known host (IP address, `localhost`, `*.local`, the mDNS name, or `[web] allowed_hosts`), otherwise 421. Cross-site `Origin` headers are refused on `/ws`, `/api/v1/*` and `/api/update*`.
 - Every response carries a Content-Security-Policy (scripts from this server only, no framing), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
-- There is no login: anyone who can reach the port controls the mixer and can install a release (never one below the security floor). Keep the server on a trusted network or behind an authenticating reverse proxy.
+- By default there is no login: anyone who can reach the port controls the mixer and can install a release (never one below the security floor). Keep the server on a trusted network, behind an authenticating reverse proxy, or turn on the admin token below.
+- **Admin token** (optional): set `[web] admin_token = "auto"` and restart. The server creates a token in `/var/lib/cuemix-web/admin-token` and logs a pairing link once; print it again as root with `cuemix-web --config /etc/cuemix-web/config.toml --pair-link` (in a Proxmox container: `pct exec <CTID> -- cuemix-web --config /etc/cuemix-web/config.toml --pair-link`). Open that link on each phone or laptop that may install updates or change the speaker plug and OSC settings; other devices see those controls read-only, while faders, presets and power stay open to everyone. The link's host name can be replaced by the server's IP; keep the `#pair=…` part. To revoke every device, delete the token file and restart (a new one is created). Scripts send `Authorization: Bearer <token>`.
 - Resource limits: 10 s to send request headers, 256 HTTP connections, 64 WebSockets (16 per client address), 200 presets. OSC datagrams from outside the local network are ignored.
 - The service runs in a tight systemd sandbox (`systemd-analyze security cuemix-web`: about 1.4); the root update units may only write the binary and the two state directories.
-- The root updater never runs a downloaded binary as root: its `--version` check runs as `nobody`. Release jobs that run third-party build code get a read-only token, and release builds use no caches.
+- The root updater never runs a downloaded binary as root: its `--version` check runs as `nobody`.
+- Releases are signed (minisign); the installers and `cuemix-update` only install files signed by the project key under their exact name (see [Releases](#releases-maintainers)). Release jobs that run third-party build code get a read-only token, and release builds use no caches.
 - The web UI's npm packages are build-time only, and npm never runs their install scripts (`frontend/.npmrc` sets `ignore-scripts=true`; CI also passes `--ignore-scripts`). CI audits both dependency trees (`cargo audit`, `npm audit`).
+
+### Releases (maintainers)
+
+Every release file is signed with [minisign](https://jedisct1.github.io/minisign/). The installers and `cuemix-update` refuse any download that is not signed by the key in [`deploy/minisign.pub`](deploy/minisign.pub) under its exact file name (tag and architecture included), so a release changed after the fact, or a file passed off under another name, is never installed. One-time setup:
+
+1. Generate the key pair on your own machine, with a password: `minisign -G -p minisign.pub -s cuemix-release.key` (Debian 12 or Ubuntu 23.04 and newer: `apt install minisign`). Keep `cuemix-release.key` and its password offline as a backup.
+2. Commit `minisign.pub` as `deploy/minisign.pub` and put its second line in `MINISIGN_PUBKEY` in `deploy/cuemix-update.sh` (CI checks they are equal).
+3. In GitHub: **Settings → Environments → New environment** `release`, add yourself as **required reviewer**, limit deployments to tags `v*`, and add two environment secrets: `MINISIGN_SECRET_KEY` (the whole content of `cuemix-release.key`) and `MINISIGN_PASSWORD`.
+
+The release workflow then pauses at **Sign release files** until you approve it. Only that job can read the key: it runs no third-party build code and checks every signature against `deploy/minisign.pub` before anything is published. Changing the key later means shipping the new public key in `cuemix-update.sh` first (through `proxmox-setup.sh --update` / `linux-setup.sh`), since installed updaters only trust the key they were installed with.
+
+`minisign` is not packaged for Ubuntu 22.04; there, install it from the upstream release before running `deploy/linux-setup.sh`.
 
 ## Documentation
 

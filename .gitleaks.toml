@@ -19,8 +19,14 @@ paths = [
 # (not the maintainer's network) in src/web/server.rs; they were replaced by
 # RFC 5737 addresses in the following commit. Scoped to these exact commits.
 [allowlist]
-description = "Historical test fixtures replaced by RFC 5737 addresses"
+description = "Historical test fixtures replaced by RFC 5737 addresses; the release signing PUBLIC key"
 commits = [
     "ee6c8394852a59e6b07efa624fa9ffdae5dc850c",
     "875d164b62286b20256bf0c4a09db89d40df01a5",
+]
+# The minisign public key (deploy/minisign.pub, MINISIGN_PUBKEY in deploy/cuemix-update.sh) is
+# meant to be published; generic-api-key flags it for its entropy. Only this exact value is
+# allowed: change it together with the key.
+regexes = [
+    '''^RWRZOG3ncoQ3MIA1BYQllxc2D4qv0XeyyLMmPiJjd5ksf5WpD3HLh7Jt$''',
 ]
