@@ -12,8 +12,6 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
-## [0.7.2] - 2026-11-27
-
 Fixes from a security review: a web page could control the mixer through DNS rebinding,
 releases could be downgraded to vulnerable versions, and the release pipeline gave build
 code more rights than it needs. Releases are now signed, and an optional admin token can

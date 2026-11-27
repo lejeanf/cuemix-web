@@ -813,9 +813,10 @@ mod tests {
         assert_eq!(v["latest"]["prerelease"], true);
 
         // Nothing newer than what runs: no badge, even when older releases are listed.
+        let running = format!("v{}", env!("CARGO_PKG_VERSION"));
         let older = json!({
-            "features": ["pin"], "latest_stable": "v0.7.2", "latest_pre": "v0.7.2-alpha.1",
-            "releases": [{"tag": "v0.7.2", "prerelease": false}],
+            "features": ["pin"], "latest_stable": running, "latest_pre": format!("{running}-alpha.1"),
+            "releases": [{"tag": running, "prerelease": false}],
         });
         tokio::fs::write(&cfg.update.status_file, older.to_string())
             .await
