@@ -557,7 +557,7 @@ fetch_payload() {
 # tampered archive would make the chmod and the install below act on its target).
 extract_payload() {
   local dir="${WORKDIR}/payload"
-  mkdir -p -m 0755 -- "${dir}"
+  mkdir -m 0755 -- "${dir}"
   case "${PAYLOAD_KIND}" in
     tar)
       tar -xzf "${WORKDIR}/${PAYLOAD}" -C "${dir}" --no-same-owner --no-same-permissions -- cuemix-web \
