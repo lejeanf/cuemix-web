@@ -173,6 +173,7 @@ preflight() {
   [[ -f "${UNIT_FILE}" ]] || die "missing ${UNIT_FILE} (run from a repository checkout)"
   [[ -f "${CONFIG_EXAMPLE}" ]] || die "missing ${CONFIG_EXAMPLE} (run from a repository checkout)"
   [[ -f "${UPDATE_SCRIPT}" ]] || die "missing ${UPDATE_SCRIPT} (run from a repository checkout)"
+  release_pubkey >/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -623,6 +624,14 @@ start_container() {
 # ---------------------------------------------------------------------------
 # Container provisioning
 # ---------------------------------------------------------------------------
+# release_pubkey : the release signing public key (second line of deploy/minisign.pub).
+release_pubkey() {
+  local key=""
+  key="$(sed -n '2p' "${SCRIPT_DIR}/minisign.pub" 2>/dev/null | tr -d '[:space:]')"
+  [[ "${key}" =~ ^RW[A-Za-z0-9+/]{54}$ ]] || die "missing or invalid ${SCRIPT_DIR}/minisign.pub (run from a repository checkout)"
+  printf '%s' "${key}"
+}
+
 write_provision_script() {
   cat > "$1" <<'PROVISION'
 #!/usr/bin/env bash
@@ -637,6 +646,8 @@ BIN=/usr/local/bin/cuemix-web
 CONF_DIR=/etc/cuemix-web
 STATE_DIR=/var/lib/cuemix-web
 MOTU_IFACE="${CUEMIX_MOTU_IFACE:-eth1}"
+# Release signing public key, passed by the host from deploy/minisign.pub.
+PUBKEY="${CUEMIX_MINISIGN_PUBKEY:-}"
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "${WORK}"' EXIT
 
@@ -645,9 +656,9 @@ warn() { printf '[ct][warn] %s\n' "$*" >&2; }
 die()  { printf '[ct][error] %s\n' "$*" >&2; exit 1; }
 
 export DEBIAN_FRONTEND=noninteractive
-log "installing packages (avahi-daemon, curl)"
+log "installing packages (avahi-daemon, curl, minisign)"
 apt-get update -qq
-apt-get install -y -qq --no-install-recommends avahi-daemon curl ca-certificates
+apt-get install -y -qq --no-install-recommends avahi-daemon curl ca-certificates minisign
 
 if ! id -u cuemix >/dev/null 2>&1; then
   useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin cuemix
@@ -698,6 +709,11 @@ if [[ -n "${TAG}" ]]; then
   log "downloading release ${TAG} (${ARCH_TARGET})"
   curl -fsSL -o "${WORK}/${asset}" "${base}/${asset}"
   curl -fsSL -o "${WORK}/${asset}.sha256" "${base}/${asset}.sha256"
+  curl -fsSL -o "${WORK}/${asset}.minisig" "${base}/${asset}.minisig"
+  [[ -n "${PUBKEY}" ]] || die "no release signing key was passed in"
+  comment="$(minisign -V -P "${PUBKEY}" -m "${WORK}/${asset}" -x "${WORK}/${asset}.minisig" -Q)" \
+    || die "signature check failed for ${asset}: not signed by the cuemix-web release key"
+  [[ "${comment}" == "cuemix-web ${asset}" ]] || die "signature of ${asset} names another file; refusing it"
   (cd "${WORK}" && sha256sum -c "${asset}.sha256")
   tar -xzf "${WORK}/${asset}" -C "${WORK}"
   install -m 0755 "${WORK}/cuemix-web" "${BIN}"
@@ -739,7 +755,7 @@ provision_container() {
   run pct push "${CTID}" "${CONFIG_EXAMPLE}" /root/cuemix-config.example.toml --perms 0644
   run pct push "${CTID}" "${UNIT_FILE}" /root/cuemix-web.service --perms 0644
   run pct push "${CTID}" "${UPDATE_SCRIPT}" /usr/local/sbin/cuemix-update --perms 0755
-  run pct exec "${CTID}" -- env CUEMIX_MOTU_IFACE=eth1 bash /root/cuemix-provision.sh
+  run pct exec "${CTID}" -- env CUEMIX_MOTU_IFACE=eth1 CUEMIX_MINISIGN_PUBKEY="$(release_pubkey)" bash /root/cuemix-provision.sh
   run pct exec "${CTID}" -- rm -f /root/cuemix-provision.sh
   push_update_units "${CTID}"
 }
@@ -814,6 +830,9 @@ update_container() {
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     dry_args+=(--dry-run)
   fi
+  # cuemix-update checks release signatures with minisign (since 0.7.2).
+  run pct exec "${ctid}" -- sh -c 'command -v minisign >/dev/null 2>&1 || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends minisign; }' \
+    || die "could not install minisign in container ${ctid}; cuemix-update needs it to check release signatures"
   run pct push "${ctid}" "${UPDATE_SCRIPT}" /usr/local/sbin/cuemix-update --perms 0755
   push_update_units "${ctid}"
   # --wait-lock: an install started from the web UI (or the daily check) may still be

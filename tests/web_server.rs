@@ -31,6 +31,14 @@ impl Drop for Harness {
 }
 
 async fn harness(tag: &str) -> Result<Harness, Box<dyn std::error::Error>> {
+    harness_with(tag, None).await
+}
+
+/// The test server, optionally with an admin token.
+async fn harness_with(
+    tag: &str,
+    admin_token: Option<cuemix_web::web::admin::AdminToken>,
+) -> Result<Harness, Box<dyn std::error::Error>> {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_nanos();
@@ -48,6 +56,9 @@ async fn harness(tag: &str) -> Result<Harness, Box<dyn std::error::Error>> {
             allowed_origins: vec!["http://mixer.example.com:8443".to_owned()],
             allowed_hosts: vec!["mixer.example.net".to_owned()],
             mdns_hostname: "cuemix-web".to_owned(),
+            admin_token,
+            // Writes stay in this test's directory.
+            update_prefs_file: dir.join("update-prefs.json"),
             ..WebConfig::default()
         },
         shutdown,
@@ -850,5 +861,228 @@ async fn update_endpoints_refuse_cross_site_origins() -> Result<(), Box<dyn std:
         let r = http_request(h.addr, method, path, &headers, body).await?;
         assert_eq!(r.status, 403, "{method} {path}");
     }
+    Ok(())
+}
+
+/// One client address cannot hold more than `MAX_WS_PER_IP` WebSockets; closing one frees a slot.
+#[tokio::test]
+async fn websockets_are_capped_per_client_address() -> Result<(), Box<dyn std::error::Error>> {
+    use cuemix_web::web::server::MAX_WS_PER_IP;
+    let h = harness("ws-cap").await?;
+    let mut open = Vec::new();
+    for _ in 0..MAX_WS_PER_IP {
+        open.push(connect(&h).await?);
+    }
+    assert_eq!(connect_with_origin(&h, None).await?, 503);
+    let mut first = open.remove(0);
+    first.close(None).await?;
+    drop(first);
+    // The slot comes back once the server has seen the close.
+    let mut status = 0;
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        status = connect_with_origin(&h, None).await?;
+        if status == 101 {
+            break;
+        }
+    }
+    assert_eq!(status, 101);
+    Ok(())
+}
+
+/// A client that never finishes its request headers is disconnected (slow-header attack).
+#[tokio::test]
+async fn a_client_that_never_finishes_its_headers_is_dropped(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use cuemix_web::web::server::HEADER_READ_TIMEOUT;
+    let h = harness("slow-header").await?;
+    let mut s = TcpStream::connect(h.addr).await?;
+    s.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n")
+        .await?;
+    let started = std::time::Instant::now();
+    let mut buf = [0u8; 256];
+    // Closed (0 bytes, or an error answer then close) well before twice the timeout.
+    let read = tokio::time::timeout(HEADER_READ_TIMEOUT * 2, async {
+        loop {
+            match s.read(&mut buf).await {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await;
+    assert!(read.is_ok(), "still open after {:?}", started.elapsed());
+    assert!(started.elapsed() >= HEADER_READ_TIMEOUT / 2);
+    Ok(())
+}
+
+/// With the admin token on, installs, the pre-release switch and the plug/OSC settings need a
+/// paired device; pairing sets an HttpOnly cookie; faders stay open.
+#[tokio::test]
+async fn admin_token_pairing_and_enforcement() -> Result<(), Box<dyn std::error::Error>> {
+    use cuemix_web::web::admin::AdminToken;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let secret = "5a".repeat(32);
+    let h = harness_with("admin", AdminToken::parse(&secret)).await?;
+    let json = ("Content-Type", "application/json");
+
+    let r = http_get(h.addr, "/api/admin").await?;
+    let v: Value = serde_json::from_slice(&r.body)?;
+    assert_eq!(
+        (v["required"].clone(), v["paired"].clone()),
+        (Value::Bool(true), Value::Bool(false))
+    );
+
+    // Not paired: admin-only HTTP routes answer 401.
+    for (method, path, body) in [
+        ("POST", "/api/update", Some("")),
+        (
+            "PUT",
+            "/api/update/prefs",
+            Some(r#"{"show_prerelease":true}"#),
+        ),
+    ] {
+        let r = http_request(
+            h.addr,
+            method,
+            path,
+            &[("x-cuemix-update", "1"), json],
+            body,
+        )
+        .await?;
+        assert_eq!(r.status, 401, "{method} {path}");
+    }
+    // ... and admin-only WebSocket commands are refused to this client only.
+    let mut ws = connect(&h).await?;
+    drain_initial(&mut ws).await?;
+    ws.send(Message::text(r#"{"cmd":"test_speaker_plug","on":true}"#))
+        .await?;
+    let e = next_json(&mut ws).await?;
+    assert_eq!(e["event"], "error");
+    assert!(
+        e["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not paired"),
+        "{e}"
+    );
+    // Faders are open to everyone.
+    let (status, _) = post(&h, r#"{"cmd":"set","param":"main_vol","db":-9}"#, &[]).await?;
+    assert_eq!(status, 200);
+
+    // A wrong token is refused without a cookie.
+    let bad = format!(r#"{{"token":"{}"}}"#, "00".repeat(32));
+    let r = http_request(h.addr, "POST", "/api/admin/pair", &[json], Some(&bad)).await?;
+    assert_eq!(r.status, 403);
+    assert!(r.header("set-cookie").is_none());
+
+    // The right one pairs: HttpOnly, SameSite=Strict cookie.
+    let good = format!(r#"{{"token":"{secret}"}}"#);
+    let r = http_request(h.addr, "POST", "/api/admin/pair", &[json], Some(&good)).await?;
+    assert_eq!(r.status, 200);
+    let cookie = r.header("set-cookie").ok_or("no cookie")?;
+    assert!(
+        cookie.starts_with(&format!("cuemix_admin={secret};")),
+        "{cookie}"
+    );
+    assert!(
+        cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"),
+        "{cookie}"
+    );
+    let jar = format!("cuemix_admin={secret}");
+
+    let r = http_request(h.addr, "GET", "/api/admin", &[("Cookie", &jar)], None).await?;
+    assert_eq!(serde_json::from_slice::<Value>(&r.body)?["paired"], true);
+    let r = http_request(
+        h.addr,
+        "PUT",
+        "/api/update/prefs",
+        &[("x-cuemix-update", "1"), json, ("Cookie", &jar)],
+        Some(r#"{"show_prerelease":true}"#),
+    )
+    .await?;
+    assert_ne!(r.status, 401, "a paired device passes the admin check");
+    // A script with the bearer header passes too.
+    let bearer = format!("Bearer {secret}");
+    let r = http_request(
+        h.addr,
+        "PUT",
+        "/api/update/prefs",
+        &[("x-cuemix-update", "1"), json, ("Authorization", &bearer)],
+        Some(r#"{"show_prerelease":false}"#),
+    )
+    .await?;
+    assert_ne!(r.status, 401);
+
+    // A paired WebSocket may send admin-only commands (the plug is off, so the test fails
+    // on its own terms, not with "not paired").
+    let mut req = format!("ws://{}/ws", h.addr).into_client_request()?;
+    req.headers_mut().insert("cookie", jar.parse()?);
+    let (mut paired, _) = tokio::time::timeout(T, connect_async(req)).await??;
+    drain_initial(&mut paired).await?;
+    paired
+        .send(Message::text(r#"{"cmd":"test_speaker_plug","on":true}"#))
+        .await?;
+    loop {
+        let ev = next_json(&mut paired).await?;
+        if ev["event"] == "error" {
+            assert!(
+                !ev["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("not paired"),
+                "{ev}"
+            );
+            break;
+        }
+        if ev["event"] == "speaker_plug_result" {
+            break;
+        }
+    }
+
+    // Unpair clears the cookie.
+    let r = http_request(
+        h.addr,
+        "POST",
+        "/api/admin/unpair",
+        &[("Cookie", &jar)],
+        None,
+    )
+    .await?;
+    let cleared = r.header("set-cookie").ok_or("no cookie")?;
+    assert!(
+        cleared.starts_with("cuemix_admin=;") && cleared.contains("Max-Age=0"),
+        "{cleared}"
+    );
+    Ok(())
+}
+
+/// With the token off (default), nothing changes for anyone.
+#[tokio::test]
+async fn admin_token_off_changes_nothing() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("admin-off").await?;
+    let v: Value = serde_json::from_slice(&http_get(h.addr, "/api/admin").await?.body)?;
+    assert_eq!(v["required"], false);
+    let r = http_request(
+        h.addr,
+        "POST",
+        "/api/admin/pair",
+        &[("Content-Type", "application/json")],
+        Some(r#"{"token":"x"}"#),
+    )
+    .await?;
+    assert_eq!(r.status, 404);
+    let r = http_request(
+        h.addr,
+        "PUT",
+        "/api/update/prefs",
+        &[
+            ("x-cuemix-update", "1"),
+            ("Content-Type", "application/json"),
+        ],
+        Some(r#"{"show_prerelease":true}"#),
+    )
+    .await?;
+    assert_ne!(r.status, 401);
     Ok(())
 }

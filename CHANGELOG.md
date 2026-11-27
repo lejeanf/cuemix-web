@@ -12,9 +12,23 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-27
+
 Fixes from a security review: a web page could control the mixer through DNS rebinding,
 releases could be downgraded to vulnerable versions, and the release pipeline gave build
-code more rights than it needs.
+code more rights than it needs. Releases are now signed, and an optional admin token can
+reserve installs and the plug/OSC settings to paired devices.
+
+### Added
+- **Optional admin token** (`[web] admin_token = "auto"`, off by default). The server creates
+  a random token in `[storage] admin_token_file` (mode 0600) and logs a pairing link once;
+  `cuemix-web --config <path> --pair-link` prints it again (as root). Opening the link on a
+  device pairs it (`HttpOnly`, `SameSite=Strict` cookie; the token travels in the URL
+  fragment, never to a server log). Only paired devices may install releases, switch
+  pre-releases, or change and test the speaker plug and OSC settings; faders, presets and
+  power stay open to everyone. Unpaired devices see these controls read-only with a note.
+  Scripts can send `Authorization: Bearer <token>`. New routes: `GET /api/admin`,
+  `POST /api/admin/pair`, `POST /api/admin/unpair`.
 
 ### Security
 - **DNS rebinding**: the server now answers only for host names an outside site cannot own:
@@ -40,6 +54,37 @@ code more rights than it needs.
 - Release workflow: no token rights by default. Jobs that run third-party build code get
   `contents: read` only, `publish` alone may write the release and `docker` alone may push the
   image. No checkout keeps the token in `.git/config`, and release builds use no caches.
+- OSC: datagrams from outside the local network (private, link-local, loopback) are dropped,
+  so a forged source address can no longer make the bridge send state dumps to a stranger.
+- HTTP: a client gets 10 s to send its request headers (slow-header attacks), at most 256
+  connections are served at once, and WebSockets are capped at 64 in total and 16 per client
+  address (503 beyond). The server now runs its own accept loop on hyper (already a dependency
+  through axum) because `axum::serve` has no header timeout.
+- At most 200 presets: a new name beyond that is refused (overwriting still works), so no
+  client can fill the disk.
+- systemd: `cuemix-web.service` adds `PrivateDevices`, `ProtectProc=invisible`, a system-call
+  filter, `RestrictAddressFamilies`, `MemoryDenyWriteExecute`, `UMask=0077`, `MemoryMax=256M`,
+  `TasksMax=256` and more (`systemd-analyze security`: 1.4, OK). The root update units may
+  only write the binary, the two state directories and `/run` (`ProtectSystem=strict`, private
+  `/tmp`); `/var/lib/cuemix-update` is now a systemd `StateDirectory` (root, 0700).
+- `cuemix-update` refuses to publish the status files when `/var/lib/cuemix-update` and
+  `/var/lib/cuemix-web` are on different filesystems (a move there would be a root copy into
+  the web user's directory).
+- CI: GitHub's own actions are pinned by commit SHA like the others, the gitleaks download is
+  checked against its published sha256, the Docker base image is pinned by digest, and a
+  manual run of the release workflow builds but never publishes.
+
+- **Signed releases**: every release file (tarballs, `.deb`, `min-version`) is signed with
+  minisign in a separate release job that only a protected `release` environment (required
+  reviewer) can run, and that runs no third-party build code. `cuemix-update`, `linux-setup.sh`
+  and the Proxmox provisioning refuse a download that is not signed by the key in
+  `deploy/minisign.pub` under its exact file name (so a signed file cannot be passed off as
+  another tag or architecture). An unsigned or altered `min-version` is ignored. minisign
+  runs unprivileged.
+
+### Fixed
+- The update notice no longer offers an older release when the root updater is older than the
+  web server (it reported "update available" for any different version).
 
 ### Compatibility
 - If you reach the UI by a name that is not an IP address, `localhost`, `*.local` or the mDNS
@@ -47,6 +92,12 @@ code more rights than it needs.
   `[web] allowed_hosts` in `config.toml` before updating, or the UI answers 421. The accepted
   names are logged at startup.
 - The Version dialog no longer lists releases older than v0.7.2.
+- `cuemix-update` now needs `minisign` (Debian 12 has it; `proxmox-setup.sh --update` and
+  `linux-setup.sh` install it). Ubuntu 22.04 has no package: install it from upstream.
+- Releases from v0.7.2 on are signed; nothing older can be installed anyway (floor v0.7.2).
+- The new systemd sandbox was checked on a regular systemd host, not yet inside a Proxmox
+  LXC container. If `cuemix-web` does not start after `proxmox-setup.sh --update`,
+  `journalctl -u cuemix-web` names the directive; report it.
 - The root-side changes (floor, unprivileged version check) arrive with
   `sudo deploy/proxmox-setup.sh --update` (or `deploy/linux-setup.sh`), like every change to
   `cuemix-update`. The in-app updater only replaces the binary.

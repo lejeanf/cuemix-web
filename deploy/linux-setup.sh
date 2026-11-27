@@ -19,6 +19,8 @@ ENV_FILE="${SCRIPT_DIR}/linux-setup.env"
 UDEV_TEMPLATE="${SCRIPT_DIR}/99-motu-mk5.rules.template"
 UNIT_TEMPLATE="${SCRIPT_DIR}/cuemix-web.service"
 UPDATER_SRC="${SCRIPT_DIR}/cuemix-update.sh"
+# Release signing public key (the key cuemix-update pins).
+PUBKEY_FILE="${SCRIPT_DIR}/minisign.pub"
 CONFIG_EXAMPLE="${REPO_DIR}/config.example.toml"
 
 CONF_DIR="/etc/cuemix-web"
@@ -168,6 +170,7 @@ require_commands() {
     [[ -f "${UNIT_TEMPLATE}" ]] || die "missing ${UNIT_TEMPLATE} (run from a repository checkout)"
     [[ -f "${CONFIG_EXAMPLE}" ]] || die "missing ${CONFIG_EXAMPLE} (run from a repository checkout)"
     [[ -f "${UPDATER_SRC}" ]] || die "missing ${UPDATER_SRC} (run from a repository checkout)"
+    [[ -f "${PUBKEY_FILE}" ]] || die "missing ${PUBKEY_FILE} (run from a repository checkout)"
   fi
 }
 
@@ -276,6 +279,22 @@ resolve_tag() {
   log_info "latest release: ${TAG}"
 }
 
+# install_minisign : the release signature checker (cuemix-update needs it for every install).
+install_minisign() {
+  command -v minisign >/dev/null 2>&1 && return 0
+  log_info "installing minisign (release signature checks)"
+  if command -v apt-get >/dev/null 2>&1; then
+    run env DEBIAN_FRONTEND=noninteractive apt-get update -qq || log_warn "apt-get update failed"
+    run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends minisign || true
+  elif command -v dnf >/dev/null 2>&1; then
+    run dnf install -y minisign || true
+  elif command -v pacman >/dev/null 2>&1; then
+    run pacman -S --needed --noconfirm minisign || true
+  fi
+  [[ "${DRY_RUN}" -eq 1 ]] || command -v minisign >/dev/null 2>&1 \
+    || die "minisign is required to check release signatures; install it (https://jedisct1.github.io/minisign/) and run this script again"
+}
+
 download_release() {
   log_step "Download and verify release ${TAG} (${TARGET})"
   local asset base
@@ -290,9 +309,16 @@ download_release() {
 
   run curl -fsSL -o "${WORKDIR}/${asset}" "${base}/${asset}"
   run curl -fsSL -o "${WORKDIR}/${asset}.sha256" "${base}/${asset}.sha256"
+  run curl -fsSL -o "${WORKDIR}/${asset}.minisig" "${base}/${asset}.minisig"
   if [[ "${DRY_RUN}" -eq 1 ]]; then
+    run minisign -V -p "${PUBKEY_FILE}" -m "${asset}" -Q
     run sha256sum -c "${asset}.sha256"
   else
+    # Signed by the release key, under this exact name (tag and architecture included).
+    local comment=""
+    comment="$(minisign -V -p "${PUBKEY_FILE}" -m "${WORKDIR}/${asset}" -x "${WORKDIR}/${asset}.minisig" -Q)" \
+      || die "signature check failed for ${asset}: not signed by the cuemix-web release key"
+    [[ "${comment}" == "cuemix-web ${asset}" ]] || die "signature of ${asset} names another file (${comment}); refusing it"
     (cd -- "${WORKDIR}" && sha256sum -c "${asset}.sha256")
   fi
   ASSET_NAME="${asset}"
@@ -512,6 +538,7 @@ main() {
     for u in "${UPDATE_UNITS[@]}"; do
       [[ -f "${SCRIPT_DIR}/systemd/${u}" ]] || die "missing ${SCRIPT_DIR}/systemd/${u} (run from a repository checkout)"
     done
+    install_minisign
     install_updater
     install_update_units
     log_info "cuemix-update and the update units are refreshed; the web UI sees the new capabilities after the release check (a few seconds)"
@@ -519,6 +546,7 @@ main() {
   fi
 
   detect_target
+  install_minisign
   resolve_tag
   download_release
   install_binary
