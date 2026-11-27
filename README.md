@@ -11,12 +11,12 @@ High-performance **Rust** web controller and bidirectional **OSC** bridge for th
 ![Output view: Monitor and Phones levels with meters, mono, A/B and talkback, output trims per pair, and the output EQ with the Loudness preset applied: curve on the left, bands on the right; the header shows the preset as modified](docs/images/webui-output.png)
 
 <p>
-<img src="docs/images/simple-phone.png" width="195" alt="Simple view on a phone: Monitor at −18 dB and Phones at −24 dB as two large knobs with meters and on/off buttons, the Preset row showing Live, and the Keep screen on switch">
+<img src="docs/images/simple-phone.png" width="195" alt="Simple view on a phone: Monitor at −18 dB and Phones at −24 dB as two large knobs with meters and on/off buttons, the Preset row showing Live, the Keep screen on switch, and the Advanced button in the header">
 <img src="docs/images/simple-phone-off.png" width="195" alt="Simple view with Monitor off: the knob reads Off, returns to −18 dB, with a grey needle at the level On will fade back to">
 <img src="docs/images/simple-phone-presets.png" width="195" alt="Simple view preset sheet: the presets chosen for the Simple view, each with its own Load button, the current one marked">
 </p>
 <p>
-<img src="docs/images/advanced-phone.png" width="195" alt="Advanced view on a phone: the mixer with Mic and Line groups and the Monitor fader, Monitor and Phones rows with on/off buttons and a ⋯ button for DIM, MONO, A/B and Talkback, and the bottom tab bar with Mixer, Input, Output and Reverb">
+<img src="docs/images/advanced-phone.png" width="195" alt="Advanced view on a phone: the Simple button in the header, the mixer with Mic and Line groups and the Monitor fader, Monitor and Phones rows with on/off buttons and a ⋯ button for DIM, MONO, A/B and Talkback, and the bottom tab bar with Mixer, Input, Output and Reverb">
 </p>
 
 <sub>Screenshots taken in demo mode (no MOTU connected, so the meters are empty), at 1400 × 820 for the desktop views and 390 × 844 for the phone views.</sub>
