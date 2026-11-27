@@ -4,8 +4,10 @@
   --bg-alt: #16181d;
   --card: #1e2128;
   --border: #2c303a;
-  --text: #e5e7eb;
-  --text-dim: #9ca3af;
+  /* Light grey, not white: easier on the eyes in a dark room (9:1 on a card). Every
+     "white" in the UI (text, needles, fader marks) comes from this token. */
+  --text: #bfc3ca;
+  --text-dim: #90959e; /* 5.3:1 on a card */
 
   --red: #ef4444; /* mute, +48V */
   --amber: #f59e0b; /* solo, DIM */
@@ -14,7 +16,7 @@
   --meter-green: #10b981;
   --meter-yellow: #eab308;
   --meter-red: #ef4444;
-  --meter-tick: #ffffff38; /* meter scale ticks (-40 / -18 / -6 dBFS) */
+  --meter-tick: #bfc3ca38; /* meter scale ticks (-40 / -18 / -6 dBFS) */
   --meter-gradient: linear-gradient(
     to top,
     var(--meter-green),
@@ -41,38 +43,6 @@
   --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --radius: 8px;
   color-scheme: dark;
-}
-
-/* Night: the same dark look with every light dimmed, for a dark room or a stage (a manual
-   choice per browser, lib/theme.ts). Text keeps at least 4.5:1 on its card. */
-:root[data-theme='night'] {
-  --bg: #0a0a0b;
-  --bg-alt: #0e0f12;
-  --card: #131519;
-  --border: #22252d;
-  --text: #a8abb2;
-  --text-dim: #80858e;
-  --red: #d45656;
-  --amber: #b07a12;
-  --cyan: #4282bf;
-  --meter-green: #0e8c63;
-  --meter-yellow: #a8850a;
-  --meter-red: #b53636;
-  --meter-tick: #ffffff24;
-  --scrim: #000c;
-  --on-accent: #0a0a0b;
-  --field: #08090b;
-  --warn-bg: #221805;
-  --warn-text: #c9b06a;
-  --danger-bg: #220b0b;
-  --danger-text: #c99a9a;
-  --row-active: #191c24;
-  --thumb-hi: #343843;
-  --thumb-lo: #20232a;
-  --thumb-edge: #40454f;
-  --grid: #14161b;
-  --grid-strong: #242831;
-  --axis-text: #5c616b;
 }
 
 *,

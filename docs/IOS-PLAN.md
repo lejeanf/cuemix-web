@@ -116,8 +116,8 @@ Limits of the web view, handled in phase 8:
   - Meters: ticks at −40, −18 and −6 dBFS and a clip mark that stays until tapped.
   - Preset picker: a sheet with one Load button per preset, listing only the presets not in
     `hidden` (the `presets` event; set from the web Presets panel, `set_preset_in_simple`).
-  - Night mode: the second token set (`[data-theme='night']` on the web), a manual switch as on
-    the web; "Keep screen on" maps to `isIdleTimerDisabled` while the view is in front.
+  - "Keep screen on" maps to `isIdleTimerDisabled` while the view is in front. (No Night mode:
+    it was tried on the web in 0.8.0 and removed; the light grey text stayed.)
 - **Advanced view**: the server's web UI in a `WKWebView`, opened with `?embed` (its own
   Simple/Advanced toggle, status dot and phone bottom tab bar hidden, safe areas respected). Native tabs at the bottom
   open each page (Mixer, Input, Output, …).
@@ -353,11 +353,10 @@ view** (and the look of controls and widgets) against the **web Simple view**. F
 keep them together.
 
 **1. One design source, generated for both.** `design/tokens.json` holds the colours (the blue
-`#3b93e0`, greys, meter green/yellow/red and tick, error and current-row colours), in two sets:
-the default dark theme and **Night** (the web's `:root[data-theme='night']` block, dimmed
-lights with text kept at 4.5:1 or more). Since the UI review every web colour comes from an
+`#3b93e0`, the light grey text `#bfc3ca` (never pure white), greys, meter green/yellow/red and
+tick, error and current-row colours). Since the UI review every web colour comes from an
 `app.css` token (except shadows, the label palette and the EQ band colours, which are data), so
-the generator only has to write the two blocks. Also radii, spacing, font sizes and knob geometry (270° arc,
+the generator only has to write one block. Also radii, spacing, font sizes and knob geometry (270° arc,
 track and arc widths, drag travel). A script generates the `:root` block of
 `frontend/src/app.css`, a `tokens.ts`, and `Tokens.swift`. It keeps the existing CSS names
 (`--cyan` stays the name of the blue, `--card`, `--meter-gradient`…), so no web component changes.
@@ -384,7 +383,6 @@ knobs", dB text formatting, meter decoding and colours. The fade curve vectors r
 | `Meter.svelte` | `MeterView.swift` | colours, scale, peak hold |
 | `PresetPicker.svelte` | preset sheet | Load per preset, `hidden` filter, current preset |
 | `TopBar.svelte` status dot and Demo pill | app status dot | states and colours |
-| `TopBar.svelte` moon button, `theme.ts` | Night switch | token set, manual choice |
 | `.bnav` in `App.svelte` (phone width) | native bottom tabs | order, names, icons (Mixer, Input, Output, Reverb) |
 
 The CI rule starts in phase 5, when both sides exist. It pairs **paths** (not whole stores): a PR

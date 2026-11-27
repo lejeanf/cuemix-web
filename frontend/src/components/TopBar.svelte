@@ -227,23 +227,13 @@
   </div>
   {/if}
 
-  <button class="btn moon" aria-pressed={store.theme === 'night'} aria-label={S.night.label} title={store.theme === 'night' ? S.night.on : S.night.off} onclick={() => store.setTheme(store.theme === 'night' ? 'dark' : 'night')}>
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>
-  </button>
   <button class="btn more" data-more-menu bind:this={moreBtn} aria-haspopup="dialog" aria-expanded={store.advancedOpen} aria-label={S.advanced.title} title={S.advanced.title} onclick={() => store.openAdvanced()}>⋯</button>
 
   {#if !store.embed}
-  <!-- Shows where you are: the current view is the highlighted half. Icons on phones. -->
-  <div class="seg" role="group" aria-label={S.view.label}>
-    <button class="segb" aria-pressed={store.simple} aria-label={S.view.simple} title={S.view.simpleHint} onclick={() => store.setSimple(true)}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 12l4-4" /></svg>
-      <span class="segt">{S.view.simple}</span>
-    </button>
-    <button class="segb" aria-pressed={!store.simple} aria-label={S.view.advanced} title={S.view.advancedHint} onclick={() => store.setSimple(false)}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v16M12 4v16M18 4v16" /><path d="M4 14h4M10 8h4M16 16h4" /></svg>
-      <span class="segt">{S.view.advanced}</span>
-    </button>
-  </div>
+  <!-- One button, always at the same place and width: it names the view it switches to. -->
+  <button class="btn mode" aria-label={store.simple ? S.view.toAdvanced : S.view.toSimple} title={store.simple ? S.view.advancedHint : S.view.simpleHint} onclick={() => store.setSimple(!store.simple)}
+    >{store.simple ? S.view.advanced : S.view.simple}</button
+  >
   <span class="sr" role="status">{linkText}</span>
   <button class="status {link}" class:show={showStatus} aria-label="Connection: {linkText}" title={linkText} onclick={() => flashStatus()}>
     <span class="dot" aria-hidden="true"></span><span class="txt" aria-hidden="true">{link === 'demo' ? S.demoShort : linkText}</span>
@@ -295,23 +285,6 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     cursor: pointer;
-  }
-  .btn.moon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 34px;
-    padding: 0 7px;
-    color: var(--text-dim);
-  }
-  .btn.moon[aria-pressed='true'] {
-    color: var(--amber);
-    border-color: var(--amber);
-  }
-  .btn.moon svg {
-    width: 18px;
-    height: 18px;
-    fill: currentColor;
   }
   .btn.more {
     min-width: 34px;
@@ -532,41 +505,12 @@
   .grow {
     flex: 1;
   }
-  .seg {
+  /* Same width for both labels, so the button never moves when it is pressed. */
+  .btn.mode {
     flex: none;
-    display: inline-flex;
-    padding: 2px;
-    gap: 2px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-  }
-  .segb {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 28px;
-    padding: 0 10px;
-    background: none;
-    border: 0;
-    border-radius: 6px;
-    color: var(--text-dim);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .segb[aria-pressed='true'] {
-    background: var(--bg-alt);
-    color: var(--text);
-    box-shadow: inset 0 0 0 1px var(--cyan);
-  }
-  .segb svg {
-    display: none;
-    width: 20px;
-    height: 20px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
+    width: 6.6em;
+    padding: 0 8px;
+    text-align: center;
   }
   .dot {
     flex: none;
@@ -650,19 +594,6 @@
     .grow {
       display: none;
     }
-    /* Icons only: the two halves fit beside Presets and ⋯. */
-    .segb {
-      min-width: 40px;
-      min-height: 32px;
-      justify-content: center;
-      padding: 0 8px;
-    }
-    .segb svg {
-      display: block;
-    }
-    .segt {
-      display: none;
-    }
     /* The presets panel is wider than the space left of its button: pin it to
        both screen edges under the header instead (was cut off at 375 px). */
     .pop.wide {
@@ -678,12 +609,10 @@
   /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
   @media (pointer: coarse) {
     .btn,
-    .segb,
     .status {
       min-height: 44px;
     }
     .btn.more,
-    .btn.moon,
     .status {
       min-width: 44px;
     }

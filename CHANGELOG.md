@@ -12,6 +12,19 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+Follow-up to the UI review, after trying 0.8.0. Web UI only; no protocol, preset or
+`config.toml` change.
+
+### Changed
+- Light grey instead of white everywhere: text, knob needles, fader marks and meter ticks use one
+  light grey (`--text` `#bfc3ca`, 9:1 on a card; secondary text `#90959e`, 5.3:1).
+- Header: one **Simple / Advanced** button again, naming the view it switches to, but at a fixed
+  place and width, so it never moves when pressed (it replaces the two-part switch).
+
+### Removed
+- Night mode (the moon button and the dimmed token set). A choice saved by 0.8.0
+  (`cuemix.theme` in the browser) is ignored.
+
 ## [0.8.0] - 2026-11-27
 
 The web UI from the UI review: a Simple view that is safer to use on a phone (a preset list with

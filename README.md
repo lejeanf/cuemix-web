@@ -4,7 +4,7 @@ High-performance **Rust** web controller and bidirectional **OSC** bridge for th
 
 **Status:** in daily use on a real UltraLite-mk5 (firmware 2.0.8). The device is identified on connect, its whole state is read back, levels are metered, and the mixes, preamps, trims and monitoring are controlled. The input and output EQ are written to the card; dynamics, reverb and clock are read from it, and writing them is enabled one feature at a time after a test on a card.
 
-![Mixer view: one tab per mix, strips grouped under Mic, Line, S/PDIF and Optical headings with pan, fader, level meter, mute/solo and DSP; the Monitor fader with its dB scale on the right; the Control Room bar at the bottom with an on/off button for Monitor and Phones; the header with the sample rate, the current preset, the moon (Night mode) and ⋯ buttons, the Simple | Advanced switch and the amber Demo pill](docs/images/webui-mixer.png)
+![Mixer view: one tab per mix, strips grouped under Mic, Line, S/PDIF and Optical headings with pan, fader, level meter, mute/solo and DSP; the Monitor fader with its dB scale on the right; the Control Room bar at the bottom with an on/off button for Monitor and Phones; the header with the sample rate, the current preset, the ⋯ button, the Simple button and the amber Demo pill](docs/images/webui-mixer.png)
 
 ![Input view: mic and line preamps with gain, phase, pad, +48V and input meters; S/PDIF and optical inputs with the ADAT/TOS switch](docs/images/webui-input.png)
 
@@ -14,7 +14,6 @@ High-performance **Rust** web controller and bidirectional **OSC** bridge for th
 <img src="docs/images/simple-phone.png" width="195" alt="Simple view on a phone: Monitor at −18 dB and Phones at −24 dB as two large knobs with meters and on/off buttons, the Preset row showing Live, and the Keep screen on switch">
 <img src="docs/images/simple-phone-off.png" width="195" alt="Simple view with Monitor off: the knob reads Off, returns to −18 dB, with a grey needle at the level On will fade back to">
 <img src="docs/images/simple-phone-presets.png" width="195" alt="Simple view preset sheet: the presets chosen for the Simple view, each with its own Load button, the current one marked">
-<img src="docs/images/simple-phone-night.png" width="195" alt="Simple view in Night mode: the same layout with dimmed text, accents and meters, the moon button lit">
 </p>
 <p>
 <img src="docs/images/advanced-phone.png" width="195" alt="Advanced view on a phone: the mixer with Mic and Line groups and the Monitor fader, Monitor and Phones rows with on/off buttons and a ⋯ button for DIM, MONO, A/B and Talkback, and the bottom tab bar with Mixer, Input, Output and Reverb">
@@ -157,7 +156,7 @@ The embedded Svelte 5 console (dark theme) has four views, each reachable direct
 - **Reverb**: reverb settings, sends (the Reverb mix) and returns.
 - **Control Room bar** (bottom of every view): DIM, MONO, A/B, Talkback, and the Monitor and Phones levels, each with its own on/off button (the same server-side fade as the Simple view).
 
-**Header.** The **Simple | Advanced** switch (two icons on phones) shows the current view and switches between them; the choice is remembered per browser. The moon button turns on **Night mode**, a dimmer version of the dark theme for a dark room or a stage: text, accents, meters and borders are dimmed, text keeps at least 4.5:1 contrast, and the choice is remembered per browser (off by default, never automatic). In demo mode (no MOTU found) the header shows an amber **Demo** pill. Error messages stay until you tap them; notices disappear after 5 seconds. On touch screens every button is at least 44 px tall.
+**Header.** One button switches views: it reads **Advanced** in the Simple view and **Simple** in the Advanced view, always at the same place and width; the choice is remembered per browser. Text and other light marks are light grey rather than white, easier on the eyes in a dark room. In demo mode (no MOTU found) the header shows an amber **Demo** pill. Error messages stay until you tap them; notices disappear after 5 seconds. On touch screens every button is at least 44 px tall.
 
 **Simple view.** On a phone the UI opens in the Simple view (household use, a dark room, a stage):
 

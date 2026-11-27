@@ -625,7 +625,7 @@ Trois acteurs, chacun avec ses droits :
 
 ### Interface : corrections rapides de la revue UX (0.8.0)
 
-- En-tête : commutateur à deux boutons **Simple | Avancé** (`aria-pressed` sur la vue courante, icônes sous 640 px) ; en vue Simple un espaceur pousse les boutons à droite comme en vue Avancée.
+- En-tête : un seul bouton de vue, qui nomme la vue vers laquelle il bascule (« Advanced » en vue Simple, « Simple » en vue Avancée), de largeur fixe (`6.6em`) pour ne jamais bouger ; en vue Simple un espaceur pousse les boutons à droite comme en vue Avancée (0.8.1 ; le commutateur à deux boutons de 0.8.0 est retiré).
 - Mode démo : pastille ambre « Demo » toujours visible (nom accessible « Demo — no MOTU ») ; le rouge reste réservé aux erreurs.
 - Toasts : les erreurs (sans `level`) restent jusqu'au toucher, dans une région `role="alert"` ; avis et avertissements disparaissent après 5 s (`toastTimeout`, `frontend/src/lib/ui.ts`).
 - L'onglet suit le fragment d'URL aussi après le chargement (`hashchange`, `tabFromHash` dans `ui.ts`).
@@ -649,14 +649,14 @@ Trois acteurs, chacun avec ses droits :
 ### Thème et tactile (revue UX, 0.8.0)
 
 - Toutes les couleurs de l'interface viennent des jetons de `frontend/src/app.css` (nouveaux : `--danger-bg`, `--danger-text`, `--row-active`, `--thumb-hi/lo/edge`, `--grid`, `--grid-strong`, `--axis-text`) ; restent en dur les ombres, les couleurs d'étiquette proposées à l'utilisateur et celles des bandes d'EQ (données). Les mètres (canvas) lisent `--field` et `--meter-*`, graduations (`--meter-tick`) et repère d'écrêtage (`--meter-red`) compris (`refreshMeterPalette` dans `meters.ts`).
-- Mode Nuit : `:root[data-theme='night']` redéfinit les jetons (lumières atténuées, texte ≥ 4,5:1 sur sa carte) ; bouton lune dans l'en-tête, choix par navigateur (`frontend/src/lib/theme.ts`, clé `cuemix.theme`), appliqué dans `main.ts` avant le premier rendu. Base du futur `design/tokens.json` partagé avec iOS.
+- Mode Nuit retiré après essai (0.8.1) ; on garde le gris clair : `--text` `#bfc3ca` (9:1 sur une carte) et `--text-dim` `#90959e` (5,3:1) remplacent le quasi-blanc partout (texte, aiguilles, repères, graduations des mètres). Les mètres lisent leurs couleurs une fois au démarrage (`refreshMeterPalette` dans `main.ts`).
 - `@media (pointer: coarse)` : cibles d'au moins 44 px de haut dans chaque composant concerné ; la souris garde la disposition dense.
 
 ### Captures d'écran (`docs/images/`)
 
 - Prises en mode démo (aucune MOTU, donc mètres vides ; la légende du README le dit) sur un serveur local `127.0.0.1`, avec des présets et libellés d'exemple ; aucune adresse ni nom d'hôte réel ne doit être visible (sinon `.example` / `192.0.2.x`).
 - Bureau, vue Avancée, 1400 × 820 : `webui-mixer.png`, `webui-input.png` (recadrée sur les cartes), `webui-output.png` (préset d'EQ Loudness appliqué).
-- Téléphone, 390 × 844 à 2× : vue Simple (`simple-phone.png`), Monitor éteint avec « returns to −18 dB » (`simple-phone-off.png` ; en démo le niveau mémorisé à l'arrêt n'est pas gardé, il est fixé par `set_return_level`), liste des présets (`simple-phone-presets.png`), mode Nuit (`simple-phone-night.png`), vue Avancée avec la barre d'onglets du bas (`advanced-phone.png`).
+- Téléphone, 390 × 844 à 2× : vue Simple (`simple-phone.png`), Monitor éteint avec « returns to −18 dB » (`simple-phone-off.png` ; en démo le niveau mémorisé à l'arrêt n'est pas gardé, il est fixé par `set_return_level`), liste des présets (`simple-phone-presets.png`), vue Avancée avec la barre d'onglets du bas (`advanced-phone.png`).
 - Vue imposée par `localStorage` (`cuemix.view`, `cuemix.theme`) dans un navigateur sans tête ; à reprendre à chaque changement visible de l'interface.
 
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
