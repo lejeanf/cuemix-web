@@ -27,10 +27,50 @@
   --field: #0d0e11;
   --warn-bg: #3a2a08;
   --warn-text: #fde68a;
+  --danger-bg: #3b1212; /* offline banner, error toasts */
+  --danger-text: #fecaca;
+  --row-active: #232733; /* the current row of a list */
+  --thumb-hi: #4b5160; /* fader thumb gradient */
+  --thumb-lo: #2f333d;
+  --thumb-edge: #5b6273;
+  --grid: #1d2027; /* EQ curve grid */
+  --grid-strong: #343947;
+  --axis-text: #6b7280;
 
   --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --radius: 8px;
   color-scheme: dark;
+}
+
+/* Night: the same dark look with every light dimmed, for a dark room or a stage (a manual
+   choice per browser, lib/theme.ts). Text keeps at least 4.5:1 on its card. */
+:root[data-theme='night'] {
+  --bg: #0a0a0b;
+  --bg-alt: #0e0f12;
+  --card: #131519;
+  --border: #22252d;
+  --text: #a8abb2;
+  --text-dim: #80858e;
+  --red: #d45656;
+  --amber: #b07a12;
+  --cyan: #4282bf;
+  --meter-green: #0e8c63;
+  --meter-yellow: #a8850a;
+  --meter-red: #b53636;
+  --scrim: #000c;
+  --on-accent: #0a0a0b;
+  --field: #08090b;
+  --warn-bg: #221805;
+  --warn-text: #c9b06a;
+  --danger-bg: #220b0b;
+  --danger-text: #c99a9a;
+  --row-active: #191c24;
+  --thumb-hi: #343843;
+  --thumb-lo: #20232a;
+  --thumb-edge: #40454f;
+  --grid: #14161b;
+  --grid-strong: #242831;
+  --axis-text: #5c616b;
 }
 
 *,

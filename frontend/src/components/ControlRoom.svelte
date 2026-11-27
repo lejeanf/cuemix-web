@@ -93,7 +93,7 @@
   .t.on {
     background: var(--on);
     border-color: var(--on);
-    color: #111;
+    color: var(--on-accent);
     font-weight: 700;
   }
   .t:disabled {
@@ -228,6 +228,21 @@
       border: 1px solid var(--border);
       border-radius: 5px;
       cursor: pointer;
+    }
+  }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .t,
+    .pw,
+    .morebtn {
+      min-height: 44px;
+    }
+    .pw,
+    .morebtn {
+      min-width: 44px;
+    }
+    .lv input {
+      min-height: 36px;
     }
   }
 </style>

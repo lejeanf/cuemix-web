@@ -375,4 +375,12 @@
     min-width: 0;
     align-self: flex-start;
   }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .t,
+    .o,
+    .preset select {
+      min-height: 44px;
+    }
+  }
 </style>

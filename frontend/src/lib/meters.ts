@@ -88,6 +88,11 @@ class MeterBank {
     }
   }
 
+  /** Draws every meter again (new colours). */
+  redraw(): void {
+    for (const t of this.targets) draw(t);
+  }
+
   private wake(): void {
     if (this.raf === 0 && typeof requestAnimationFrame !== 'undefined' && !document.hidden) {
       this.last = 0;
@@ -118,8 +123,32 @@ class MeterBank {
   }
 }
 
+/** Meter colours, from the theme tokens (app.css); refreshed when the theme changes. */
+interface Palette {
+  track: string;
+  green: string;
+  yellow: string;
+  red: string;
+}
+const FALLBACK: Palette = { track: '#0d0e11', green: '#10B981', yellow: '#EAB308', red: '#EF4444' };
+let palette: Palette = FALLBACK;
+
+/** Reads the meter colours from the page's CSS variables (call after a theme change). */
+export function refreshMeterPalette(): void {
+  if (typeof document === 'undefined') return;
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name: string, d: string) => cs.getPropertyValue(name).trim() || d;
+  palette = {
+    track: v('--field', FALLBACK.track),
+    green: v('--meter-green', FALLBACK.green),
+    yellow: v('--meter-yellow', FALLBACK.yellow),
+    red: v('--meter-red', FALLBACK.red),
+  };
+  meterBank.redraw();
+}
+
 function colorAt(pos: number): string {
-  return pos > 0.92 ? '#EF4444' : pos > 0.75 ? '#EAB308' : '#10B981';
+  return pos > 0.92 ? palette.red : pos > 0.75 ? palette.yellow : palette.green;
 }
 
 function draw(t: Target): void {
@@ -132,14 +161,14 @@ function draw(t: Target): void {
   const g = c.getContext('2d');
   if (!g) return;
   g.clearRect(0, 0, w, h);
-  g.fillStyle = '#0d0e11';
+  g.fillStyle = palette.track;
   g.fillRect(0, 0, w, h);
   const len = t.horizontal ? w : h;
   const fill = Math.round(len * t.value);
   const grad = t.horizontal ? g.createLinearGradient(0, 0, w, 0) : g.createLinearGradient(0, h, 0, 0);
-  grad.addColorStop(0, '#10B981');
-  grad.addColorStop(0.75, '#EAB308');
-  grad.addColorStop(1, '#EF4444');
+  grad.addColorStop(0, palette.green);
+  grad.addColorStop(0.75, palette.yellow);
+  grad.addColorStop(1, palette.red);
   g.fillStyle = grad;
   if (t.horizontal) g.fillRect(0, 0, fill, h);
   else g.fillRect(0, h - fill, w, fill);

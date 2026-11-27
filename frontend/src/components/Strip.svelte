@@ -201,7 +201,7 @@
   .b.on {
     background: var(--on);
     border-color: var(--on);
-    color: #111;
+    color: var(--on-accent);
     font-weight: 700;
   }
   .b:disabled {
@@ -211,6 +211,16 @@
   .rdiff {
     display: block;
     font-size: 0.75em;
-    color: var(--amber, #f59e0b);
+    color: var(--amber);
+  }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .b {
+      min-height: 44px;
+      min-width: 30px;
+    }
+    .noDsp {
+      min-height: 44px;
+    }
   }
 </style>

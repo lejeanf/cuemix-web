@@ -646,6 +646,12 @@ Trois acteurs, chacun avec ses droits :
 - Mixer : tranches groupées (`frontend/src/lib/mixerGroups.ts` : Mic, Line, S/PDIF, Optical, Computer, Reverb ; blocs numériques et USB seulement pour la disposition à 32 entrées, sinon « Other ») ; graduation dB à côté du fader Monitor, calculée avec `trimDbToPos` et la géométrie du fader.
 - Téléphones : toasts sous l'en-tête.
 
+### Thème et tactile (revue UX, non publié)
+
+- Toutes les couleurs de l'interface viennent des jetons de `frontend/src/app.css` (nouveaux : `--danger-bg`, `--danger-text`, `--row-active`, `--thumb-hi/lo/edge`, `--grid`, `--grid-strong`, `--axis-text`) ; restent en dur les ombres, les couleurs d'étiquette proposées à l'utilisateur et celles des bandes d'EQ (données). Les mètres (canvas) lisent `--field` et `--meter-*` (`refreshMeterPalette` dans `meters.ts`).
+- Mode Nuit : `:root[data-theme='night']` redéfinit les jetons (lumières atténuées, texte ≥ 4,5:1 sur sa carte) ; bouton lune dans l'en-tête, choix par navigateur (`frontend/src/lib/theme.ts`, clé `cuemix.theme`), appliqué dans `main.ts` avant le premier rendu. Base du futur `design/tokens.json` partagé avec iOS.
+- `@media (pointer: coarse)` : cibles d'au moins 44 px de haut dans chaque composant concerné ; la souris garde la disposition dense.
+
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
 
 | # | Sujet | Arbitrage | État |

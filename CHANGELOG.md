@@ -12,6 +12,22 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+Touch sizes and Night mode from the UI review (web UI only).
+
+### Added
+- **Night mode**: a moon button in the header dims the whole UI (text, accents, meters, borders)
+  for a dark room or a stage. Off by default, remembered per browser, applied before the first
+  paint. Text keeps at least 4.5:1 contrast on its background.
+
+### Changed
+- Touch screens (`pointer: coarse`): buttons and fields are at least 44 px tall (mute/solo, +48V /
+  pad / phase, Control Room, mix tabs, EQ band controls, header buttons); the mouse keeps the
+  dense layout.
+- Colours: every UI colour now comes from a token in `app.css` (new tokens for the error
+  background and text, the current list row, the fader thumb and the EQ grid); the meters read
+  theirs from the tokens too.
+- Phones (≤ 420 px), Advanced view: the header hides the app name to keep its buttons on one row.
+
 Preset management from the UI review. Compatibility: preset files are unchanged; the Simple view
 list is a new file, `<presets_dir>/.simple-view.json`.
 
