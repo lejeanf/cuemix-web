@@ -261,9 +261,10 @@
     stroke: var(--text);
     stroke-width: 2;
   }
+  /* Solid and grey: a dash pattern with round caps turns into a row of blobs. */
   .ghost .arc {
     stroke: var(--text-dim);
-    stroke-dasharray: 2 2.5;
+    opacity: 0.6;
   }
   .ghost .needle {
     stroke: var(--text-dim);
