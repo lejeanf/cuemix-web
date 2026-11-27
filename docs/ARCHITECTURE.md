@@ -635,6 +635,13 @@ Trois acteurs, chacun avec ses droits :
 - L'onglet suit le fragment d'URL aussi après le chargement (`hashchange`, `tabFromHash` dans `ui.ts`).
 - Sous 640 px, le panneau Présets est fixé aux deux bords de l'écran (il débordait de 121 px à 375 px) ; les cartes de la vue Entrée se partagent chaque ligne.
 
+### Vue Avancée : disposition (revue UX, non publié)
+
+- Téléphones (≤ 640 px) : barre d'onglets en bas (`.bnav` dans `App.svelte`, icônes + libellés, même ordre et mêmes noms que l'app iOS, Q11) ; l'en-tête garde une seule ligne (`TopBar` prop `phoneTabs`). Avec `?embed`, pas de barre du bas : les onglets restent dans l'en-tête et l'app native fournit sa barre.
+- Barre Control Room : Monitor et Phones ont chacun un bouton marche/arrêt (commande `power`, état `powerView`) ; sur téléphone, lignes de 40 px et boutons DIM/MONO/A-B/Talkback repliés derrière ⋯. Le niveau principal s'appelle « Monitor » partout ; plus de remise à 0 dB par double-clic sur ce curseur (un volume ne doit jamais sauter vers le haut).
+- Mixer : tranches groupées (`frontend/src/lib/mixerGroups.ts` : Mic, Line, S/PDIF, Optical, Computer, Reverb ; blocs numériques et USB seulement pour la disposition à 32 entrées, sinon « Other ») ; graduation dB à côté du fader Monitor, calculée avec `trimDbToPos` et la géométrie du fader.
+- Téléphones : toasts sous l'en-tête.
+
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
 
 | # | Sujet | Arbitrage | État |

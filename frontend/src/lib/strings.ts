@@ -57,6 +57,7 @@ export const S = {
   reverbSends: 'Sends',
   reverbSendsHint: 'Sends are the faders of the Reverb mix',
   controlRoom: 'Control Room',
+  crMore: 'More Control Room buttons',
   dim: 'DIM',
   mono: 'MONO',
   speakerAB: 'A/B',

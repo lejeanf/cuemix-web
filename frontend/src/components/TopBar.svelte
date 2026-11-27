@@ -6,8 +6,8 @@
   import { PRESET_SCHEMA_VERSION, exportFileName, presetNameFromFile } from '../lib/presetFile';
   import type { Snippet } from 'svelte';
 
-  /** The view tabs, shown in the same bar. */
-  let { children }: { children?: Snippet } = $props();
+  /** The view tabs, shown in the same bar. `phoneTabs`: also on phones (else a bottom bar has them). */
+  let { children, phoneTabs = true }: { children?: Snippet; phoneTabs?: boolean } = $props();
 
   let root: HTMLElement;
   let moreBtn = $state<HTMLButtonElement>();
@@ -102,7 +102,7 @@
 
 <header class="top" bind:this={root}>
   <span class="brand">{S.appName}</span>
-  {#if !store.simple}<nav class="tabs">{@render children?.()}</nav>{:else}<span class="grow"></span>{/if}
+  {#if !store.simple}<nav class="tabs" class:wideonly={!phoneTabs}>{@render children?.()}</nav>{:else}<span class="grow"></span>{/if}
 
   <div class="pw">
     <button class="btn clock" aria-haspopup="dialog" aria-expanded={open === 'clock'} disabled={off} onclick={() => toggle('clock')}>
@@ -475,6 +475,10 @@
       order: 10;
       flex-basis: 100%;
       min-height: 40px;
+    }
+    /* The bottom tab bar has the views on phones: the header keeps one row. */
+    .tabs.wideonly {
+      display: none;
     }
     .clock {
       display: none;

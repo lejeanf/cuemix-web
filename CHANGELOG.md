@@ -12,6 +12,21 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+Advanced layout from the UI review (web UI only).
+
+### Changed
+- Phones: a bottom tab bar (Mixer, Input, Output, Reverb, with icons) replaces the second header
+  row, in the order and names planned for the iOS app. Not shown with `?embed` (the app has its
+  own tab bar there).
+- Control Room bar: Monitor and Phones each get an on/off button (the server-side fade, like the
+  Simple view). On phones the two levels get touch-sized rows and DIM, MONO, A/B and Talkback fold
+  behind a ⋯ button. The Main level is called **Monitor** everywhere (bar, mixer column), "Main"
+  stays the name of the mix. Double-click on the Monitor slider no longer jumps to 0 dB.
+- Mixer: strips are grouped under Mic, Line, S/PDIF, Optical, Computer and Reverb headings (the
+  digital and USB groups only for the 32-input layout); the Monitor fader has a dB scale (0, −10,
+  −20, −40, −60).
+- Phones: messages (toasts) show under the header instead of over the bottom bars.
+
 Simple view refinements from the UI review. Compatibility: no preset or `config.toml` change.
 
 ### Added
