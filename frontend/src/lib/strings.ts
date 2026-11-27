@@ -10,6 +10,10 @@ export const S = {
   connecting: 'connecting',
   offline: 'offline',
   demo: 'Demo — no MOTU',
+  /** Short status label, always shown in demo mode (the full text is its accessible name). */
+  demoShort: 'Demo',
+  dismiss: 'Tap to dismiss',
+  view: { label: 'View', simple: 'Simple', advanced: 'Advanced', simpleHint: 'Volume remote for phones', advancedHint: 'Every control' },
   offlineBanner: 'Offline — reconnecting…',
   tabs: { mixer: 'Mixer', input: 'Input', output: 'Output', reverb: 'Reverb', probe: 'Meter probe' },
   monitoring: 'Monitoring',

@@ -102,7 +102,7 @@
 
 <header class="top" bind:this={root}>
   <span class="brand">{S.appName}</span>
-  {#if !store.simple}<nav class="tabs">{@render children?.()}</nav>{/if}
+  {#if !store.simple}<nav class="tabs">{@render children?.()}</nav>{:else}<span class="grow"></span>{/if}
 
   <div class="pw">
     <button class="btn clock" aria-haspopup="dialog" aria-expanded={open === 'clock'} disabled={off} onclick={() => toggle('clock')}>
@@ -168,12 +168,20 @@
   <button class="btn more" data-more-menu bind:this={moreBtn} aria-haspopup="dialog" aria-expanded={store.advancedOpen} aria-label={S.advanced.title} title={S.advanced.title} onclick={() => store.openAdvanced()}>⋯</button>
 
   {#if !store.embed}
-  <button class="btn mode" aria-pressed={!store.simple} title={store.simple ? 'Show every control' : 'Volume remote for phones'} onclick={() => store.setSimple(!store.simple)}
-    >{store.simple ? 'Advanced' : 'Simple'}</button
-  >
+  <!-- Shows where you are: the current view is the highlighted half. Icons on phones. -->
+  <div class="seg" role="group" aria-label={S.view.label}>
+    <button class="segb" aria-pressed={store.simple} aria-label={S.view.simple} title={S.view.simpleHint} onclick={() => store.setSimple(true)}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 12l4-4" /></svg>
+      <span class="segt">{S.view.simple}</span>
+    </button>
+    <button class="segb" aria-pressed={!store.simple} aria-label={S.view.advanced} title={S.view.advancedHint} onclick={() => store.setSimple(false)}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v16M12 4v16M18 4v16" /><path d="M4 14h4M10 8h4M16 16h4" /></svg>
+      <span class="segt">{S.view.advanced}</span>
+    </button>
+  </div>
   <span class="sr" role="status">{linkText}</span>
   <button class="status {link}" class:show={showStatus} aria-label="Connection: {linkText}" title={linkText} onclick={() => flashStatus()}>
-    <span class="dot" aria-hidden="true"></span><span class="txt" aria-hidden="true">{linkText}</span>
+    <span class="dot" aria-hidden="true"></span><span class="txt" aria-hidden="true">{link === 'demo' ? S.demoShort : linkText}</span>
   </button>
   {/if}
 </header>
@@ -350,8 +358,67 @@
   .status.connecting {
     --c: var(--amber);
   }
+  /* Demo is not a fault: amber, and its label always shows (in the flow, so it
+     never covers a button). Red stays for real problems. */
   .status.demo {
-    --c: var(--red);
+    --c: var(--amber);
+    width: auto;
+    gap: 6px;
+    padding: 0 10px 0 8px;
+    border: 1px solid var(--c);
+    border-radius: 999px;
+    height: 28px;
+  }
+  .status.demo .dot {
+    width: 9px;
+    height: 9px;
+  }
+  .status.demo .txt {
+    position: static;
+    transform: none;
+    padding: 0;
+    border: 0;
+    background: none;
+    opacity: 1;
+  }
+  .grow {
+    flex: 1;
+  }
+  .seg {
+    flex: none;
+    display: inline-flex;
+    padding: 2px;
+    gap: 2px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .segb {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 0 10px;
+    background: none;
+    border: 0;
+    border-radius: 6px;
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .segb[aria-pressed='true'] {
+    background: var(--bg-alt);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--cyan);
+  }
+  .segb svg {
+    display: none;
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
   }
   .dot {
     flex: none;
@@ -415,6 +482,45 @@
     .btn {
       min-height: 30px;
       padding: 0 10px;
+    }
+    /* One row on a 375 px phone even with a long preset name and the demo
+       pill: the preset button is capped and the brand gives way first. */
+    .brand {
+      display: block;
+      min-width: 0;
+      line-height: 44px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .btn {
+      max-width: 120px;
+    }
+    .grow {
+      display: none;
+    }
+    /* Icons only: the two halves fit beside Presets and ⋯. */
+    .segb {
+      min-width: 40px;
+      min-height: 32px;
+      justify-content: center;
+      padding: 0 8px;
+    }
+    .segb svg {
+      display: block;
+    }
+    .segt {
+      display: none;
+    }
+    /* The presets panel is wider than the space left of its button: pin it to
+       both screen edges under the header instead (was cut off at 375 px). */
+    .pop.wide {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 50px);
+      left: max(8px, env(safe-area-inset-left, 0px));
+      right: max(8px, env(safe-area-inset-right, 0px));
+      width: auto;
+      max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 66px);
+      overflow-y: auto;
     }
   }
 </style>

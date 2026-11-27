@@ -11,6 +11,7 @@ import { ParamSender } from './sender';
 import { clamp } from './validate';
 import { isHwMapped, isHwReadOnly, visibleTabs, type Tab } from './hwmap';
 import { S } from './strings';
+import { tabFromHash, toastTimeout } from './ui';
 import { LIVENESS_CHECK_MS, needsLivenessCheck, parseLaunchFlags, resolveSimple, shouldDropSilentSocket, shouldReconnectNow } from './launch';
 
 export type Link = 'offline' | 'connecting' | 'online' | 'demo';
@@ -65,9 +66,8 @@ function launchFlags() {
   return parseLaunchFlags(typeof location === 'undefined' ? '' : location.search);
 }
 
-function tabFromHash(): Tab {
-  const h = typeof location === 'undefined' ? '' : location.hash.slice(1);
-  return (TABS as readonly string[]).includes(h) ? (h as Tab) : 'mixer';
+function initialTab(): Tab {
+  return (typeof location === 'undefined' ? null : tabFromHash(location.hash, TABS)) ?? 'mixer';
 }
 
 class Store {
@@ -81,7 +81,7 @@ class Store {
     return visibleTabs({ online: this.online, reverbWritable: isHwMapped('reverb_decay'), probe });
   }
   /** Current view; `#mixer`, `#input`, `#output`, `#reverb` in the URL open it directly. */
-  tab: Tab = $state(tabFromHash());
+  tab: Tab = $state(initialTab());
   /** Phone remote (Main / Phones volume) instead of the full console. */
   simple = $state(initialSimple());
   /** `?embed`: running inside the native app's web view (hides the view toggle and status dot). */
@@ -218,8 +218,15 @@ class Store {
     this.connect();
     document.addEventListener('visibilitychange', this.onVisible);
     window.addEventListener('pageshow', this.onPageShow);
+    window.addEventListener('hashchange', this.onHash);
     if (import.meta.env.DEV && new URLSearchParams(location.search).has('fakeMeters')) this.startFakeMeters();
   }
+
+  /** Back/forward or an edited `#tab` on an open page switches the view. */
+  private onHash = (): void => {
+    const t = tabFromHash(location.hash, TABS);
+    if (t) this.tab = t;
+  };
 
   private onVisible = (): void => {
     if (document.visibilityState !== 'visible') return;
@@ -284,6 +291,7 @@ class Store {
     this.stopped = true;
     document.removeEventListener('visibilitychange', this.onVisible);
     window.removeEventListener('pageshow', this.onPageShow);
+    window.removeEventListener('hashchange', this.onHash);
     if (this.retry) clearTimeout(this.retry);
     this.clearLiveness();
     if (this.fakeTimer) clearInterval(this.fakeTimer);
@@ -404,8 +412,10 @@ class Store {
     }
     applyEvent(this.c, ev);
     if (ev.event === 'error' || ev.event === 'notice') {
-      const id = this.c.toastSeq;
-      setTimeout(() => this.dismissToast(id), 5000);
+      // Errors stay until tapped away; notices and warnings fade on their own.
+      const t = this.c.toasts.find((x) => x.id === this.c.toastSeq);
+      const ms = t ? toastTimeout(t) : null;
+      if (t && ms !== null) setTimeout(() => this.dismissToast(t.id), ms);
     }
     if (ev.event === 'snapshot' && this.bus >= ev.state.topology.mixes) this.bus = 0;
   }

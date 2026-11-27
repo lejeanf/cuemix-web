@@ -85,10 +85,18 @@
   <AdvancedDialog />
 {/if}
 
-<div class="toasts" aria-live="polite">
-  {#each store.c.toasts as t (t.id)}
-    <button class="toast" class:warning={t.level === 'warning'} class:info={t.level === 'info'} onclick={() => store.dismissToast(t.id)}>{t.message}</button>
-  {/each}
+<!-- Errors are announced at once and stay until tapped; notices are polite and fade. -->
+<div class="toasts">
+  <div class="tq" role="alert">
+    {#each store.c.toasts.filter((t) => !t.level) as t (t.id)}
+      <button class="toast" aria-label="{t.message}. {S.dismiss}" onclick={() => store.dismissToast(t.id)}><span>{t.message}</span><span class="x" aria-hidden="true">×</span></button>
+    {/each}
+  </div>
+  <div class="tq" aria-live="polite">
+    {#each store.c.toasts.filter((t) => t.level) as t (t.id)}
+      <button class="toast" class:warning={t.level === 'warning'} class:info={t.level === 'info'} onclick={() => store.dismissToast(t.id)}>{t.message}</button>
+    {/each}
+  </div>
 </div>
 
 <style>
@@ -144,7 +152,15 @@
     gap: 6px;
     max-width: min(360px, 92vw);
   }
+  .tq {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
   .toast {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
     text-align: left;
     padding: 10px 14px;
     background: #3b1212;
@@ -152,6 +168,11 @@
     border: 1px solid var(--red);
     border-radius: var(--radius);
     cursor: pointer;
+  }
+  .toast .x {
+    margin-left: auto;
+    font-size: 18px;
+    line-height: 1;
   }
   .toast.warning {
     background: var(--warn-bg);

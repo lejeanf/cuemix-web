@@ -159,6 +159,20 @@
     gap: 8px;
     align-items: stretch;
   }
+  /* Phones: each group takes the full width and its cards share it evenly, so
+     rows end flush instead of leaving ragged gaps. */
+  @media (max-width: 640px) {
+    .chans {
+      flex: 1 1 100%;
+    }
+    /* 96 px basis: three per row at 375 px, so the six line inputs split 3 + 3. */
+    .chans > .ch {
+      flex: 1 1 96px;
+    }
+    .groups > .ch:last-child {
+      flex: 1;
+    }
+  }
   .ch {
     position: relative;
     min-width: 64px;

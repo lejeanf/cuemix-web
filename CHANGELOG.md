@@ -12,6 +12,22 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+Quick fixes from the UI review (web UI only; no server or preset change).
+
+### Changed
+- Header: a two-part **Simple | Advanced** switch shows the current view (icons on phones) instead
+  of one button labelled with the other view. The header buttons now sit on the right in both views.
+- Demo mode: the status shows an amber **Demo** pill, always visible (its full text, "Demo — no
+  MOTU", is the accessible name). Red is no longer used for demo.
+- Error toasts stay until tapped (with a ×) and are announced at once (`role="alert"`); notices and
+  warnings still fade after 5 s.
+- Input view on phones: preamp cards share each row evenly (three per row) instead of leaving gaps.
+
+### Fixed
+- Presets panel on phones: it ran 121 px off the left edge at 375 px, hiding the preset names. Below
+  640 px it now spans the screen under the header and scrolls if needed.
+- The view follows the URL fragment on an open page: Back/Forward or editing `#output` switches tab.
+
 ## [0.7.2] - 2026-11-27
 
 Fixes from a security review: a web page could control the mixer through DNS rebinding,

@@ -618,6 +618,14 @@ Trois acteurs, chacun avec ses droits :
 - `?simple` force la vue Simple pour ce chargement sans l'écrire dans `localStorage` ; priorité : `?simple` > `localStorage` > largeur d'écran. `?embed` seul (réservé à la future vue web de l'app native, où Simple est natif) ouvre la vue Avancée pour ce chargement (non sauvegardée) et masque le bouton Simple/Avancé et le point d'état ; `?embed&simple` ouvre Simple. Logique pure dans `frontend/src/lib/launch.ts`.
 - Au retour de veille (`visibilitychange` visible, `pageshow` persisté), `store.reconnectNow()` rouvre la WebSocket immédiatement si elle n'est ni ouverte ni en cours de connexion (une seule tentative à la fois, backoff remis à zéro pour afficher « connexion » et non « hors ligne »). Si la socket paraît ouverte mais que la session est `online`/`demo` (mètres ≈ 30/s) et qu'aucun message n'arrive dans les 2 s suivant le retour au premier plan, elle est détachée sans attendre la fermeture et une nouvelle connexion est ouverte aussitôt. `manifest.json` porte `id: "./"` ; `theme_color` = couleur de la TopBar (`#16181d`), `background_color` = `#121214`.
 
+### Interface : corrections rapides de la revue UX (non publié)
+
+- En-tête : commutateur à deux boutons **Simple | Avancé** (`aria-pressed` sur la vue courante, icônes sous 640 px) ; en vue Simple un espaceur pousse les boutons à droite comme en vue Avancée.
+- Mode démo : pastille ambre « Demo » toujours visible (nom accessible « Demo — no MOTU ») ; le rouge reste réservé aux erreurs.
+- Toasts : les erreurs (sans `level`) restent jusqu'au toucher, dans une région `role="alert"` ; avis et avertissements disparaissent après 5 s (`toastTimeout`, `frontend/src/lib/ui.ts`).
+- L'onglet suit le fragment d'URL aussi après le chargement (`hashchange`, `tabFromHash` dans `ui.ts`).
+- Sous 640 px, le panneau Présets est fixé aux deux bords de l'écran (il débordait de 121 px à 375 px) ; les cartes de la vue Entrée se partagent chaque ligne.
+
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
 
 | # | Sujet | Arbitrage | État |
