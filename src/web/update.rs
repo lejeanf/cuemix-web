@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::body::{check_json_content_type, parse_json};
-use super::server::{AppState, WebConfig};
+use super::server::{origin_allowed, AppState, WebConfig};
 
 /// Header the UI sends with the install request. A plain cross-site form
 /// cannot set it, and a page that tries gets a CORS preflight this server
@@ -39,8 +39,12 @@ pub(super) const MAX_BODY_BYTES: usize = 1024;
 const MAX_RELEASES: usize = 20;
 /// Longest request file / tag the root side reads.
 const MAX_TAG_BYTES: usize = 64;
-/// Oldest release the UI may ask for (the root side enforces the same floor).
-const MIN_PIN_VERSION: &str = "0.5.0";
+/// Oldest release that may be installed (the *floor*): anything older would bring back a
+/// security hole or a serious bug that a later release fixed. The root side enforces the same
+/// floor. Raise it (here, in `deploy/cuemix-update.sh` and in `deploy/min-version`) with every
+/// release that fixes one. The newest release can raise it further for installed systems
+/// (`min_version` in the status file), never lower it.
+pub(super) const MIN_PIN_VERSION: &str = "0.7.2";
 /// Least time between two accepted install requests.
 pub(super) const INSTALL_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
 /// `features` entry of a status file written by a root updater that reads the request file.
@@ -194,6 +198,9 @@ struct StatusView {
     pinning: bool,
     /// Written by an updater that lists releases (older ones only know `latest`).
     lists_releases: bool,
+    /// Oldest installable version (without `v`): [`MIN_PIN_VERSION`], or the status file's
+    /// `min_version` when that is higher.
+    floor: String,
 }
 
 fn tag_field(status: &Value, key: &str) -> Option<String> {
@@ -204,7 +211,19 @@ fn tag_field(status: &Value, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// [`MIN_PIN_VERSION`], raised (never lowered) by the status file's `min_version`, which the
+/// root side read from the newest release.
+fn floor(status: &Value) -> String {
+    match tag_field(status, "min_version") {
+        Some(t) if cmp_versions(&t, MIN_PIN_VERSION) == Ordering::Greater => {
+            t.trim_start_matches('v').to_owned()
+        }
+        _ => MIN_PIN_VERSION.to_owned(),
+    }
+}
+
 fn view(status: &Value) -> StatusView {
+    let floor = floor(status);
     let releases: Vec<Release> = status
         .get("releases")
         .and_then(Value::as_array)
@@ -228,7 +247,7 @@ fn view(status: &Value) -> StatusView {
                         published_at,
                     })
                 })
-                .filter(|r| cmp_versions(&r.tag, MIN_PIN_VERSION) != Ordering::Less)
+                .filter(|r| cmp_versions(&r.tag, &floor) != Ordering::Less)
                 .take(MAX_RELEASES)
                 .collect()
         })
@@ -242,6 +261,7 @@ fn view(status: &Value) -> StatusView {
         latest_stable: tag_field(status, "latest_stable"),
         latest_pre: tag_field(status, "latest_pre"),
         releases,
+        floor,
     }
 }
 
@@ -339,6 +359,8 @@ pub(super) async fn status_json(cfg: &WebConfig) -> Value {
         "latest_stable": view.latest_stable,
         "latest_pre": view.latest_pre,
         "releases": view.releases,
+        // Older releases are neither listed nor installable from the UI.
+        "min_version": format!("v{}", if view.floor.is_empty() { MIN_PIN_VERSION } else { &view.floor }),
         "status": status,
         "pending": tokio::fs::try_exists(&u.request_file).await.unwrap_or(false),
         "pending_version": pending_version(&u.request_file).await,
@@ -346,8 +368,11 @@ pub(super) async fn status_json(cfg: &WebConfig) -> Value {
     })
 }
 
-pub(super) async fn status(State(app): State<AppState>) -> Json<Value> {
-    Json(status_json(&app.cfg).await)
+pub(super) async fn status(State(app): State<AppState>, headers: HeaderMap) -> Response {
+    if !origin_allowed(&headers, &app.cfg) {
+        return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
+    }
+    Json(status_json(&app.cfg).await).into_response()
 }
 
 fn refuse(status: StatusCode, message: &str) -> (StatusCode, String) {
@@ -399,6 +424,9 @@ pub(super) async fn put_prefs(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    if !origin_allowed(&headers, &app.cfg) {
+        return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
+    }
     if !headers.contains_key(INSTALL_HEADER) {
         return (StatusCode::FORBIDDEN, "missing x-cuemix-update header").into_response();
     }
@@ -493,10 +521,13 @@ pub(super) async fn queue_install(
                     "this machine's updater cannot install a chosen version yet: run the setup script's --update (deploy/proxmox-setup.sh --update, or deploy/linux-setup.sh) to refresh it",
                 );
             }
-            if cmp_versions(tag, MIN_PIN_VERSION) == Ordering::Less {
+            if cmp_versions(tag, &view.floor) == Ordering::Less {
                 return refuse(
                     StatusCode::BAD_REQUEST,
-                    "releases older than v0.5.0 cannot be installed from the UI",
+                    &format!(
+                        "releases older than v{} cannot be installed: they lack security or serious bug fixes",
+                        view.floor
+                    ),
                 );
             }
             if !view.releases.iter().any(|r| &r.tag == tag) {
@@ -538,6 +569,9 @@ pub(super) async fn install(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    if !origin_allowed(&headers, &app.cfg) {
+        return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
+    }
     if !headers.contains_key(INSTALL_HEADER) {
         return (StatusCode::FORBIDDEN, "missing x-cuemix-update header").into_response();
     }
@@ -595,7 +629,7 @@ mod tests {
             "releases": [
                 {"tag":"v9.1.0-alpha.2","version":"9.1.0-alpha.2","prerelease":true,"published_at":"2026-11-25T09:00:00Z"},
                 {"tag":"v9.0.0","version":"9.0.0","prerelease":false,"published_at":"2026-11-24T09:00:00Z"},
-                {"tag":"v0.5.1","version":"0.5.1","prerelease":false,"published_at":"2026-11-01T09:00:00Z"},
+                {"tag":"v0.8.1","version":"0.8.1","prerelease":false,"published_at":"2026-11-01T09:00:00Z"},
             ],
         })
         .to_string()
@@ -770,8 +804,8 @@ mod tests {
 
         // Nothing newer than what runs: no badge, even when older releases are listed.
         let older = json!({
-            "features": ["pin"], "latest_stable": "v0.5.1", "latest_pre": "v0.5.2-alpha.1",
-            "releases": [{"tag": "v0.5.1", "prerelease": false}],
+            "features": ["pin"], "latest_stable": "v0.7.2", "latest_pre": "v0.7.2-alpha.1",
+            "releases": [{"tag": "v0.7.2", "prerelease": false}],
         });
         tokio::fs::write(&cfg.update.status_file, older.to_string())
             .await
@@ -812,7 +846,7 @@ mod tests {
     #[tokio::test]
     async fn a_new_status_without_the_pin_marker_refuses_a_version() {
         let (cfg, dir) = setup("nopin", Some(status_text("0.6.0", false))).await;
-        let (code, msg) = request_install(&cfg, br#"{"version":"v0.5.1"}"#).await;
+        let (code, msg) = request_install(&cfg, br#"{"version":"v0.8.1"}"#).await;
         assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{msg}");
         assert!(!cfg.update.request_file.exists());
         // A plain request still works (the old root side installs the newest).
@@ -826,36 +860,36 @@ mod tests {
         let (cfg, dir) = setup("body", Some(status_text("0.6.0", true))).await;
         for (body, want) in [
             (&br#"{"version":"v7.7.7"}"#[..], StatusCode::BAD_REQUEST),
-            (br#"{"version":"v0.5.1; reboot"}"#, StatusCode::BAD_REQUEST),
-            (br#"{"version":"0.5.1"}"#, StatusCode::BAD_REQUEST),
+            (br#"{"version":"v0.8.1; reboot"}"#, StatusCode::BAD_REQUEST),
+            (br#"{"version":"0.8.1"}"#, StatusCode::BAD_REQUEST),
             (br#"{"version":5}"#, StatusCode::BAD_REQUEST),
             (b"not json", StatusCode::BAD_REQUEST),
             (b"[]", StatusCode::BAD_REQUEST),
-            (b"\"v0.5.1\"", StatusCode::BAD_REQUEST),
+            (b"\"v0.8.1\"", StatusCode::BAD_REQUEST),
         ] {
             let (code, msg) = request_install(&cfg, body).await;
             assert_eq!(code, want, "{} -> {msg}", String::from_utf8_lossy(body));
             assert!(!cfg.update.request_file.exists());
         }
         // A tag from the list is written as is, atomically, and only once.
-        let (code, _) = request_install(&cfg, br#"{"version":"v0.5.1"}"#).await;
+        let (code, _) = request_install(&cfg, br#"{"version":"v0.8.1"}"#).await;
         assert_eq!(code, StatusCode::ACCEPTED);
         assert_eq!(
             tokio::fs::read_to_string(&cfg.update.request_file)
                 .await
                 .unwrap(),
-            "v0.5.1"
+            "v0.8.1"
         );
         let v = status_json(&cfg).await;
         assert_eq!(v["pending"], true);
-        assert_eq!(v["pending_version"], "v0.5.1");
+        assert_eq!(v["pending_version"], "v0.8.1");
         let (code, _) = request_install(&cfg, br#"{"version":"v9.0.0"}"#).await;
         assert_eq!(code, StatusCode::CONFLICT);
         assert_eq!(
             tokio::fs::read_to_string(&cfg.update.request_file)
                 .await
                 .unwrap(),
-            "v0.5.1",
+            "v0.8.1",
             "the queued request is untouched"
         );
         // No temporary file is left behind.
@@ -894,21 +928,53 @@ mod tests {
             "features": ["pin"], "latest_stable": "v9.0.0",
             "releases": [
                 {"tag": "v9.0.0", "prerelease": false},
+                {"tag": "v0.7.3", "prerelease": false},
+                {"tag": "v0.7.2", "prerelease": false},
+                {"tag": "v0.7.1", "prerelease": false},
                 {"tag": "v0.5.0", "prerelease": false},
-                {"tag": "v0.4.9", "prerelease": false},
-                {"tag": "v0.3.0", "prerelease": false},
-                {"tag": "v0.5.0-alpha.1", "prerelease": true},
+                {"tag": "v0.7.2-alpha.1", "prerelease": true},
             ],
         });
         let tags: Vec<String> = view(&status).releases.into_iter().map(|r| r.tag).collect();
-        assert_eq!(tags, vec!["v9.0.0", "v0.5.0"]);
+        assert_eq!(tags, vec!["v9.0.0", "v0.7.3", "v0.7.2"]);
         let (cfg, dir) = setup("floor", Some(status.to_string())).await;
-        let (code, msg) = request_install(&cfg, br#"{"version":"v0.4.9"}"#).await;
-        assert_eq!(code, StatusCode::BAD_REQUEST);
-        assert!(msg.contains("older than v0.5.0"), "{msg}");
-        assert!(!cfg.update.request_file.exists());
-        let (code, _) = request_install(&cfg, br#"{"version":"v0.5.0"}"#).await;
+        assert_eq!(status_json(&cfg).await["min_version"], "v0.7.2");
+        // v0.7.1 lacks the DNS-rebinding fix, v0.5.0 the 0.7.1 input checks.
+        for old in ["v0.7.1", "v0.5.0", "v0.7.2-alpha.1"] {
+            let body = format!(r#"{{"version":"{old}"}}"#);
+            let (code, msg) = request_install(&cfg, body.as_bytes()).await;
+            assert_eq!(code, StatusCode::BAD_REQUEST, "{old}");
+            assert!(msg.contains("older than v0.7.2"), "{msg}");
+            assert!(!cfg.update.request_file.exists());
+        }
+        let (code, _) = request_install(&cfg, br#"{"version":"v0.7.3"}"#).await;
         assert_eq!(code, StatusCode::ACCEPTED);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn the_newest_release_can_raise_the_floor_but_never_lower_it() {
+        let mut status = json!({
+            "features": ["pin"], "latest_stable": "v9.0.0", "min_version": "v0.9.0",
+            "releases": [
+                {"tag": "v9.0.0", "prerelease": false},
+                {"tag": "v0.9.0", "prerelease": false},
+                {"tag": "v0.8.1", "prerelease": false},
+            ],
+        });
+        let tags: Vec<String> = view(&status).releases.into_iter().map(|r| r.tag).collect();
+        assert_eq!(tags, vec!["v9.0.0", "v0.9.0"]);
+        let (cfg, dir) = setup("floor-up", Some(status.to_string())).await;
+        assert_eq!(status_json(&cfg).await["min_version"], "v0.9.0");
+        let (code, msg) = request_install(&cfg, br#"{"version":"v0.8.1"}"#).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{msg}");
+        assert!(msg.contains("older than v0.9.0"), "{msg}");
+        // A lower or malformed value (the file sits in a directory the web user can write)
+        // does not lower the built-in floor.
+        for bad in [json!("v0.5.0"), json!("0.9.0; x"), json!(1)] {
+            status["min_version"] = bad;
+            assert_eq!(floor(&status), MIN_PIN_VERSION);
+        }
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
@@ -1103,7 +1169,7 @@ mod tests {
         );
         assert!(!cfg.update.request_file.exists() && !cfg.update_prefs_file.exists());
 
-        let big = format!(r#"{{"version":"v0.5.1","pad":"{}"}}"#, "x".repeat(2000));
+        let big = format!(r#"{{"version":"v0.8.1","pad":"{}"}}"#, "x".repeat(2000));
         assert_eq!(http(addr, "POST", "/api/update", true, &big).await.0, 413);
         assert!(!cfg.update.request_file.exists());
 
@@ -1127,7 +1193,7 @@ mod tests {
             400
         );
         assert_eq!(
-            http(addr, "POST", "/api/update", true, r#"{"version":"v0.5.1"}"#)
+            http(addr, "POST", "/api/update", true, r#"{"version":"v0.8.1"}"#)
                 .await
                 .0,
             202
@@ -1164,25 +1230,25 @@ mod tests {
 
         let gate = Cooldown::new(std::time::Duration::ZERO);
         for bad in [
-            &br#"{"version":"v0.5.1","extra":true}"#[..],
+            &br#"{"version":"v0.8.1","extra":true}"#[..],
             br#"{"version":5}"#,
-            br#"{"version":["v0.5.1"]}"#,
-            br#"{"version":"v0.5.1\n"}"#,
-            br#"{"version":"v0.5.1\u0000"}"#,
-            br#"{"version":"v0.5.1\r\nX: 1"}"#,
-            br#"{"version":"v0.5.1/../../x"}"#,
-            br#"{"version":"v0.5.1 "}"#,
-            br#"{"version":"V0.5.1"}"#,
+            br#"{"version":["v0.8.1"]}"#,
+            br#"{"version":"v0.8.1\n"}"#,
+            br#"{"version":"v0.8.1\u0000"}"#,
+            br#"{"version":"v0.8.1\r\nX: 1"}"#,
+            br#"{"version":"v0.8.1/../../x"}"#,
+            br#"{"version":"v0.8.1 "}"#,
+            br#"{"version":"V0.8.1"}"#,
             br#"{"version":"v0.5"}"#,
-            br#"{"version":"v0.5.1-"}"#,
-            br#"{"version":"v0.5.1;rm -rf /"}"#,
-            br#"{"version":"v0.5.1$(id)"}"#,
+            br#"{"version":"v0.8.1-"}"#,
+            br#"{"version":"v0.8.1;rm -rf /"}"#,
+            br#"{"version":"v0.8.1$(id)"}"#,
             "{\"version\":\"v0.5.\u{ff11}\"}".as_bytes(),
-            "{\"version\":\"v0.5.1\u{202e}\"}".as_bytes(),
-            b"{\"version\":\"v0.5.1\"}\0",
+            "{\"version\":\"v0.8.1\u{202e}\"}".as_bytes(),
+            b"{\"version\":\"v0.8.1\"}\0",
             br#"[]"#,
-            br#""v0.5.1""#,
-            b"v0.5.1",
+            br#""v0.8.1""#,
+            b"v0.8.1",
             b"\xff",
         ] {
             let (code, _) = queue_install(&cfg, &gate, bad).await;
@@ -1283,7 +1349,7 @@ mod tests {
                 "{ct:?}"
             );
             assert_eq!(
-                http_ct(addr, "POST", "/api/update", ct, r#"{"version":"v0.5.1"}"#).await,
+                http_ct(addr, "POST", "/api/update", ct, r#"{"version":"v0.8.1"}"#).await,
                 415,
                 "{ct:?}"
             );

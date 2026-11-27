@@ -206,6 +206,10 @@ pub struct Web {
     /// Extra origins allowed to open `/ws` (e.g. `https://mixer.example.com`).
     /// Same-origin requests (`Origin` host = `Host`) are always allowed.
     pub allowed_origins: Vec<String>,
+    /// Extra host names the UI is reached by (e.g. `mixer.example.com` behind a proxy,
+    /// or a router DNS name). IP addresses, `localhost`, `*.local` and the mDNS name are
+    /// always accepted; any other `Host` gets 421 (DNS-rebinding guard).
+    pub allowed_hosts: Vec<String>,
 }
 
 /// Keys present in `raw` but absent from the serialised known config.

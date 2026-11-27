@@ -58,6 +58,10 @@ trust_forwarded_headers = false
 # Extra origins allowed to open the /ws WebSocket (same-origin is always allowed).
 # Example behind a proxy: ["https://mixer.example.com"]
 allowed_origins = []
+# Host names the UI is reached by, besides IP addresses, localhost, *.local and the mDNS
+# name (always accepted). Any other Host header gets 421: this blocks DNS-rebinding pages.
+# Example: ["mixer.example.com", "cuemix.example.net"]
+allowed_hosts = []
 
 [update]
 # Default of the "Show pre-releases" switch (Advanced menu, "Version..."), used until

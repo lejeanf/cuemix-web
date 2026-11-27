@@ -14,19 +14,27 @@
 //! - the client IP used in logs is the peer address, or the rightmost
 //!   `X-Forwarded-For` entry (appended by the trusted proxy) when
 //!   `web.trust_forwarded_headers = true`.
-//! - `/ws` and `/api/v1/*` reject cross-site browser requests (403): an `Origin` header
-//!   must match the request host or an entry of `web.allowed_origins`.
+//! - every request must name a known host (DNS-rebinding guard, [`host_allowed`]): an IP
+//!   literal, `localhost`, a `.local` name, the mDNS name, or an entry of `web.allowed_hosts` /
+//!   `web.allowed_origins`. Anything else gets 421 before any route runs.
+//! - `/ws`, `/api/v1/*` and `/api/update*` reject cross-site browser requests (403): an
+//!   `Origin` header must match the request host or an entry of `web.allowed_origins`.
+//! - every response carries a Content-Security-Policy (no framing, scripts from this server
+//!   only), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+//!   `Referrer-Policy: no-referrer` and `Cross-Origin-Opener-Policy: same-origin`
+//!   ([`security_headers`]).
 //! - every WebSocket write has a [`SEND_TIMEOUT`]; a client that stops
 //!   reading is disconnected so it can never pin memory or stall others.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use anyhow::Context;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::DefaultBodyLimit;
-use axum::extract::{ConnectInfo, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
+use axum::extract::{ConnectInfo, Request, State};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode, Uri};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -60,6 +68,11 @@ pub struct WebConfig {
     pub trust_forwarded_headers: bool,
     /// Extra origins (`scheme://host[:port]`) allowed to open `/ws`.
     pub allowed_origins: Vec<String>,
+    /// Extra host names the UI is reached by (`[web] allowed_hosts`), on top of IP literals,
+    /// `localhost`, `.local` names and [`Self::mdns_hostname`].
+    pub allowed_hosts: Vec<String>,
+    /// `[network] mdns_hostname` (accepted bare and as `<name>.local`).
+    pub mdns_hostname: String,
     pub update: crate::config::Update,
     /// `{"show_prerelease":bool}` saved from the UI (`[storage] update_prefs_file`).
     pub update_prefs_file: std::path::PathBuf,
@@ -70,6 +83,8 @@ impl WebConfig {
         Self {
             trust_forwarded_headers: cfg.web.trust_forwarded_headers,
             allowed_origins: cfg.web.allowed_origins.clone(),
+            allowed_hosts: cfg.web.allowed_hosts.clone(),
+            mdns_hostname: cfg.network.mdns_hostname.clone(),
             update: cfg.update.clone(),
             update_prefs_file: cfg.storage.update_prefs_file.clone(),
         }
@@ -86,6 +101,13 @@ pub(super) struct AppState {
 
 /// Build the router (HTTP + WebSocket).
 pub fn router(engine: EngineHandle, cfg: WebConfig) -> Router {
+    let state = AppState {
+        engine,
+        cfg,
+        gate: std::sync::Arc::new(super::update::Cooldown::new(
+            super::update::INSTALL_COOLDOWN,
+        )),
+    };
     Router::new()
         .route("/ws", get(ws_handler))
         .route("/api/health", get(health))
@@ -115,13 +137,11 @@ pub fn router(engine: EngineHandle, cfg: WebConfig) -> Router {
                 .layer(DefaultBodyLimit::max(super::update::MAX_BODY_BYTES)),
         )
         .fallback(get(static_handler))
-        .with_state(AppState {
-            engine,
-            cfg,
-            gate: std::sync::Arc::new(super::update::Cooldown::new(
-                super::update::INSTALL_COOLDOWN,
-            )),
-        })
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            host_guard,
+        ))
+        .with_state(state)
 }
 
 /// Serve until `shutdown` fires.
@@ -131,6 +151,10 @@ pub async fn serve(
     cfg: WebConfig,
     mut shutdown: Shutdown,
 ) -> anyhow::Result<()> {
+    tracing::info!(
+        hosts = %accepted_hosts(&cfg),
+        "web UI answers for these host names (others get 421; add yours to [web] allowed_hosts)"
+    );
     let app = router(engine, cfg);
     axum::serve(
         listener,
@@ -147,6 +171,170 @@ async fn health() -> Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "api": crate::engine::API_VERSION,
     }))
+}
+
+// ------------------------------------------------------------ host guard ---
+
+/// The host part of a `Host` / `X-Forwarded-Host` value (`name`, `name:port`, `[v6]:port`),
+/// lowercase, without a trailing dot. IPv6 literals keep their brackets. `None` when the value
+/// is not a plain authority.
+pub(super) fn host_part(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty()
+        || raw.len() > 300
+        || raw
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || "/?#@\\,\"<>".contains(c))
+    {
+        return None;
+    }
+    let valid_port = |p: &str| {
+        !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u16>().is_ok()
+    };
+    if let Some(v6) = raw.strip_prefix('[') {
+        let (addr, tail) = v6.split_once(']')?;
+        if !(tail.is_empty() || tail.strip_prefix(':').is_some_and(valid_port)) {
+            return None;
+        }
+        addr.parse::<Ipv6Addr>().ok()?;
+        return Some(format!("[{}]", addr.to_ascii_lowercase()));
+    }
+    let host = match raw.split_once(':') {
+        Some((h, p)) if valid_port(p) => h,
+        Some(_) => return None,
+        None => raw,
+    };
+    let host = host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase();
+    (!host.is_empty()).then_some(host)
+}
+
+/// Whether a request for `host` (from [`host_part`]) may be served. A DNS-rebinding page always
+/// names its own public domain, so only names an outside attacker cannot own are accepted: IP
+/// literals, `localhost`, `.local` names (mDNS, never served by public DNS), the configured mDNS
+/// name, and the names listed in `allowed_hosts` / `allowed_origins`.
+pub(super) fn host_allowed(host: &str, cfg: &WebConfig) -> bool {
+    if host.starts_with('[') || host.parse::<Ipv4Addr>().is_ok() || host == "localhost" {
+        return true;
+    }
+    if host.len() > ".local".len() && host.ends_with(".local") {
+        return true;
+    }
+    let mdns = cfg.mdns_hostname.trim().to_ascii_lowercase();
+    if !mdns.is_empty() && host == mdns {
+        return true;
+    }
+    cfg.allowed_hosts
+        .iter()
+        .filter_map(|h| host_part(h))
+        .chain(
+            cfg.allowed_origins
+                .iter()
+                .filter_map(|o| parse_origin(o))
+                .map(|(_, h, _)| h),
+        )
+        .any(|h| h == host)
+}
+
+/// The authority the client asked for: the rightmost `X-Forwarded-Host` behind a trusted
+/// proxy, else `Host`, else the request URI's authority (HTTP/2). A header that is not text
+/// comes back as `"\0"`, which [`host_part`] refuses.
+fn requested_host<'a>(headers: &'a HeaderMap, uri: &'a Uri, cfg: &WebConfig) -> Option<&'a str> {
+    let forwarded = cfg
+        .trust_forwarded_headers
+        .then(|| headers.get("x-forwarded-host"))
+        .flatten();
+    match forwarded.or_else(|| headers.get(header::HOST)) {
+        Some(v) => Some(
+            v.to_str()
+                .map(|h| h.rsplit(',').next().unwrap_or(h).trim())
+                .unwrap_or("\u{0}"),
+        ),
+        None => uri.authority().map(|a| a.as_str()),
+    }
+}
+
+/// The accepted host names, for the startup log.
+fn accepted_hosts(cfg: &WebConfig) -> String {
+    let mut names = vec![
+        "IP addresses".to_owned(),
+        "localhost".to_owned(),
+        "*.local".to_owned(),
+    ];
+    let mdns = cfg.mdns_hostname.trim().to_ascii_lowercase();
+    if !mdns.is_empty() {
+        names.push(mdns);
+    }
+    names.extend(cfg.allowed_hosts.iter().filter_map(|h| host_part(h)));
+    names.extend(
+        cfg.allowed_origins
+            .iter()
+            .filter_map(|o| parse_origin(o))
+            .map(|(_, h, _)| h),
+    );
+    names.dedup();
+    names.join(", ")
+}
+
+/// Security headers of every response. `host` is the authority the client used (already
+/// checked by [`host_guard`]), so this server's own WebSocket is the only `connect-src` besides
+/// `'self'` (older Safari does not count `ws:` as `'self'`).
+pub(super) fn security_headers(headers: &mut HeaderMap, host: Option<&str>) {
+    let ws = host
+        .filter(|h| {
+            !h.is_empty()
+                && h.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-.:[]_".contains(&b))
+        })
+        .map(|h| format!(" ws://{h} wss://{h}"))
+        .unwrap_or_default();
+    let csp = format!(
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data:; font-src 'self' data:; media-src 'self' blob:; \
+         connect-src 'self'{ws}; object-src 'none'; base-uri 'none'; form-action 'none'; \
+         frame-ancestors 'none'"
+    );
+    if let Ok(v) = HeaderValue::from_str(&csp) {
+        headers.insert(header::CONTENT_SECURITY_POLICY, v);
+    }
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        HeaderName::from_static("cross-origin-opener-policy"),
+        HeaderValue::from_static("same-origin"),
+    );
+}
+
+/// Runs before every route: refuses unknown host names (421), then adds [`security_headers`].
+async fn host_guard(State(app): State<AppState>, req: Request, next: Next) -> Response {
+    let raw = requested_host(req.headers(), req.uri(), &app.cfg).map(str::to_owned);
+    if let Some(raw) = &raw {
+        if !host_part(raw).is_some_and(|h| host_allowed(&h, &app.cfg)) {
+            // Untrusted text: cut and escaped before it reaches the log.
+            let shown: String = raw
+                .chars()
+                .take(64)
+                .flat_map(char::escape_default)
+                .collect();
+            tracing::info!(host = %shown, "refused a request for an unknown host name (add it to [web] allowed_hosts if it is yours)");
+            let mut resp = (
+                StatusCode::MISDIRECTED_REQUEST,
+                "unknown host name: add it to [web] allowed_hosts in config.toml",
+            )
+                .into_response();
+            security_headers(resp.headers_mut(), None);
+            return resp;
+        }
+    }
+    let mut resp = next.run(req).await;
+    security_headers(resp.headers_mut(), raw.as_deref());
+    resp
 }
 
 // ---------------------------------------------------------------- static ---
@@ -466,8 +654,7 @@ mod tests {
         let cfg = WebConfig {
             trust_forwarded_headers: false,
             allowed_origins: vec!["https://Mixer.Example.com".into()],
-            update: Default::default(),
-            update_prefs_file: Default::default(),
+            ..WebConfig::default()
         };
         let ok = |p: &[(&'static str, &'static str)]| origin_allowed(&hm(p), &cfg);
         assert!(ok(&[("host", "pi.local:8080")]));
@@ -550,6 +737,84 @@ mod tests {
         )
         .await;
         assert_eq!(r, Err(SendFailed));
+    }
+
+    #[test]
+    fn host_names_an_outside_attacker_could_own_are_refused() {
+        let cfg = WebConfig {
+            mdns_hostname: "Cuemix-Web".into(),
+            allowed_hosts: vec!["mixer.example.net".into(), "Proxy.Example.org:443".into()],
+            allowed_origins: vec!["https://studio.example.com:8443".into()],
+            ..WebConfig::default()
+        };
+        let ok = |raw: &str| host_part(raw).is_some_and(|h| host_allowed(&h, &cfg));
+        for good in [
+            "192.0.2.10:8080",
+            "127.0.0.1",
+            "[::1]:8080",
+            "[FE80::1]",
+            "localhost:8080",
+            "cuemix-web.local",
+            "CUEMIX-WEB.LOCAL.:8080",
+            "other-box.local",
+            "cuemix-web",
+            "mixer.example.net:8080",
+            "proxy.example.org",
+            "studio.example.com",
+        ] {
+            assert!(ok(good), "{good}");
+        }
+        for bad in [
+            "rebind.attacker.example",
+            "rebind.attacker.example:8080",
+            "cuemix-web.local.attacker.example",
+            "localhost.attacker.example",
+            ".local",
+            "local",
+            "127.0.0.1.nip.io",
+            "mixer.example.net.attacker.example",
+            "",
+            "a b",
+            "x:y:z",
+            "127.0.0.1:70000",
+            "127.0.0.1:",
+            "[::1",
+            "[::1]x",
+            "[nothex]",
+            "u@127.0.0.1",
+            "127.0.0.1/x",
+            "\u{0}",
+        ] {
+            assert!(!ok(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn security_headers_name_only_this_server_for_websockets() {
+        let csp_of = |host: Option<&str>| {
+            let mut h = HeaderMap::new();
+            security_headers(&mut h, host);
+            assert_eq!(
+                h.get(header::X_FRAME_OPTIONS).map(|v| v.as_bytes()),
+                Some(&b"DENY"[..])
+            );
+            h.get(header::CONTENT_SECURITY_POLICY)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let csp = csp_of(Some("cuemix-web.local:8080"));
+        assert!(
+            csp.contains(
+                "connect-src 'self' ws://cuemix-web.local:8080 wss://cuemix-web.local:8080;"
+            ),
+            "{csp}"
+        );
+        assert!(csp.contains("frame-ancestors 'none'"));
+        // A strange value never reaches the policy.
+        let csp = csp_of(Some("x; script-src *"));
+        assert!(csp.contains("connect-src 'self';"), "{csp}");
+        assert!(!csp.contains("script-src *"), "{csp}");
     }
 
     #[test]

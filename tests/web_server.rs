@@ -46,8 +46,9 @@ async fn harness(tag: &str) -> Result<Harness, Box<dyn std::error::Error>> {
         WebConfig {
             trust_forwarded_headers: true,
             allowed_origins: vec!["http://mixer.example.com:8443".to_owned()],
-            update: Default::default(),
-            update_prefs_file: Default::default(),
+            allowed_hosts: vec!["mixer.example.net".to_owned()],
+            mdns_hostname: "cuemix-web".to_owned(),
+            ..WebConfig::default()
         },
         shutdown,
     ));
@@ -139,7 +140,11 @@ async fn http_request(
     body: Option<&str>,
 ) -> Result<HttpResp, Box<dyn std::error::Error>> {
     let mut s = TcpStream::connect(addr).await?;
-    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n");
+    let mut req = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");
+    // `Host: localhost` unless the test names its own.
+    if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host")) {
+        req.push_str("Host: localhost\r\n");
+    }
     for (k, v) in headers {
         req.push_str(&format!("{k}: {v}\r\n"));
     }
@@ -709,5 +714,141 @@ async fn api_command_refuses_hostile_bodies() -> Result<(), Box<dyn std::error::
     // The state did not move.
     let s: Value = serde_json::from_slice(&http_get(h.addr, "/api/v1/summary").await?.body)?;
     assert_ne!(s["main"]["db"], -3.0);
+    Ok(())
+}
+
+/// DNS rebinding: the attacker's page names its own domain in both `Host` and `Origin`, which
+/// match each other. The host guard refuses it on every route before anything runs.
+#[tokio::test]
+async fn requests_for_an_unknown_host_name_are_refused_everywhere(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("rebind").await?;
+    let before: Value = serde_json::from_slice(&http_get(h.addr, "/api/v1/summary").await?.body)?;
+    let evil = [
+        ("Host", "rebind.attacker.example:8080"),
+        ("Origin", "http://rebind.attacker.example:8080"),
+    ];
+    let set = r#"{"cmd":"set","param":"main_vol","db":-7}"#;
+    assert_eq!(post(&h, set, &evil).await?.0, 421);
+    for (method, path, body) in [
+        ("GET", "/", None),
+        ("GET", "/api/health", None),
+        ("GET", "/api/v1/summary", None),
+        ("GET", "/api/update", None),
+        ("POST", "/api/update", Some(r#"{"version":"v9.9.9"}"#)),
+        ("GET", "/ws", None),
+    ] {
+        let mut headers = evil.to_vec();
+        headers.push(("x-cuemix-update", "1"));
+        headers.push(("Content-Type", "application/json"));
+        let r = http_request(h.addr, method, path, &headers, body).await?;
+        assert_eq!(r.status, 421, "{method} {path}");
+        assert_eq!(r.header("x-frame-options").as_deref(), Some("DENY"));
+    }
+    // The WebSocket upgrade itself.
+    let upgrade = [
+        ("Host", "rebind.attacker.example"),
+        ("Origin", "http://rebind.attacker.example"),
+        ("Connection", "Upgrade"),
+        ("Upgrade", "websocket"),
+        ("Sec-WebSocket-Version", "13"),
+        ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="),
+    ];
+    let r = http_request(h.addr, "GET", "/ws", &upgrade, None).await?;
+    assert_eq!(r.status, 421);
+    // Behind the trusted proxy, the forwarded host is the one that counts.
+    let r = http_request(
+        h.addr,
+        "GET",
+        "/api/health",
+        &[("X-Forwarded-Host", "rebind.attacker.example")],
+        None,
+    )
+    .await?;
+    assert_eq!(r.status, 421);
+    // Nothing moved.
+    let s: Value = serde_json::from_slice(&http_get(h.addr, "/api/v1/summary").await?.body)?;
+    assert_eq!(s["main"]["db"], before["main"]["db"]);
+    assert_ne!(s["main"]["db"], -7.0);
+
+    // Names an outside attacker cannot own are served: IP literals, localhost, .local, the
+    // mDNS name, allowed_hosts and the hosts of allowed_origins.
+    for host in [
+        h.addr.to_string(),
+        "127.0.0.1".to_owned(),
+        "[::1]:8080".to_owned(),
+        "LOCALHOST".to_owned(),
+        "cuemix-web.local:8080".to_owned(),
+        "studio-pi.local.".to_owned(),
+        "cuemix-web".to_owned(),
+        "Mixer.Example.NET".to_owned(),
+        "mixer.example.com:8443".to_owned(),
+    ] {
+        let r = http_request(h.addr, "GET", "/api/health", &[("Host", &host)], None).await?;
+        assert_eq!(r.status, 200, "{host}");
+    }
+    for host in ["x.example", "127.0.0.1:99999", "user@127.0.0.1"] {
+        let r = http_request(h.addr, "GET", "/api/health", &[("Host", host)], None).await?;
+        assert_ne!(r.status, 200, "{host:?}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn every_response_carries_the_security_headers() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("headers").await?;
+    for path in [
+        "/",
+        "/index.html",
+        "/api/health",
+        "/api/v1/summary",
+        "/some/spa/route",
+    ] {
+        let r = http_get(h.addr, path).await?;
+        let csp = r.header("content-security-policy").ok_or("no CSP")?;
+        for part in [
+            "default-src 'self'",
+            "script-src 'self';",
+            "frame-ancestors 'none'",
+            "object-src 'none'",
+            "connect-src 'self' ws://localhost wss://localhost;",
+        ] {
+            assert!(csp.contains(part), "{path}: {csp}");
+        }
+        assert_eq!(
+            r.header("x-frame-options").as_deref(),
+            Some("DENY"),
+            "{path}"
+        );
+        assert_eq!(
+            r.header("x-content-type-options").as_deref(),
+            Some("nosniff")
+        );
+        assert_eq!(r.header("referrer-policy").as_deref(), Some("no-referrer"));
+    }
+    Ok(())
+}
+
+/// The update endpoints apply the same cross-site Origin rule as `/ws` and `/api/v1`.
+#[tokio::test]
+async fn update_endpoints_refuse_cross_site_origins() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("update-origin").await?;
+    for (method, path, body) in [
+        ("GET", "/api/update", None),
+        ("POST", "/api/update", Some("")),
+        (
+            "PUT",
+            "/api/update/prefs",
+            Some(r#"{"show_prerelease":true}"#),
+        ),
+    ] {
+        let headers = [
+            ("Origin", "http://evil.example"),
+            ("x-cuemix-update", "1"),
+            ("Content-Type", "application/json"),
+        ];
+        let r = http_request(h.addr, method, path, &headers, body).await?;
+        assert_eq!(r.status, 403, "{method} {path}");
+    }
     Ok(())
 }
