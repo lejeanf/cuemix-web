@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
 
-  // Shared modal shell of the ⋯ menu panels (speaker plug, OSC, version): backdrop, focus
+  // Modal shell of the Advanced settings dialog (speaker plug, OSC and version tabs): backdrop, focus
   // trap, Escape, focus restore. The panel content brings its own buttons and state.
   let {
     title,
@@ -36,7 +36,7 @@
   });
 
   const focusables = () =>
-    dlg ? [...dlg.querySelectorAll<HTMLElement>('input, select, textarea, button, a[href]')].filter((x) => !(x as HTMLInputElement).disabled) : [];
+    dlg ? [...dlg.querySelectorAll<HTMLElement>('input, select, textarea, button, a[href]')].filter((x) => !(x as HTMLInputElement).disabled && !x.closest('[hidden]')) : [];
 
   function key(e: KeyboardEvent) {
     if (e.key === 'Escape') {

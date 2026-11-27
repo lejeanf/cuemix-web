@@ -18,7 +18,7 @@ describe('stale tab reload wiring', () => {
     store.buildVersion = '0.6.0';
     store.version = null;
     store.reloadWaiting = false;
-    store.plugOpen = store.oscOpen = store.versionOpen = store.roomOpen = false;
+    store.advancedOpen = store.roomOpen = false;
     store.c.toasts.length = 0;
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -52,13 +52,13 @@ describe('stale tab reload wiring', () => {
   });
   it('waits for an open panel, tells the user, and reloads once it is closed', async () => {
     serve('0.7.0');
-    store.oscOpen = true;
+    store.advancedOpen = true;
     await store.refreshVersion();
     await store.refreshVersion();
     expect(reload).not.toHaveBeenCalled();
     expect(store.c.toasts.filter((t) => t.level === 'info')).toHaveLength(1);
     expect(store.reloadWaiting).toBe(true);
-    store.oscOpen = false;
+    store.advancedOpen = false;
     store.checkStale();
     expect(reload).toHaveBeenCalledTimes(1);
     expect(store.reloadWaiting).toBe(false);
@@ -73,5 +73,25 @@ describe('stale tab reload wiring', () => {
     serve('0.7.0');
     await store.refreshVersion();
     expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe('Advanced settings dialog state', () => {
+  it('counts as an open panel (no stale reload) and opens on the asked or remembered tab', () => {
+    const mem = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) });
+    store.advancedOpen = false;
+    expect(store.panelOpen).toBe(false);
+    store.openAdvanced();
+    expect(store.panelOpen).toBe(true);
+    expect(store.advancedTab).toBe('plug');
+    store.setAdvancedTab('osc');
+    store.advancedOpen = false;
+    store.openAdvanced();
+    expect(store.advancedTab).toBe('osc');
+    store.openAdvanced('version');
+    expect(store.advancedTab).toBe('version');
+    store.advancedOpen = false;
+    vi.unstubAllGlobals();
   });
 });

@@ -55,6 +55,12 @@ Stricter input checking everywhere the server accepts text or numbers.
 - The web forms check the same rules before sending (preset names, labels,
   speaker plug URLs); the server stays the authority.
 
+### Changed
+- **⋯** now opens one **Advanced settings** dialog with three tabs (Speaker
+  plug, OSC, Version) instead of a menu that opens a dialog per item. It opens
+  on the tab you used last (remembered in this browser), keeps unsaved edits
+  when you switch tabs, and is also available in the Simple view.
+
 ### Compatibility
 - `POST /api/v1/command` answers 415 without `Content-Type: application/json`
   (for example `curl -d` without `-H 'Content-Type: application/json'`).

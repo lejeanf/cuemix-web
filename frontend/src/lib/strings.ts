@@ -81,10 +81,14 @@ export const S = {
   powerOff: 'Off',
   fadingIn: 'Fading in…',
   fadingOut: 'Fading out…',
-  menu: 'More',
-  plugMenuItem: 'Speaker plug…',
-  oscMenuItem: 'OSC…',
-  versionMenuItem: 'Version…',
+  advanced: {
+    title: 'Advanced settings',
+    tabsLabel: 'Settings sections',
+    tabs: { plug: 'Speaker plug', osc: 'OSC', version: 'Version' },
+    /** Short labels for narrow phones. */
+    short: { plug: 'Plug', osc: 'OSC', version: 'Version' },
+    close: 'Close',
+  },
   plugState: { off: 'Speaker plug off', on: 'Speaker plug on', warming: 'Speaker plug warming up', error: 'Speaker plug error', unknown: 'Speaker plug state unknown' },
   plug: {
     title: 'Speaker plug',

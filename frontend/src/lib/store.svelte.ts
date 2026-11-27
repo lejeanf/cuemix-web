@@ -3,6 +3,7 @@
 import { meterBank } from './meters';
 import { hasMk5Meters, mk5MeterLevels } from './meterMap';
 import { handleStale } from './reload';
+import { loadAdvancedTab, saveAdvancedTab, type AdvancedTab } from './advanced';
 import type { ChannelLabel, Command, DeviceInfo, EqBand, MeasureInfo, Param, OscSettings, PowerChannel, ServerEvent, SpeakerPlugSettings } from './protocol';
 import { DSP_LIMITS } from './protocol';
 import { applyEvent, applyParam, initialClientState, type ClientState } from './reducer';
@@ -37,6 +38,15 @@ export function healthUrl(loc: Pick<Location, 'pathname'>): string {
 
 const TABS: readonly Tab[] = ['mixer', 'input', 'output', 'reverb', 'probe'];
 const VIEW_KEY = 'cuemix.view';
+
+/** localStorage, or null when the browser blocks even looking at it. */
+function safeStorage(): Storage | null {
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+}
 /** Simple (phone remote) or advanced view: remembered per browser, phones start simple.
  *  `?simple` in the URL forces Simple for this load without saving it. */
 function initialSimple(): boolean {
@@ -86,12 +96,10 @@ class Store {
   }
   /** Room measurement state from the server (`unavailable` until it says otherwise). */
   measure: MeasureInfo = $state({ state: 'unavailable', source: [] });
-  /** The speaker plug settings panel is open. */
-  plugOpen = $state(false);
-  /** The OSC settings panel is open. */
-  oscOpen = $state(false);
-  /** The version panel is open. */
-  versionOpen = $state(false);
+  /** The Advanced settings dialog (speaker plug, OSC, version tabs) is open. */
+  advancedOpen = $state(false);
+  /** The tab it shows. */
+  advancedTab: AdvancedTab = $state('plug');
   /** The room test panel is open. */
   roomOpen = $state(false);
   /** Main output EQ bands (slot 0) from before the last applied room correction, for Undo. */
@@ -276,13 +284,24 @@ class Store {
     this.socketOpen = false;
   }
 
+  /** Opens the Advanced settings dialog on `tab`, or on the last tab used in this browser. */
+  openAdvanced(tab?: AdvancedTab): void {
+    this.advancedTab = tab ?? loadAdvancedTab(safeStorage());
+    this.advancedOpen = true;
+  }
+  /** Shows a tab of the open dialog and remembers it. */
+  setAdvancedTab(tab: AdvancedTab): void {
+    this.advancedTab = tab;
+    saveAdvancedTab(safeStorage(), tab);
+  }
+
   /** Build version of this page (overridable for tests). */
   buildVersion: string = __APP_VERSION__;
   /** A server update was seen while a panel was open: the reload waits for it to close. */
   reloadWaiting = false;
   /** Any modal panel is open (edits in it must not be lost to a reload). */
   get panelOpen(): boolean {
-    return this.plugOpen || this.oscOpen || this.versionOpen || this.roomOpen;
+    return this.advancedOpen || this.roomOpen;
   }
 
   async refreshVersion(): Promise<void> {

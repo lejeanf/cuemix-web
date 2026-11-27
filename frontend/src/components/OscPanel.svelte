@@ -1,6 +1,5 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import Dialog from './Dialog.svelte';
   import { store } from '../lib/store.svelte';
   import { S } from '../lib/strings';
   import { errorSince } from '../lib/plug';
@@ -28,6 +27,9 @@
   const problems = $derived(oscProblems(cur));
   const valid = $derived(oscValid(cur));
   const dirty = $derived(saved === null ? !sameOsc(cur, { listen: '', targets: [] }) : !sameOsc(cur, saved));
+  /** The tab bar needs to know about unsaved edits (switching tabs keeps them; closing asks first). */
+  let { onDirty }: { onDirty?: (d: boolean) => void } = $props();
+  $effect(() => onDirty?.(dirty));
 
   // Server settings arriving (first load, another client): take them unless the user is mid-edit.
   $effect(() => {
@@ -92,7 +94,7 @@
     saving = store.setOscSettings(norm);
   }
   function close() {
-    store.oscOpen = false;
+    store.advancedOpen = false;
   }
   // Per-row problem: problems.targets indexes the normalized list (empty rows are dropped).
   const rowErr = $derived.by(() => {
@@ -113,7 +115,7 @@
   });
 </script>
 
-<Dialog title={S.osc.title} titleId="osc-title" {dirty} onclose={close}>
+<div class="panel">
   <p class="note">{S.osc.help}</p>
 
   {#if info}
@@ -163,7 +165,7 @@
     <button type="button" class="primary" disabled={!store.ready || !valid || !dirty || saving} onclick={save}>{saving ? S.dialog.saving : S.dialog.save}</button>
     <button type="button" onclick={close}>{dirty ? S.dialog.cancel : S.dialog.close}</button>
   </div>
-</Dialog>
+</div>
 
 <style>
   fieldset {
