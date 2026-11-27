@@ -10,3 +10,17 @@ TimeoutStartSec=2min
 # Writes the result for the web UI; exit 10 = an update is available.
 ExecStart=/usr/local/sbin/cuemix-update --check --status-file /var/lib/cuemix-web/update-status.json
 SuccessExitStatus=10
+# Since 0.7.2: runs as root, but may only write the binary, the two state directories, its
+# lock in /run and a private /tmp.
+ProtectSystem=strict
+ReadWritePaths=/usr/local/bin /var/lib/cuemix-web /run
+# /var/lib/cuemix-update, root-only (0700), created by systemd if missing.
+StateDirectory=cuemix-update
+StateDirectoryMode=0700
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes

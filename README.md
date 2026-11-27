@@ -312,6 +312,8 @@ How an update stays safe:
 - DNS-rebinding guard: requests must name a known host (IP address, `localhost`, `*.local`, the mDNS name, or `[web] allowed_hosts`), otherwise 421. Cross-site `Origin` headers are refused on `/ws`, `/api/v1/*` and `/api/update*`.
 - Every response carries a Content-Security-Policy (scripts from this server only, no framing), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
 - There is no login: anyone who can reach the port controls the mixer and can install a release (never one below the security floor). Keep the server on a trusted network or behind an authenticating reverse proxy.
+- Resource limits: 10 s to send request headers, 256 HTTP connections, 64 WebSockets (16 per client address), 200 presets. OSC datagrams from outside the local network are ignored.
+- The service runs in a tight systemd sandbox (`systemd-analyze security cuemix-web`: about 1.4); the root update units may only write the binary and the two state directories.
 - The root updater never runs a downloaded binary as root: its `--version` check runs as `nobody`. Release jobs that run third-party build code get a read-only token, and release builds use no caches.
 - The web UI's npm packages are build-time only, and npm never runs their install scripts (`frontend/.npmrc` sets `ignore-scripts=true`; CI also passes `--ignore-scripts`). CI audits both dependency trees (`cargo audit`, `npm audit`).
 

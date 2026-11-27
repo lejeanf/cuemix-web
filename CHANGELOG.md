@@ -42,6 +42,29 @@ code more rights than it needs.
 - Release workflow: no token rights by default. Jobs that run third-party build code get
   `contents: read` only, `publish` alone may write the release and `docker` alone may push the
   image. No checkout keeps the token in `.git/config`, and release builds use no caches.
+- OSC: datagrams from outside the local network (private, link-local, loopback) are dropped,
+  so a forged source address can no longer make the bridge send state dumps to a stranger.
+- HTTP: a client gets 10 s to send its request headers (slow-header attacks), at most 256
+  connections are served at once, and WebSockets are capped at 64 in total and 16 per client
+  address (503 beyond). The server now runs its own accept loop on hyper (already a dependency
+  through axum) because `axum::serve` has no header timeout.
+- At most 200 presets: a new name beyond that is refused (overwriting still works), so no
+  client can fill the disk.
+- systemd: `cuemix-web.service` adds `PrivateDevices`, `ProtectProc=invisible`, a system-call
+  filter, `RestrictAddressFamilies`, `MemoryDenyWriteExecute`, `UMask=0077`, `MemoryMax=256M`,
+  `TasksMax=256` and more (`systemd-analyze security`: 1.4, OK). The root update units may
+  only write the binary, the two state directories and `/run` (`ProtectSystem=strict`, private
+  `/tmp`); `/var/lib/cuemix-update` is now a systemd `StateDirectory` (root, 0700).
+- `cuemix-update` refuses to publish the status files when `/var/lib/cuemix-update` and
+  `/var/lib/cuemix-web` are on different filesystems (a move there would be a root copy into
+  the web user's directory).
+- CI: GitHub's own actions are pinned by commit SHA like the others, the gitleaks download is
+  checked against its published sha256, the Docker base image is pinned by digest, and a
+  manual run of the release workflow builds but never publishes.
+
+### Fixed
+- The update notice no longer offers an older release when the root updater is older than the
+  web server (it reported "update available" for any different version).
 
 ### Compatibility
 - If you reach the UI by a name that is not an IP address, `localhost`, `*.local` or the mDNS
@@ -49,6 +72,9 @@ code more rights than it needs.
   `[web] allowed_hosts` in `config.toml` before updating, or the UI answers 421. The accepted
   names are logged at startup.
 - The Version dialog no longer lists releases older than v0.7.2.
+- The new systemd sandbox was checked on a regular systemd host, not yet inside a Proxmox
+  LXC container. If `cuemix-web` does not start after `proxmox-setup.sh --update`,
+  `journalctl -u cuemix-web` names the directive; report it.
 - The root-side changes (floor, unprivileged version check) arrive with
   `sudo deploy/proxmox-setup.sh --update` (or `deploy/linux-setup.sh`), like every change to
   `cuemix-update`. The in-app updater only replaces the binary.

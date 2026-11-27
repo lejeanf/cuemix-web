@@ -395,8 +395,14 @@ private_dir() {
 # there by root: a rename replaces whatever sits at FILE (a planted symlink included, which
 # is replaced, not followed) and -T refuses to move into a planted directory.
 atomic_publish() {
-  local file="$1" text="$2" tmp=""
+  local file="$1" text="$2" tmp="" dest_dir=""
   private_dir
+  # mv between filesystems is a copy, which would write as root inside the web user's
+  # directory (following a planted symlink): refuse instead.
+  dest_dir="$(dirname -- "${file}")"
+  if [[ "$(stat -c %d -- "${PRIVATE_DIR}")" != "$(stat -c %d -- "${dest_dir}")" ]]; then
+    die "${PRIVATE_DIR} and ${dest_dir} are on different filesystems; cannot publish ${file} safely"
+  fi
   tmp="$(mktemp "${PRIVATE_DIR}/publish.XXXXXX")" || die "cannot create a temporary file in ${PRIVATE_DIR}"
   if ! { printf '%s\n' "${text}" >"${tmp}" && chmod 0644 -- "${tmp}" && mv -fT -- "${tmp}" "${file}"; }; then
     rm -f -- "${tmp}"

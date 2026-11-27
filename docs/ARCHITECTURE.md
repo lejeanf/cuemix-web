@@ -494,13 +494,15 @@ Trois acteurs, chacun avec ses droits :
   (seul `fsevents`, optionnel et macOS uniquement, en déclare un).
 * `.cargo/config.toml` : résolution compatible MSRV 1.85 (`cargo update` choisit des versions compatibles).
 * `ci.yml` : frontend → rust (fmt, clippy `-D warnings`, tests) · msrv · shell (shellcheck) · gitleaks + RFC1918.
-* `security.yml` : `cargo audit` · `npm audit` · dependency-review (PR) · CodeQL ; actions tierces épinglées par SHA.
+* `security.yml` : `cargo audit` · `npm audit` · dependency-review (PR) · CodeQL ; actions épinglées par SHA de commit.
 * `release.yml` : musl x86_64/aarch64/armv7 (`cargo-zigbuild`), `.deb`, GitHub Release, image
   `ghcr.io` amd64/arm64 (distroless `nonroot`). Depuis 0.7.2 : `permissions: {}` par défaut, les jobs qui
   exécutent du code tiers (npm, scripts de build des crates) n'ont que `contents: read` ; seul `publish` a
   `contents: write` et seul `docker` a `packages: write` ; `persist-credentials: false` partout (le jeton ne reste
   pas dans `.git/config`) ; aucun cache (npm, `rust-cache`, Docker `gha`) dans les builds de release ; `deploy/min-version`
-  est publié avec la release et doit être ≤ au tag.
+  est publié avec la release et doit être ≤ au tag. Toutes les actions, y compris celles de GitHub, sont
+  épinglées par SHA de commit ; l'archive de gitleaks est vérifiée par sha256 ; l'image de base Docker est
+  épinglée par digest ; un lancement manuel (`workflow_dispatch`) construit sans rien publier.
 * `cuemix-update` n'exécute jamais en root un binaire seulement téléchargé : le contrôle `--version` passe par
   `setpriv` (uid/gid 65534, `--no-new-privs`, environnement vidé ; repli `runuser -u nobody`, sinon refus).
   Seul le membre `cuemix-web` de l'archive est extrait (`--no-same-owner`), et il doit être un fichier ordinaire
@@ -516,6 +518,21 @@ Trois acteurs, chacun avec ses droits :
   `network.mdns_hostname`, ou figurer dans `web.allowed_hosts` / les hôtes de `web.allowed_origins` ; sinon **421**.
   Une page piégée qui fait pointer son propre domaine vers le serveur envoie `Host` = `Origin` = son domaine :
   le contrôle `Origin` seul ne suffisait pas. Les noms acceptés sont journalisés au démarrage.
+* **Limites (0.7.2)** : boucle d'acceptation propre (`serve`, hyper HTTP/1 + `hyper-util`, déjà tirés par axum ;
+  `axum::serve` n'a pas de délai de lecture des en-têtes) : **10 s** pour envoyer les en-têtes (attaque « slowloris »),
+  **256** connexions HTTP servies à la fois (au-delà, la nouvelle connexion est fermée), WebSockets limités à **64**
+  au total et **16** par adresse client (503 au-delà ; adresse = `X-Forwarded-For` si `trust_forwarded_headers`),
+  **200** présets (nouveau nom refusé au-delà, écrasement toujours permis). Pont OSC : un datagramme dont la source
+  n'est pas locale (même barrière que la prise : privée, lien-local, boucle) est ignoré, donc une adresse source
+  falsifiée ne fait plus envoyer d'état à un tiers.
+* **systemd (0.7.2)** : `cuemix-web.service` ajoute `PrivateDevices`, `ProtectProc=invisible`, `ProcSubset=pid`,
+  `ProtectClock`, `ProtectHostname`, `ProtectKernelLogs`, `RestrictNamespaces`, `RestrictRealtime`,
+  `MemoryDenyWriteExecute`, `SystemCallFilter=@system-service ~@privileged` (EPERM), `RestrictAddressFamilies=AF_INET
+  AF_INET6 AF_UNIX AF_NETLINK` (netlink : liste des interfaces pour mDNS et le lien MOTU), `UMask=0077`,
+  `MemoryMax=256M`, `TasksMax=256`, `LimitNOFILE=4096` (exposition `systemd-analyze security` : 1,4). Les unités root
+  de mise à jour : `ProtectSystem=strict`, écriture limitée à `/usr/local/bin`, `/var/lib/cuemix-web`, `/run`,
+  `StateDirectory=cuemix-update` (0700) et un `/tmp` privé. `atomic_publish` refuse de publier si les deux
+  répertoires d'état ne sont pas sur le même système de fichiers (`stat -c %d`).
 * **En-têtes de sécurité (0.7.2)** sur toutes les réponses : `Content-Security-Policy` (`default-src 'self'`,
   `script-src 'self'`, `style-src 'self' 'unsafe-inline'` pour les directives `style:` de Svelte,
   `connect-src 'self' ws://<hôte> wss://<hôte>`, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'none'`,
