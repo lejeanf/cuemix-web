@@ -168,21 +168,28 @@ pub(crate) async fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         std::process::id(),
         COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    let mut file = tokio::fs::File::create(&tmp)
-        .await
-        .with_context(|| format!("cannot create {}", tmp.display()))?;
-    file.write_all(bytes)
-        .await
-        .with_context(|| format!("cannot write {}", tmp.display()))?;
-    // Data on disk before the rename, so power loss never leaves a torn file.
-    file.sync_all()
-        .await
-        .with_context(|| format!("cannot sync {}", tmp.display()))?;
-    drop(file);
-    tokio::fs::rename(&tmp, path)
-        .await
-        .with_context(|| format!("cannot replace {}", path.display()))?;
-    Ok(())
+    let written = async {
+        let mut file = tokio::fs::File::create(&tmp)
+            .await
+            .with_context(|| format!("cannot create {}", tmp.display()))?;
+        file.write_all(bytes)
+            .await
+            .with_context(|| format!("cannot write {}", tmp.display()))?;
+        // Data on disk before the rename, so power loss never leaves a torn file.
+        file.sync_all()
+            .await
+            .with_context(|| format!("cannot sync {}", tmp.display()))?;
+        drop(file);
+        tokio::fs::rename(&tmp, path)
+            .await
+            .with_context(|| format!("cannot replace {}", path.display()))
+    }
+    .await;
+    if written.is_err() {
+        // Never leave the temporary file behind.
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
+    written
 }
 
 #[cfg(test)]
@@ -231,6 +238,22 @@ mod tests {
         assert_eq!(loaded.map(|p| p.state), Some(state));
         assert!(store.load("missing").await.is_err());
         assert!(store.load("../x").await.is_err());
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn a_failed_write_leaves_no_temporary_file() {
+        let dir = tmp_dir("atomic");
+        // The target is a directory: the final rename fails.
+        let target = dir.join("busy");
+        tokio::fs::create_dir_all(&target).await.unwrap();
+        assert!(write_atomic(&target, b"{}").await.is_err());
+        let mut rd = tokio::fs::read_dir(&dir).await.unwrap();
+        let mut names = Vec::new();
+        while let Some(e) = rd.next_entry().await.unwrap() {
+            names.push(e.file_name().to_string_lossy().into_owned());
+        }
+        assert_eq!(names, vec!["busy".to_owned()], "{names:?}");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
