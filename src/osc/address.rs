@@ -30,9 +30,14 @@ pub enum OscError {
     ArgType(String),
 }
 
+/// Longest address pattern looked at (the longest real one is under 40 bytes).
+const MAX_ADDRESS_LEN: usize = 128;
+/// Most arguments a message may carry (every address takes one).
+const MAX_ARGS: usize = 4;
+
 fn index_u16(seg: &str, addr: &str) -> Result<u16, OscError> {
     match seg.parse::<u16>() {
-        Ok(n) if n >= 1 => Ok(n - 1),
+        Ok(n) if n >= 1 && seg.bytes().all(|b| b.is_ascii_digit()) => Ok(n - 1),
         _ => Err(OscError::BadIndex(seg.to_owned(), addr.to_owned())),
     }
 }
@@ -175,6 +180,9 @@ pub fn is_sync(msg: &OscMessage) -> bool {
 pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
     let addr = msg.addr.as_str();
     let args = msg.args.as_slice();
+    if addr.len() > MAX_ADDRESS_LEN || args.len() > MAX_ARGS {
+        return Err(OscError::UnknownAddress(addr.chars().take(32).collect()));
+    }
     let segs: Vec<&str> = addr.strip_prefix('/').unwrap_or(addr).split('/').collect();
     let unknown = || OscError::UnknownAddress(addr.to_owned());
 
@@ -375,7 +383,14 @@ pub fn parse(msg: &OscMessage) -> Result<Command, OscError> {
             db: fader::trim_pos_to_db(arg_f64(addr, args)?, TRIM_MIN_DB),
         },
         ["preset", "load"] => match single(addr, args)? {
-            OscType::String(name) => return Ok(Command::LoadPreset { name: name.clone() }),
+            OscType::String(name) => {
+                let command = Command::LoadPreset { name: name.clone() };
+                // Names that cannot be a preset never reach the engine.
+                command
+                    .validate()
+                    .map_err(|_| OscError::ArgType(addr.to_owned()))?;
+                return Ok(command);
+            }
             _ => return Err(OscError::ArgType(addr.to_owned())),
         },
         _ => return Err(unknown()),
@@ -911,5 +926,50 @@ mod dsp_osc_tests {
                 assert_eq!(back, p, "{}", m.addr);
             }
         }
+    }
+
+    #[test]
+    fn hostile_osc_messages_are_refused() {
+        let m = |addr: &str, args: Vec<OscType>| OscMessage {
+            addr: addr.to_owned(),
+            args,
+        };
+        // Non-finite floats.
+        for v in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            for a in ["/mix/main/vol", "/preamp/1/gain", "/mix/1/ch/1/pan"] {
+                assert!(parse(&m(a, vec![OscType::Float(v)])).is_err(), "{a} {v}");
+            }
+        }
+        assert!(parse(&m("/mix/main/vol", vec![OscType::Double(f64::NAN)])).is_err());
+        // Indices: digits only, in range.
+        for a in [
+            "/mix/+1/ch/1/vol",
+            "/mix/1/ch/+1/vol",
+            "/mix/1/ch/-1/vol",
+            "/mix/1/ch/0/vol",
+            "/mix/1/ch/65536/vol",
+            "/mix/1/ch/1e1/vol",
+            "/mix/1/ch/\u{ff11}/vol",
+        ] {
+            assert!(parse(&m(a, vec![OscType::Float(0.5)])).is_err(), "{a}");
+        }
+        // Address and argument count caps.
+        let long = format!("/mix/1/ch/1/vol{}", "x".repeat(MAX_ADDRESS_LEN));
+        assert!(parse(&m(&long, vec![OscType::Float(0.5)])).is_err());
+        assert!(parse(&m("/mix/main/vol", vec![OscType::Float(0.5); 5])).is_err());
+        // Preset names go through the same allowlist as the web side.
+        for bad in ["../x", "a/b", "", ".x", "a\0b", &"x".repeat(100)] {
+            assert!(
+                parse(&m("/preset/load", vec![OscType::String(bad.into())])).is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(parse(&m("/preset/load", vec![OscType::String("live".into())])).is_ok());
+        // Unknown strings in enum arguments are errors, not panics.
+        assert!(parse(&m(
+            "/clock/source",
+            vec![OscType::String("x".repeat(10_000))]
+        ))
+        .is_err());
     }
 }

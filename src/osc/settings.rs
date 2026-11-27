@@ -24,6 +24,8 @@ use crate::config::Network;
 pub const MAX_TARGETS: usize = 8;
 /// Lowest port the bridge may listen on (no privileged ports).
 pub const MIN_LISTEN_PORT: u16 = 1024;
+/// Longest `host:port` text accepted (a name is at most 253 characters).
+const MAX_ENTRY_LEN: usize = 300;
 /// Time allowed for resolving every target name.
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Most addresses kept over all targets (a name can resolve to several).
@@ -216,7 +218,20 @@ async fn resolve_spec(listen: SocketAddr, spec: &TargetSpec) -> Result<Vec<Socke
     Ok(usable)
 }
 
+/// Text of an address: bounded, no control character (a stray CR/LF, NUL or escape never
+/// reaches the parser, the saved file or the logs).
+fn check_text(raw: &str, what: &str) -> Result<(), String> {
+    if raw.len() > MAX_ENTRY_LEN {
+        return Err(format!("{what} is longer than {MAX_ENTRY_LEN} characters"));
+    }
+    if raw.chars().any(char::is_control) {
+        return Err(format!("{what} must not contain control characters"));
+    }
+    Ok(())
+}
+
 fn parse_listen(raw: &str) -> Result<SocketAddr, String> {
+    check_text(raw, "listen address")?;
     let raw = raw.trim();
     let addr: SocketAddr = raw.parse().map_err(|_| {
         format!("listen address {raw:?} must be ip:port (for example 0.0.0.0:8000 or [::]:8000)")
@@ -250,6 +265,7 @@ fn valid_hostname(host: &str) -> bool {
 }
 
 fn parse_target(raw: &str) -> Result<TargetSpec, String> {
+    check_text(raw, "feedback target")?;
     let raw = raw.trim();
     let bad = |why: &str| format!("feedback target {raw:?}: {why}");
     let (host, port) = if let Some(rest) = raw.strip_prefix('[') {
@@ -272,7 +288,7 @@ fn parse_target(raw: &str) -> Result<TargetSpec, String> {
     let port: u16 = port
         .parse()
         .ok()
-        .filter(|p| *p >= 1)
+        .filter(|p| *p >= 1 && port.bytes().all(|b| b.is_ascii_digit()))
         .ok_or_else(|| bad("port must be 1-65535"))?;
     if host.parse::<IpAddr>().is_err() && !valid_hostname(host) {
         return Err(bad("not an IP address or a host name"));
@@ -672,5 +688,56 @@ mod tests {
             .and_then(|s| s.local_addr())
             .map(|a| a.port())
             .unwrap_or(40_000)
+    }
+
+    #[test]
+    fn hostile_addresses_are_refused() {
+        let s = |listen: &str, targets: &[&str]| OscSettings {
+            listen: listen.into(),
+            targets: targets.iter().map(|t| (*t).to_owned()).collect(),
+        };
+        assert!(s("0.0.0.0:8000", &["192.0.2.5:9000"]).validate().is_ok());
+        for bad in [
+            "0.0.0.0:8000\r\nX",
+            "0.0.0.0:\u{0}8000",
+            "0.0.0.0:+8000",
+            "0.0.0.0:80",
+            "0.0.0.0:99999",
+            "0.0.0.0:-1",
+            "224.0.0.1:8000",
+            "255.255.255.255:8000",
+            "0.0.0.0:8000;rm",
+            "[::]:8000\u{202e}",
+            "",
+        ] {
+            assert!(s(bad, &[]).validate().is_err(), "listen {bad:?}");
+        }
+        let long = format!("{}:9000", "a".repeat(300));
+        for bad in [
+            "192.0.2.5:9000\r\n",
+            "plug.example:9000\0",
+            "192.0.2.5:+9000",
+            "192.0.2.5:0",
+            "192.0.2.5:65536",
+            "192.0.2.5",
+            "http://192.0.2.5:9000",
+            "user@192.0.2.5:9000",
+            "a b.example:9000",
+            "plug\u{ff0e}example:9000",
+            "plug.example\u{202e}:9000",
+            "-x.example:9000",
+            "a..example:9000",
+            "2001:db8::1:9000",
+            long.as_str(),
+        ] {
+            assert!(
+                s("0.0.0.0:8000", &[bad]).validate().is_err(),
+                "target {bad:?}"
+            );
+        }
+        let nine = vec!["192.0.2.5:9000"; MAX_TARGETS + 1];
+        assert!(s("0.0.0.0:8000", &nine).validate().is_err());
+        let eight = vec!["192.0.2.5:9000"; MAX_TARGETS];
+        assert!(s("0.0.0.0:8000", &eight).validate().is_ok());
     }
 }

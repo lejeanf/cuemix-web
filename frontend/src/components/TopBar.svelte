@@ -11,8 +11,7 @@
 
   let root: HTMLElement;
   let moreBtn = $state<HTMLButtonElement>();
-  let menuEl = $state<HTMLElement>();
-  let open = $state<'' | 'presets' | 'clock' | 'menu'>('');
+  let open = $state<'' | 'presets' | 'clock'>('');
   let newName = $state('');
 
   const session = $derived(store.c.session);
@@ -35,9 +34,8 @@
   }
   $effect(() => () => clearTimeout(statusTimer));
 
-  function toggle(which: 'presets' | 'clock' | 'menu') {
+  function toggle(which: 'presets' | 'clock') {
     open = open === which ? '' : which;
-    if (open === 'menu') queueMicrotask(() => menuEl?.querySelector<HTMLElement>('[role=menuitem]')?.focus());
     if (open === 'presets') store.listPresets();
   }
   function outside(e: PointerEvent) {
@@ -45,28 +43,7 @@
   }
   function key(e: KeyboardEvent) {
     if (e.key === 'Escape') {
-      if (open === 'menu') moreBtn?.focus();
       open = '';
-    }
-  }
-  /** Arrow keys, Home and End move between the menu items; Tab closes the menu. */
-  function menuKey(e: KeyboardEvent) {
-    const items = [...(menuEl?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? [])];
-    if (!items.length) return;
-    const i = items.indexOf(document.activeElement as HTMLElement);
-    const to =
-      e.key === 'ArrowDown' ? items[(i + 1) % items.length]
-      : e.key === 'ArrowUp' ? items[(i <= 0 ? items.length : i) - 1]
-      : e.key === 'Home' ? items[0]
-      : e.key === 'End' ? items[items.length - 1]
-      : null;
-    if (to) {
-      e.preventDefault();
-      to.focus();
-    } else if (e.key === 'Tab') {
-      e.preventDefault();
-      open = '';
-      moreBtn?.focus();
     }
   }
   function setRate(rate: SampleRate) {
@@ -110,6 +87,9 @@
     try {
       // Compact it: the WebSocket accepts up to 256 KiB per message.
       const text = JSON.stringify(JSON.parse(await file.text()));
+      // The message also carries the name and JSON escapes: measure it as sent (limit 256 KiB).
+      const sent = new TextEncoder().encode(JSON.stringify({ cmd: 'import_preset', name: presetNameFromFile(file.name), text })).length;
+      if (sent > 250 * 1024) throw new Error('too large');
       store.importPreset(presetNameFromFile(file.name), text);
       open = '';
     } catch {
@@ -183,17 +163,9 @@
       </div>
     {/if}
   </div>
-  <div class="pw">
-    <button class="btn more" data-more-menu bind:this={moreBtn} aria-haspopup="menu" aria-expanded={open === 'menu'} aria-label={S.menu} title={S.menu} onclick={() => toggle('menu')}>⋯</button>
-    {#if open === 'menu'}
-      <div class="pop menu" role="menu" aria-label={S.menu} tabindex="-1" bind:this={menuEl} onkeydown={menuKey}>
-        <button class="item" role="menuitem" onclick={() => { open = ''; store.plugOpen = true; }}>{S.plugMenuItem}</button>
-        <button class="item" role="menuitem" onclick={() => { open = ''; store.oscOpen = true; }}>{S.oscMenuItem}</button>
-        <button class="item" role="menuitem" onclick={() => { open = ''; store.versionOpen = true; }}>{S.versionMenuItem}</button>
-      </div>
-    {/if}
-  </div>
   {/if}
+
+  <button class="btn more" data-more-menu bind:this={moreBtn} aria-haspopup="dialog" aria-expanded={store.advancedOpen} aria-label={S.advanced.title} title={S.advanced.title} onclick={() => store.openAdvanced()}>⋯</button>
 
   {#if !store.embed}
   <button class="btn mode" aria-pressed={!store.simple} title={store.simple ? 'Show every control' : 'Volume remote for phones'} onclick={() => store.setSimple(!store.simple)}
@@ -256,25 +228,6 @@
     padding: 0 8px;
     font-size: 18px;
     line-height: 1;
-  }
-  .pop.menu {
-    min-width: 160px;
-    padding: 4px;
-    gap: 2px;
-  }
-  .item {
-    min-height: 44px;
-    padding: 0 10px;
-    text-align: left;
-    background: none;
-    border: 0;
-    border-radius: 4px;
-    color: var(--text);
-    cursor: pointer;
-  }
-  .item:hover,
-  .item:focus-visible {
-    background: var(--bg-alt);
   }
   .btn.sm {
     min-height: 30px;

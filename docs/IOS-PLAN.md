@@ -181,7 +181,8 @@ the full snapshot is too slow for that. New routes:
   preset list, MOTU status, server version.
 - `POST /api/v1/command`: only the commands quick access needs: set `main_vol` / `phones_vol`,
   `power`, `load_preset`. Everything else is refused (400). In particular the room test can never
-  start from it: a test is tied to the WebSocket client that started it.
+  start from it: a test is tied to the WebSocket client that started it. Clients must send
+  `Content-Type: application/json` (415 otherwise) and a body of at most 16 KiB (413 otherwise).
   - It answers with the real result (200, or 4xx with the reason). Today the engine sends errors
     only over the WebSocket of the client that caused them, so phase 1 adds an engine request that
     returns the result to the HTTP route.

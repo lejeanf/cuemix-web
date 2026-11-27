@@ -379,7 +379,16 @@ impl OscBridge {
             }
             match address::parse(m) {
                 Ok(c) => commands.push(c),
-                Err(e) => tracing::debug!(%peer, addr = %m.addr, error = %e, "bad OSC message"),
+                Err(e) => {
+                    // Untrusted text: cut and escaped before it reaches the log.
+                    let addr: String = m
+                        .addr
+                        .chars()
+                        .take(32)
+                        .flat_map(char::escape_default)
+                        .collect();
+                    tracing::debug!(%peer, %addr, error = %e, "bad OSC message");
+                }
             }
         }
         if commands.is_empty() && !sync {

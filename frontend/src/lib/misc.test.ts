@@ -301,3 +301,19 @@ describe('preset files', () => {
     expect(exportFileName('Live set', new Date('2026-11-15T10:00:00Z'))).toBe('cuemix-Live_set-2026-11-15.json');
   });
 });
+
+describe('preset name rule (mirrors src/presets.rs)', () => {
+  it('accepts plain names and refuses traversal, control and look-alike characters', async () => {
+    const { PRESET_NAME_RE } = await import('./protocol');
+    for (const ok of ['default', 'Live Set 2', 'a.b_c-d', 'a..b', 'x'.repeat(64)]) expect(PRESET_NAME_RE.test(ok), ok).toBe(true);
+    for (const bad of ['', '..', '../x', 'a/b', 'a\b', '.hidden', ' pad', 'pad ', 'a\nb', 'a\0b', 'x'.repeat(65), 'café', 'a／b', '‮gnp', 'a∕b', 'a:b'])
+      expect(PRESET_NAME_RE.test(bad), JSON.stringify(bad)).toBe(false);
+  });
+});
+
+describe('label names refuse invisible and reordering characters', () => {
+  it('matches the server rule', () => {
+    expect(isValidLabelName('Guîtare \u{1f3b8}')).toBe(true);
+    for (const bad of ['', 'a\nb', 'a\0', 'a\u0085b', '‮cba', 'a​b', '﻿x', '⁦x', 'x'.repeat(65)]) expect(isValidLabelName(bad), JSON.stringify(bad)).toBe(false);
+  });
+});

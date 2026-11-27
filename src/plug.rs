@@ -31,6 +31,12 @@ pub const WARMUP_MS_MAX: u32 = 10_000;
 pub const OFF_DELAY_MS_MAX: u32 = 5_000;
 /// Allowed `timeout_ms`.
 pub const TIMEOUT_MS_RANGE: (u32, u32) = (500, 10_000);
+/// Longest URL accepted (custom plugs).
+pub const MAX_URL_LEN: usize = 2048;
+/// Longest host name (RFC 1035).
+pub const MAX_HOST_LEN: usize = 253;
+/// Longest label of a host name.
+const MAX_LABEL_LEN: usize = 63;
 
 /// Plug type (a preset of URLs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -119,8 +125,27 @@ impl SpeakerPlugSettings {
         Ok(())
     }
 
-    /// Full validation for saving: ranges, and buildable URLs when enabled.
+    /// Text fields (always applied, enabled or not): bounded, no control character. Whether they
+    /// make working URLs is checked by [`build_urls`] when the plug is enabled.
+    pub fn validate_text(&self) -> Result<(), String> {
+        for (text, max, what) in [
+            (&self.host, MAX_HOST_LEN + 8, "host"),
+            (&self.on_url, MAX_URL_LEN, "on URL"),
+            (&self.off_url, MAX_URL_LEN, "off URL"),
+        ] {
+            if text.len() > max {
+                return Err(format!("{what} is longer than {max} characters"));
+            }
+            if text.chars().any(char::is_control) {
+                return Err(format!("{what} must not contain control characters"));
+            }
+        }
+        Ok(())
+    }
+
+    /// Full validation for saving: text, ranges, and buildable URLs when enabled.
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_text()?;
         self.validate_ranges()?;
         if self.enabled {
             build_urls(self)?;
@@ -154,10 +179,14 @@ fn parse_authority(a: &str) -> Result<(String, u16, bool), String> {
     if a.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err("host must not contain spaces".into());
     }
+    if a.len() > MAX_HOST_LEN + 8 {
+        return Err("host is too long".into());
+    }
     let bad_port = || "port must be 1-65535".to_owned();
+    // Digits only: `u16::from_str` would also take a leading `+`.
     let port = |s: &str| -> Result<u16, String> {
         match s.parse::<u16>() {
-            Ok(p) if p != 0 => Ok(p),
+            Ok(p) if p != 0 && s.bytes().all(|b| b.is_ascii_digit()) => Ok(p),
             _ => Err(bad_port()),
         }
     };
@@ -185,22 +214,71 @@ fn parse_authority(a: &str) -> Result<(String, u16, bool), String> {
     {
         return Err("host must be an IP address or a name, without scheme, path or login".into());
     }
+    if !valid_host_name(host) {
+        return Err(format!(
+            "host name must be at most {MAX_HOST_LEN} characters, in labels of 1-{MAX_LABEL_LEN} that do not start or end with '-'"
+        ));
+    }
     match p {
         None => Ok((host.to_owned(), 80, false)),
         Some(p) => Ok((host.to_owned(), port(p)?, true)),
     }
 }
 
-/// Parse a plain `http://host[:port][/path][?query]` URL (no login, no fragment).
+/// Host name shape (characters were checked): dot-separated labels of 1-63 characters that do
+/// not start or end with `-`, 253 characters at most; one trailing dot is allowed.
+fn valid_host_name(host: &str) -> bool {
+    let name = host.strip_suffix('.').unwrap_or(host);
+    name.len() <= MAX_HOST_LEN
+        && name.split('.').all(|l| {
+            (1..=MAX_LABEL_LEN).contains(&l.len()) && !l.starts_with('-') && !l.ends_with('-')
+        })
+}
+
+/// Path and query: RFC 3986 unreserved characters, the sub-delimiters `! $ ' ( ) * + , ; =`,
+/// `/ ? & : @` and well-formed `%XX` (the authority was split off before, so `@` here is plain
+/// data). Nothing else ever reaches the request line (no space, `#`, `\`, `"`, `<`, `>`,
+/// control or non-ASCII character).
+fn valid_path_and_query(tail: &str) -> bool {
+    let bytes = tail.as_bytes();
+    let mut i = 0;
+    while let Some(&b) = bytes.get(i) {
+        match b {
+            b'%' => {
+                let hex = |k: usize| bytes.get(i + k).is_some_and(u8::is_ascii_hexdigit);
+                if !(hex(1) && hex(2)) {
+                    return false;
+                }
+                i += 3;
+                continue;
+            }
+            b if b.is_ascii_alphanumeric() => {}
+            b'-' | b'.' | b'_' | b'~' | b'/' | b'?' | b'&' | b'=' | b':' | b',' | b'+' | b';'
+            | b'!' | b'$' | b'\'' | b'(' | b')' | b'*' | b'@' => {}
+            _ => return false,
+        }
+        i += 1;
+    }
+    true
+}
+
+/// Parse a plain `http://host[:port][/path][?query]` URL (no login, no fragment). Strict
+/// allowlist: this text ends up verbatim in a hand-written request line.
 pub fn parse_url(url: &str) -> Result<Target, String> {
     let rest = url
         .strip_prefix("http://")
         .ok_or("URL must start with http://")?;
+    if url.len() > MAX_URL_LEN {
+        return Err(format!("URL is longer than {MAX_URL_LEN} characters"));
+    }
     if rest
         .chars()
         .any(|c| c.is_whitespace() || c.is_control() || c == '#')
     {
         return Err("URL must not contain spaces or a fragment".into());
+    }
+    if !rest.is_ascii() {
+        return Err("URL must be plain ASCII (write other characters as %XX)".into());
     }
     let end = rest.find(['/', '?']).unwrap_or(rest.len());
     let (authority, tail) = rest.split_at(end);
@@ -208,6 +286,12 @@ pub fn parse_url(url: &str) -> Result<Target, String> {
         return Err("URL must not contain a login".into());
     }
     let (host, port, _) = parse_authority(authority)?;
+    if !valid_path_and_query(tail) {
+        return Err(
+            "path and query may only contain letters, digits and - . _ ~ / ? & = : , + ; %XX"
+                .into(),
+        );
+    }
     let path = match tail {
         "" => "/".to_owned(),
         t if t.starts_with('?') => format!("/{t}"),
@@ -334,6 +418,15 @@ pub async fn http_get(url: &str, timeout: Duration) -> Result<u16, String> {
 
 async fn http_get_inner(url: &str) -> Result<u16, String> {
     let t = parse_url(url)?;
+    // Belt and braces: nothing but visible ASCII may reach the hand-written request.
+    if !t
+        .path
+        .bytes()
+        .chain(t.authority.bytes())
+        .all(|b| b.is_ascii_graphic())
+    {
+        return Err("URL contains characters that cannot be sent".into());
+    }
     let addrs = resolve_fenced(&t.host, t.port).await?;
     let mut stream = None;
     let mut last = String::new();
@@ -762,5 +855,82 @@ mod tests {
         let got = load_settings(&path).await.unwrap().unwrap();
         assert!(got.enabled && got.warmup_ms == 2000);
         let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[test]
+    fn hostile_text_never_makes_a_url() {
+        for bad in [
+            "http://192.0.2.1/on\r\nHost: evil.example",
+            "http://192.0.2.1/on\nX: 1",
+            "http://192.0.2.1/on\rX: 1",
+            "http://192.0.2.1/on HTTP/1.1\r\n\r\nGET /x",
+            "http://192.0.2.1/on\u{85}x",
+            "http://192.0.2.1/on\u{2028}x",
+            "http://192.0.2.1/on\u{202e}x",
+            "http://192.0.2.1/on\u{ff0f}x",
+            "http://192.0.2.1\u{ff0f}on",
+            "http://192.0.2.1/caf\u{e9}",
+            "http://192.0.2.1/on\\x",
+            "http://192.0.2.1/on%",
+            "http://192.0.2.1/on%g0",
+            "http://192.0.2.1/on|x",
+            "http://192.0.2.1/on`x`",
+            "http://192.0.2.1/on{x}",
+            "http://192.0.2.1/on\0",
+            "http://192.0.2.1:+80/",
+            "http://192.0.2.1:8 0/",
+            "http://-x.example/",
+            "http://x-.example/",
+            "http://a..example/",
+            "http://plug.example\u{202e}/",
+            "http://pl\0ug.example/",
+        ] {
+            assert!(parse_url(bad).is_err(), "{bad:?}");
+        }
+        let long_path = format!("http://192.0.2.1/{}", "a".repeat(MAX_URL_LEN));
+        assert!(parse_url(&long_path).is_err());
+        let long_label = format!("http://{}.example/", "a".repeat(64));
+        assert!(parse_url(&long_label).is_err(), "label of 64");
+        let huge_name = format!("http://{}/", vec!["a".repeat(60); 5].join("."));
+        assert!(parse_url(&huge_name).is_err(), "name above 253");
+        // Sub-delimiters and `@` after the authority are plain data (saved by 0.7.0 already).
+        let t = parse_url("http://plug.example/api?cmd=set(1)&a=b*c!$'x@y").unwrap();
+        assert_eq!(t.host, "plug.example");
+        assert_eq!(t.path, "/api?cmd=set(1)&a=b*c!$'x@y");
+        assert!(parse_url("http://192.0.2.1/on@evil.example").is_ok());
+        assert!(
+            parse_url("http://evil.example@192.0.2.1/on").is_err(),
+            "login stays refused"
+        );
+        // Percent-encoded text is data, not framing: it is allowed and stays encoded.
+        let t = parse_url("http://192.0.2.1/cm?cmnd=Power%0D%0AOn").unwrap();
+        assert_eq!(t.path, "/cm?cmnd=Power%0D%0AOn");
+        assert!(t.path.bytes().all(|b| b.is_ascii_graphic()));
+    }
+
+    #[test]
+    fn text_fields_are_bounded_even_when_the_plug_is_disabled() {
+        let with = |f: fn(&mut SpeakerPlugSettings)| {
+            let mut s = SpeakerPlugSettings::default();
+            f(&mut s);
+            s.validate_text().is_err() && s.validate().is_err()
+        };
+        assert!(with(|s| s.host = "a\r\nb".into()));
+        assert!(with(|s| s.host = "a\0".into()));
+        assert!(with(|s| s.on_url = "http://x/\u{7f}".into()));
+        assert!(with(|s| s.off_url = "http://x/\u{1b}[2J".into()));
+        assert!(with(|s| s.host = "h".repeat(300)));
+        assert!(with(|s| s.on_url = format!("http://x/{}", "a".repeat(3000))));
+        assert!(SpeakerPlugSettings::default().validate_text().is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_hostile_url_is_refused_before_any_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let url = format!("http://{addr}/on\r\nX-Evil: 1");
+        assert!(http_get(&url, Duration::from_secs(2)).await.is_err());
+        let accepted = tokio::time::timeout(Duration::from_millis(200), listener.accept()).await;
+        assert!(accepted.is_err(), "nothing may reach the plug");
     }
 }

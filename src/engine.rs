@@ -428,7 +428,11 @@ pub async fn start_with(
     let (events, _) = broadcast::channel(EVENT_RING);
 
     let labels = match presets::load_labels(&cfg.labels_file).await {
-        Ok(l) => l,
+        Ok(mut l) => {
+            // Keys outside the mixer's inputs can never be shown: dropped like invalid entries.
+            l.channels.retain(|ch, _| *ch < cfg.topology.mixer_inputs);
+            l
+        }
         Err(e) => {
             tracing::warn!(error = %e, "labels not loaded, starting empty");
             Labels::default()
@@ -772,6 +776,10 @@ impl Engine {
     }
 
     async fn on_command(&mut self, origin: Origin, command: Command) {
+        // Last line of defence: whatever the entry point (WebSocket, HTTP API, OSC) already did.
+        if let Err(e) = command.validate() {
+            return self.reply_error(origin, e);
+        }
         match command {
             Command::MeasureStart => self.on_measure(origin, MeasureRequest::Start),
             Command::MeasureStop => self.on_measure(origin, MeasureRequest::Stop),

@@ -12,6 +12,11 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-26
+
+Stricter input checking everywhere the server accepts text or numbers, and one
+Advanced settings dialog behind ⋯.
+
 ### Added
 - `design/vectors/protocol.json`: one sample of every WebSocket message, written by the
   server's own types (`tests/protocol_vectors.rs`). vitest checks `protocol.ts` and the
@@ -22,8 +27,55 @@ need attention. Preset files carry `schema_version`; see
 - npm never runs package install scripts (`frontend/.npmrc`, and `npm ci --ignore-scripts`
   in CI): the usual way a compromised package runs code on a build machine. No package in
   the lock needs one.
+- Every request body (update install, pre-release switch, `POST /api/v1/command`) is
+  checked before it is read: size limit, `Content-Type: application/json` when
+  there is a body, valid UTF-8 and no control characters. It is then read into a
+  fixed set of fields; wrong types are refused with a clear error, and so are
+  unknown fields in the update requests and in the speaker plug and OSC
+  settings (commands are typed but tolerate extra fields).
+  `POST /api/v1/command` now requires `Content-Type: application/json` (in
+  Shortcuts, set the request body to JSON).
+- WebSocket commands get the same checks: message size, control characters, and
+  one shared validator for preset names, imported preset text (240 KiB at most),
+  channel labels, speaker plug settings and OSC settings. Labels can no longer
+  contain invisible or text-reversing characters.
+- Speaker plug and custom URLs: the path and query accept only plain ASCII
+  letters, digits, `- . _ ~ / ? & = : , + ; ! $ ' ( ) * @` and `%XX`, at most
+  2048 characters; host names follow the usual label rules (253 characters at
+  most), and a login before the host (`user@host`) is refused. Spaces, line
+  breaks, `#`, backslashes and non-ASCII look-alikes are refused, so a URL can
+  never add lines to the request sent to the plug.
+- OSC: addresses and the OSC settings form only accept digits for ports and
+  indices, bounded text and no control characters; incoming OSC messages are
+  length-limited, and preset names received over OSC follow the preset rules.
+- Saved channel labels that were edited by hand into something the UI would
+  refuse (odd colours, control characters) are ignored when the server starts.
+- The web forms check the same rules before sending (preset names, labels,
+  speaker plug URLs); the server stays the authority.
 
-Compatibility: no change to presets, `config.toml` or the protocol.
+### Changed
+- **⋯** now opens one **Advanced settings** dialog with three tabs (Speaker
+  plug, OSC, Version) instead of a menu that opens a dialog per item. It opens
+  on the tab you used last (remembered in this browser), keeps unsaved edits
+  when you switch tabs, and is also available in the Simple view.
+
+### Compatibility
+- `POST /api/v1/command` answers 415 without `Content-Type: application/json`
+  (for example `curl -d` without `-H 'Content-Type: application/json'`).
+  Add the header to scripts and shortcuts that call it.
+- Speaker plug URLs saved by an earlier version that break the new rules
+  (spaces, control or non-ASCII characters, over-long text) disable the plug at
+  start-up, with the reason in the server log. Edit them in the plug panel and
+  save again.
+- Hand-edited `labels.json` entries that the UI would refuse (invalid colour,
+  control characters, unknown channel) are ignored at start-up, and are gone for
+  good after the next label change saves the file.
+- No preset or `config.toml` change.
+
+### Fixed
+- `deploy/proxmox-setup.sh --update` waits (up to 60 s) for an update already
+  running in the container, such as an install started from the web UI, instead
+  of stopping with "another cuemix-update is already running".
 
 ## [0.7.0] - 2026-11-26
 

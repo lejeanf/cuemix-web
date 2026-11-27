@@ -12,9 +12,7 @@
   import Probe from './components/Probe.svelte';
   import Remote from './components/Remote.svelte';
   import RoomTest from './components/RoomTest.svelte';
-  import SpeakerPlug from './components/SpeakerPlug.svelte';
-  import OscPanel from './components/OscPanel.svelte';
-  import VersionPanel from './components/VersionPanel.svelte';
+  import AdvancedDialog from './components/AdvancedDialog.svelte';
   import { updates } from './lib/updates.svelte';
 
   onMount(() => {
@@ -83,16 +81,8 @@
   <RoomTest />
 {/if}
 
-{#if store.plugOpen}
-  <SpeakerPlug />
-{/if}
-
-{#if store.oscOpen}
-  <OscPanel />
-{/if}
-
-{#if store.versionOpen}
-  <VersionPanel />
+{#if store.advancedOpen}
+  <AdvancedDialog />
 {/if}
 
 <div class="toasts" aria-live="polite">

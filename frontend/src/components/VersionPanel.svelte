@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import Dialog from './Dialog.svelte';
   import { store } from '../lib/store.svelte';
   import { updates } from '../lib/updates.svelte';
   import { S } from '../lib/strings';
@@ -49,11 +48,11 @@
     return d && !Number.isNaN(d.getTime()) ? d.toLocaleString() : '';
   };
   function close() {
-    store.versionOpen = false;
+    store.advancedOpen = false;
   }
 </script>
 
-<Dialog title={S.version.title} titleId="version-title" onclose={close}>
+<div class="panel">
   {#if !info}
     <p class="note" role="status">{!store.socketOpen ? S.dialog.noServer : updates.loadFailed ? S.update.requestFailed : S.update.loading}</p>
   {:else}
@@ -115,7 +114,7 @@
   <div class="row">
     <button type="button" onclick={close}>{S.dialog.close}</button>
   </div>
-</Dialog>
+</div>
 
 <style>
   label.sw {

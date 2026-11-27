@@ -134,7 +134,13 @@ fn drop_v1_dsp(raw: &mut serde_json::Value) {
 pub async fn load_labels(path: &Path) -> Result<Labels> {
     match tokio::fs::read_to_string(path).await {
         Ok(text) => {
-            serde_json::from_str(&text).with_context(|| format!("invalid {}", path.display()))
+            let mut labels: Labels = serde_json::from_str(&text)
+                .with_context(|| format!("invalid {}", path.display()))?;
+            // The file is not more trusted than a client: an entry that would be refused
+            // when sent (control or bidi characters, a colour that is not #RRGGBB, which the
+            // UI puts in a style attribute) is dropped instead of being shown.
+            labels.channels.retain(|_, l| l.validate().is_ok());
+            Ok(labels)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Labels::default()),
         Err(e) => Err(e).with_context(|| format!("cannot read {}", path.display())),
@@ -395,5 +401,67 @@ mod compat_tests {
             json + "\n",
         )
         .unwrap_or_else(|e| panic!("{e}"));
+    }
+
+    #[test]
+    fn hostile_names_never_leave_the_directory() {
+        let store = PresetStore::new("presets");
+        for bad in [
+            "..",
+            "../x",
+            "..\\x",
+            "a/../b",
+            "/etc/passwd",
+            "C:\\x",
+            "a\0b",
+            "a\nb",
+            "a\r\nb",
+            "a\tb",
+            "\u{202e}gnp.exe",
+            "a\u{ff0f}b",
+            "a\u{2215}b",
+            "\u{ff0e}\u{ff0e}",
+            "nam\u{e9}",
+            "a:b",
+            "a*b",
+            "a?b",
+            "a|b",
+            "a\"b",
+            "a<b>",
+            "trailing ",
+            " leading",
+            "~root/$HOME",
+            "%2e%2e",
+            "x.json/..",
+        ] {
+            assert!(validate_name(bad).is_err(), "{bad:?}");
+            assert!(store.path(bad).is_err(), "{bad:?}");
+        }
+        for ok in ["a..b", "v1.2", "A B-c_d.e"] {
+            let p = store.path(ok).unwrap();
+            assert_eq!(p.parent(), Some(Path::new("presets")), "{ok}");
+        }
+        assert!(validate_name(&"x".repeat(64)).is_ok());
+        assert!(validate_name(&"x".repeat(65)).is_err());
+    }
+
+    #[tokio::test]
+    async fn labels_read_back_from_disk_are_validated() {
+        let dir =
+            std::env::temp_dir().join(format!("cuemix-labels-hostile-{}", std::process::id()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let file = dir.join("labels.json");
+        let text = r##"{"channels":{
+            "0":{"name":"Kick","color":"#06B6D4"},
+            "1":{"name":"Snare","color":"url(http://x.example/a)"},
+            "2":{"name":"Hat\u202e","color":null},
+            "3":{"name":"","color":null},
+            "4":{"name":"Bass","color":"red;background:url(x)"}}}"##;
+        tokio::fs::write(&file, text).await.unwrap();
+        let l = load_labels(&file).await.unwrap();
+        assert_eq!(l.channels.keys().copied().collect::<Vec<_>>(), vec![0]);
+        tokio::fs::write(&file, "{{{ not json").await.unwrap();
+        assert!(load_labels(&file).await.is_err());
+        let _ = tokio::fs::remove_dir_all(dir).await;
     }
 }

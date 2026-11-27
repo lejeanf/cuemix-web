@@ -19,6 +19,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 
+use super::body::{check_json_content_type, parse_json};
 use super::server::{origin_allowed, AppState};
 use crate::state::{Command, Param};
 
@@ -55,6 +56,33 @@ pub(super) async fn summary(State(app): State<AppState>, headers: HeaderMap) -> 
     }
 }
 
+/// Checks, in order: size, `Content-Type: application/json`, UTF-8, control characters, then
+/// the typed [`Command`] parse and [`Command::validate`] (names, text, settings). The body is
+/// required: an empty one is a 400.
+pub(super) fn parse_command(
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Result<Command, (StatusCode, String)> {
+    if body.len() > MAX_BODY_BYTES {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("body is larger than {MAX_BODY_BYTES} bytes"),
+        ));
+    }
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "invalid command: a JSON body is required".into(),
+        ));
+    }
+    check_json_content_type(headers)?;
+    let command: Command = parse_json(body, MAX_BODY_BYTES, "invalid command")?;
+    command
+        .validate()
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    Ok(command)
+}
+
 pub(super) async fn command(
     State(app): State<AppState>,
     headers: HeaderMap,
@@ -63,9 +91,9 @@ pub(super) async fn command(
     if !origin_allowed(&headers, &app.cfg) {
         return failure(StatusCode::FORBIDDEN, "origin not allowed");
     }
-    let command: Command = match serde_json::from_slice(&body) {
+    let command = match parse_command(&headers, &body) {
         Ok(c) => c,
-        Err(e) => return failure(StatusCode::BAD_REQUEST, format!("invalid command: {e}")),
+        Err((status, message)) => return failure(status, message),
     };
     if !allowed(&command) {
         return failure(
@@ -89,6 +117,78 @@ pub(super) async fn command(
 mod tests {
     use super::*;
     use crate::power::PowerChannel;
+
+    fn json_headers() -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(
+            header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("application/json"),
+        );
+        h
+    }
+
+    #[test]
+    fn command_bodies_are_checked_before_and_while_parsing() {
+        let ok = br#"{"cmd":"set","param":"main_vol","db":-12}"#;
+        assert!(parse_command(&json_headers(), ok).is_ok());
+        let code = |h: &HeaderMap, b: &[u8]| parse_command(h, b).map_err(|e| e.0);
+        // No content type, a wrong one, a form type.
+        assert_eq!(
+            code(&HeaderMap::new(), ok),
+            Err(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+        );
+        let mut text = HeaderMap::new();
+        text.insert(
+            header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("text/plain"),
+        );
+        assert_eq!(code(&text, ok), Err(StatusCode::UNSUPPORTED_MEDIA_TYPE));
+        // Empty body.
+        assert_eq!(code(&json_headers(), b""), Err(StatusCode::BAD_REQUEST));
+        assert_eq!(code(&json_headers(), b"  \n"), Err(StatusCode::BAD_REQUEST));
+        // Oversized.
+        let big = format!(
+            r#"{{"cmd":"list_presets","pad":"{}"}}"#,
+            "x".repeat(MAX_BODY_BYTES)
+        );
+        assert_eq!(
+            code(&json_headers(), big.as_bytes()),
+            Err(StatusCode::PAYLOAD_TOO_LARGE)
+        );
+        for bad in [
+            &b"\xff{}"[..],
+            b"{\"cmd\":\"list_presets\"}\0",
+            b"{\"cmd\":\"list_presets\x1b\"}",
+            b"[]",
+            b"null",
+            b"\"set\"",
+            br#"{"cmd":"set","param":"main_vol","db":"-12"}"#,
+            br#"{"cmd":"set","param":"main_vol"}"#,
+            br#"{"cmd":"set","param":"nope","db":1}"#,
+            br#"{"cmd":["set"]}"#,
+        ] {
+            assert_eq!(
+                code(&json_headers(), bad),
+                Err(StatusCode::BAD_REQUEST),
+                "{}",
+                String::from_utf8_lossy(bad)
+            );
+        }
+        // Names are validated before the engine sees them.
+        for name in ["../x", "a/b", "", ".x", "a\\u0000b", "\\u202ex", "\\uff0f"] {
+            let body = format!(r#"{{"cmd":"load_preset","name":"{name}"}}"#);
+            assert_eq!(
+                code(&json_headers(), body.as_bytes()),
+                Err(StatusCode::BAD_REQUEST),
+                "{name}"
+            );
+        }
+        let live = br#"{"cmd":"load_preset","name":"Live 1"}"#;
+        assert!(matches!(
+            parse_command(&json_headers(), live),
+            Ok(Command::LoadPreset { .. })
+        ));
+    }
 
     #[test]
     fn only_the_quick_access_commands_are_allowed() {

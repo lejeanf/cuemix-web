@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import Dialog from './Dialog.svelte';
   import { store } from '../lib/store.svelte';
   import { S } from '../lib/strings';
   import type { PlugKind, SpeakerPlugSettings } from '../lib/protocol';
@@ -36,6 +35,9 @@
   const urlErr = $derived(urls ? null : urlProblem(norm));
   const problem = $derived(settingsProblem(cur));
   const dirty = $derived(saved === null ? !sameSettings(cur, defaultPlugSettings()) : !sameSettings(cur, saved));
+  /** The tab bar needs to know about unsaved edits (switching tabs keeps them; closing asks first). */
+  let { onDirty }: { onDirty?: (d: boolean) => void } = $props();
+  $effect(() => onDirty?.(dirty));
   const plugState = $derived(store.c.plug?.state ?? null);
 
   // Only errors that arrive after this panel sent a command are shown as its reply.
@@ -99,14 +101,14 @@
     testing = store.testSpeakerPlug(on) ? on : null;
   }
   function close() {
-    store.plugOpen = false;
+    store.advancedOpen = false;
   }
   onMount(() => {
     store.c.plugResult = null;
   });
 </script>
 
-<Dialog title={S.plug.title} titleId="plug-title" {dirty} onclose={close}>
+<div class="panel">
     <p class="note">{S.plug.help}</p>
 
     <label class="sw">
@@ -173,7 +175,7 @@
       <button type="button" class="primary" disabled={!store.ready || problem !== null || !dirty || saving} onclick={save}>{saving ? S.plug.saving : S.plug.save}</button>
       <button type="button" onclick={close}>{dirty ? S.plug.cancel : S.plug.close}</button>
     </div>
-</Dialog>
+</div>
 
 <style>
   label.sw {
