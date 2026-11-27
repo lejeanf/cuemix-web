@@ -7,7 +7,7 @@
 
 | | |
 |---|---|
-| Version du contrat | `0.3.0` + non publié (0.6.0 : `power`, prise enceintes, `/api/v1`, D29 ; 0.7.0 : réglages OSC en direct `set_osc_settings` / `osc_settings`, choix de version à installer, D30) : DSP / réverbe / horloge à la forme du matériel, lus sur la MOTU (présets schema v2, D19–D23) |
+| Version du contrat | `0.3.0` + non publié (0.6.0 : `power`, prise enceintes, `/api/v1`, D29 ; 0.7.0 : réglages OSC en direct `set_osc_settings` / `osc_settings`, choix de version à installer, D30 ; 0.8.0 : `return_db` et `set_return_level`, `rename_preset` / `delete_preset` / `set_preset_in_simple`, champ `hidden` de l'événement `presets`, D34) : DSP / réverbe / horloge à la forme du matériel, lus sur la MOTU (présets schema v2, D19–D23) |
 | MSRV | Rust `1.85`, édition 2021 (relevée depuis 1.80, décision D18) |
 | Frontend | Svelte 5 + Vite + TypeScript → `frontend/dist/` (embarqué via `rust-embed`) |
 
@@ -623,15 +623,7 @@ Trois acteurs, chacun avec ses droits :
 - `?simple` force la vue Simple pour ce chargement sans l'écrire dans `localStorage` ; priorité : `?simple` > `localStorage` > largeur d'écran. `?embed` seul (réservé à la future vue web de l'app native, où Simple est natif) ouvre la vue Avancée pour ce chargement (non sauvegardée) et masque le bouton Simple/Avancé, le point d'état et la barre d'onglets du bas ; `?embed&simple` ouvre Simple. Logique pure dans `frontend/src/lib/launch.ts`.
 - Au retour de veille (`visibilitychange` visible, `pageshow` persisté), `store.reconnectNow()` rouvre la WebSocket immédiatement si elle n'est ni ouverte ni en cours de connexion (une seule tentative à la fois, backoff remis à zéro pour afficher « connexion » et non « hors ligne »). Si la socket paraît ouverte mais que la session est `online`/`demo` (mètres ≈ 30/s) et qu'aucun message n'arrive dans les 2 s suivant le retour au premier plan, elle est détachée sans attendre la fermeture et une nouvelle connexion est ouverte aussitôt. `manifest.json` porte `id: "./"` ; `theme_color` = couleur de la TopBar (`#16181d`), `background_color` = `#121214`.
 
-### Vue Simple : affinages de la revue UX (non publié)
-
-- Courbe des boutons de volume (Monitor, Phones ; vue Simple et vue Sortie) : `volKnobToNorm` / `volKnobFromNorm` (`frontend/src/lib/fader.ts`), c'est-à-dire la loi « trim » des curseurs étirée pour que le plancher (−100 dB) soit au début de l'arc. Vecteurs partagés avec l'app iOS : `design/vectors/volume-knob.json` (vérifiés par vitest). Flèches, molette et lecteur d'écran : pas exact de 1 dB (prop `keyStep` de `Knob.svelte`, avec `curve`).
-- Boutons marche/arrêt : pendant un fondu, couleur de l'état visé et barre animée (immobile avec `prefers-reduced-motion`) ; préchauffage de la prise en ambre avec compte à rebours calculé côté client depuis `warmup_ms` des réglages de la prise et l'instant où l'état `warming` arrive. Sous un canal éteint, « returns to −18 dB » vient du champ `return_db` de l'événement `power` (ligne réservée, pour que le bouton ne bouge pas). Tant que le canal est éteint, son bouton rotatif règle ce niveau de retour au lieu du volume (aiguille et arc gris ; commande `set_return_level`, entiers −99..0 dB, ignorée si le canal est allumé ou en fondu d'entrée ; le serveur le garde dans `power.json` même en démo, car c'est un choix explicite, contrairement au niveau mémorisé à l'arrêt). Option « Keep screen on » (verrou d'écran `navigator.wakeLock`, redemandé à chaque retour au premier plan ; par navigateur, désactivée par défaut, `frontend/src/lib/wakelock.ts`).
-- Canal éteint : « Off » au lieu du plancher sous le bouton (et dans `aria-valuetext`).
-- Présets en vue Simple : ligne « Preset » (préset courant, « ● Modified ») qui ouvre `PresetPicker.svelte` (fenêtre `Dialog`, un bouton Load par préset) ; `store.presetsOpen` compte dans `panelOpen`.
-- Mètres (`meters.ts`) : graduations à −40/−18/−6 dBFS, repère d'écrêtage rouge mémorisé dès qu'une trame atteint ≈ −0,3 dBFS, effacé d'un toucher sur le mètre (les mètres ne servent plus de surface de glissement du bouton).
-
-### Interface : corrections rapides de la revue UX (non publié)
+### Interface : corrections rapides de la revue UX (0.8.0)
 
 - En-tête : commutateur à deux boutons **Simple | Avancé** (`aria-pressed` sur la vue courante, icônes sous 640 px) ; en vue Simple un espaceur pousse les boutons à droite comme en vue Avancée.
 - Mode démo : pastille ambre « Demo » toujours visible (nom accessible « Demo — no MOTU ») ; le rouge reste réservé aux erreurs.
@@ -639,22 +631,22 @@ Trois acteurs, chacun avec ses droits :
 - L'onglet suit le fragment d'URL aussi après le chargement (`hashchange`, `tabFromHash` dans `ui.ts`).
 - Sous 640 px, le panneau Présets est fixé aux deux bords de l'écran (il débordait de 121 px à 375 px) ; les cartes de la vue Entrée se partagent chaque ligne.
 
-### Vue Simple : affinages de la revue UX (non publié)
+### Vue Simple : affinages de la revue UX (0.8.0)
 
 - Courbe des boutons de volume (Monitor, Phones ; vue Simple et vue Sortie) : `volKnobToNorm` / `volKnobFromNorm` (`frontend/src/lib/fader.ts`), c'est-à-dire la loi « trim » des curseurs étirée pour que le plancher (−100 dB) soit au début de l'arc. Vecteurs partagés avec l'app iOS : `design/vectors/volume-knob.json` (vérifiés par vitest). Flèches, molette et lecteur d'écran : pas exact de 1 dB (prop `keyStep` de `Knob.svelte`, avec `curve`).
 - Boutons marche/arrêt : pendant un fondu, couleur de l'état visé et barre animée (immobile avec `prefers-reduced-motion`) ; préchauffage de la prise en ambre avec compte à rebours calculé côté client depuis `warmup_ms` des réglages de la prise et l'instant où l'état `warming` arrive. Sous un canal éteint, « returns to −18 dB » vient du champ `return_db` de l'événement `power` (ligne réservée, pour que le bouton ne bouge pas). Tant que le canal est éteint, son bouton rotatif règle ce niveau de retour au lieu du volume (aiguille et arc gris ; commande `set_return_level`, entiers −99..0 dB, ignorée si le canal est allumé ou en fondu d'entrée ; le serveur le garde dans `power.json` même en démo, car c'est un choix explicite, contrairement au niveau mémorisé à l'arrêt). Option « Keep screen on » (verrou d'écran `navigator.wakeLock`, redemandé à chaque retour au premier plan ; par navigateur, désactivée par défaut, `frontend/src/lib/wakelock.ts`).
 - Canal éteint : « Off » au lieu du plancher sous le bouton (et dans `aria-valuetext`).
-- Présets en vue Simple : ligne « Preset » (préset courant, « ● Modified ») qui ouvre `PresetPicker.svelte` (fenêtre `Dialog`, un bouton Load par préset, seulement les présets absents de `hidden`, voir D31) ; `store.presetsOpen` compte dans `panelOpen`.
+- Présets en vue Simple : ligne « Preset » (préset courant, « ● Modified ») qui ouvre `PresetPicker.svelte` (fenêtre `Dialog`, un bouton Load par préset, seulement les présets absents de `hidden`, voir D34) ; `store.presetsOpen` compte dans `panelOpen`.
 - Mètres (`meters.ts`) : graduations à −40/−18/−6 dBFS, repère d'écrêtage rouge mémorisé dès qu'une trame atteint ≈ −0,3 dBFS, effacé d'un toucher sur le mètre (les mètres ne servent plus de surface de glissement du bouton).
 
-### Vue Avancée : disposition (revue UX, non publié)
+### Vue Avancée : disposition (revue UX, 0.8.0)
 
 - Téléphones (≤ 640 px) : barre d'onglets en bas (`.bnav` dans `App.svelte`, icônes + libellés, même ordre et mêmes noms que l'app iOS, Q11) ; l'en-tête garde une seule ligne (`TopBar` prop `phoneTabs`). Avec `?embed`, pas de barre du bas : les onglets restent dans l'en-tête et l'app native fournit sa barre.
 - Barre Control Room : Monitor et Phones ont chacun un bouton marche/arrêt (commande `power`, état `powerView`) ; sur téléphone, lignes de 40 px et boutons DIM/MONO/A-B/Talkback repliés derrière ⋯. Le niveau principal s'appelle « Monitor » partout ; plus de remise à 0 dB par double-clic sur ce curseur (un volume ne doit jamais sauter vers le haut).
 - Mixer : tranches groupées (`frontend/src/lib/mixerGroups.ts` : Mic, Line, S/PDIF, Optical, Computer, Reverb ; blocs numériques et USB seulement pour la disposition à 32 entrées, sinon « Other ») ; graduation dB à côté du fader Monitor, calculée avec `trimDbToPos` et la géométrie du fader.
 - Téléphones : toasts sous l'en-tête.
 
-### Thème et tactile (revue UX, non publié)
+### Thème et tactile (revue UX, 0.8.0)
 
 - Toutes les couleurs de l'interface viennent des jetons de `frontend/src/app.css` (nouveaux : `--danger-bg`, `--danger-text`, `--row-active`, `--thumb-hi/lo/edge`, `--grid`, `--grid-strong`, `--axis-text`) ; restent en dur les ombres, les couleurs d'étiquette proposées à l'utilisateur et celles des bandes d'EQ (données). Les mètres (canvas) lisent `--field` et `--meter-*`, graduations (`--meter-tick`) et repère d'écrêtage (`--meter-red`) compris (`refreshMeterPalette` dans `meters.ts`).
 - Mode Nuit : `:root[data-theme='night']` redéfinit les jetons (lumières atténuées, texte ≥ 4,5:1 sur sa carte) ; bouton lune dans l'en-tête, choix par navigateur (`frontend/src/lib/theme.ts`, clé `cuemix.theme`), appliqué dans `main.ts` avant le premier rendu. Base du futur `design/tokens.json` partagé avec iOS.
