@@ -628,7 +628,7 @@ start_container() {
 release_pubkey() {
   local key=""
   key="$(sed -n '2p' "${SCRIPT_DIR}/minisign.pub" 2>/dev/null | tr -d '[:space:]')"
-  [[ "${key}" =~ ^RW[A-Za-z0-9+/]{52}=*$ ]] || die "missing or invalid ${SCRIPT_DIR}/minisign.pub (run from a repository checkout)"
+  [[ "${key}" =~ ^RW[A-Za-z0-9+/]{54}$ ]] || die "missing or invalid ${SCRIPT_DIR}/minisign.pub (run from a repository checkout)"
   printf '%s' "${key}"
 }
 
