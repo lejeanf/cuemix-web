@@ -12,8 +12,8 @@ const info = (): PowerInfo => ({
 
 describe('powerView', () => {
   it('shows what the server reports', () => {
-    expect(powerView(info(), 'main', -100)).toEqual({ on: true, fading: 'in', plug: 'warming' });
-    expect(powerView(info(), 'phones', -20)).toEqual({ on: false, fading: null, plug: null });
+    expect(powerView(info(), 'main', -100)).toEqual({ on: true, fading: 'in', plug: 'warming', returnDb: null });
+    expect(powerView(info(), 'phones', -20)).toEqual({ on: false, fading: null, plug: null, returnDb: null });
   });
   it('shows where the channel is heading while it fades', () => {
     // Plug warm-up: the server still reports on=false (level at the minimum).
@@ -21,9 +21,17 @@ describe('powerView', () => {
     expect(powerView(warm, 'main', -100).on).toBe(true);
     expect(powerView(warm, 'phones', -20).on).toBe(false);
   });
+  it('says where On goes back to while off', () => {
+    const off: PowerInfo = { main: { on: false, fading: null, plug: null, return_db: -18 }, phones: { on: true, fading: 'out', plug: null, return_db: -30 } };
+    expect(powerView(off, 'main', -100).returnDb).toBe(-18);
+    expect(powerView(off, 'phones', -50).returnDb).toBe(-30);
+    // Heading on: nothing to return to.
+    const warm: PowerInfo = { main: { on: false, fading: 'in', plug: 'warming', return_db: -18 }, phones: { on: true, fading: null, plug: null } };
+    expect(powerView(warm, 'main', -100).returnDb).toBeNull();
+  });
   it('falls back to the level before the first power event', () => {
-    expect(powerView(null, 'main', -30)).toEqual({ on: true, fading: null, plug: null });
-    expect(powerView(null, 'main', -100)).toEqual({ on: false, fading: null, plug: null });
+    expect(powerView(null, 'main', -30)).toEqual({ on: true, fading: null, plug: null, returnDb: null });
+    expect(powerView(null, 'main', -100)).toEqual({ on: false, fading: null, plug: null, returnDb: null });
   });
 });
 

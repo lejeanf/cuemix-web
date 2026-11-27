@@ -97,9 +97,13 @@ fn command_kind(c: &Command) -> usize {
         C::SetSpeakerPlug { .. } => 9,
         C::TestSpeakerPlug { .. } => 10,
         C::SetOscSettings { .. } => 11,
+        C::SetReturnLevel { .. } => 12,
+        C::DeletePreset { .. } => 13,
+        C::RenamePreset { .. } => 14,
+        C::SetPresetInSimple { .. } => 15,
     }
 }
-const COMMAND_KINDS: usize = 12;
+const COMMAND_KINDS: usize = 16;
 
 fn event_kind(e: &ServerEvent) -> usize {
     use ServerEvent as E;
@@ -301,6 +305,19 @@ fn commands() -> Vec<Command> {
         Command::SetOscSettings {
             settings: osc_settings(),
         },
+        Command::SetReturnLevel {
+            channel: PowerChannel::Phones,
+            db: -24.0,
+        },
+        Command::DeletePreset { name: "Old".into() },
+        Command::RenamePreset {
+            name: "Live".into(),
+            to: "Live 2".into(),
+        },
+        Command::SetPresetInSimple {
+            name: "Studio".into(),
+            show: false,
+        },
     ]
 }
 
@@ -339,6 +356,7 @@ fn events() -> Vec<ServerEvent> {
         ServerEvent::Session(session()),
         ServerEvent::Presets {
             names: vec!["Live".into(), "Studio".into()],
+            hidden: vec!["Studio".into()],
         },
         ServerEvent::Labels(Labels { channels }),
         ServerEvent::Meters {
@@ -361,11 +379,13 @@ fn events() -> Vec<ServerEvent> {
                 on: true,
                 fading: Some(FadeDir::Out),
                 plug: Some(PlugState::On),
+                return_db: Some(-18.0),
             },
             phones: ChannelPower {
                 on: false,
                 fading: None,
                 plug: None,
+                return_db: Some(-70.0),
             },
         },
         ServerEvent::SpeakerPlug {

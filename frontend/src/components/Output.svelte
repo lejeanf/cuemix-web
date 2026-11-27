@@ -2,7 +2,7 @@
   import { store } from '../lib/store.svelte';
   import { S } from '../lib/strings';
   import { TRIM_MIN_DB } from '../lib/protocol';
-  import { formatDb } from '../lib/fader';
+  import { formatDb, volKnobFromNorm, volKnobToNorm } from '../lib/fader';
   import { OUTPUT_EQ_PRESETS, matchPreset, presetWrites } from '../lib/eqPresets';
   import Knob from './Knob.svelte';
   import Meter from './Meter.svelte';
@@ -14,6 +14,8 @@
   const st = $derived(store.state);
   const off = $derived(!store.ready);
   const dbText = (v: number) => `${formatDb(v, 0)} dB`;
+  /** Monitor and Phones: the Simple view's volume curve, 1 dB per key. */
+  const volCurve = { toNorm: (v: number) => volKnobToNorm(v, TRIM_MIN_DB), fromNorm: (n: number) => volKnobFromNorm(n, TRIM_MIN_DB) };
   let eqOut = $state(0);
   let eqBand = $state(0);
   const eqHint = $derived(store.hint('output_eq_freq'));
@@ -56,6 +58,8 @@
             min={TRIM_MIN_DB}
             max={0}
             step={1}
+            keyStep={1}
+            curve={volCurve}
             label={S.monitor}
             ariaLabel="{S.monitor} level"
             size={48}
@@ -83,6 +87,8 @@
             min={TRIM_MIN_DB}
             max={0}
             step={1}
+            keyStep={1}
+            curve={volCurve}
             label={S.phones}
             ariaLabel="{S.phones} level"
             size={48}
@@ -368,5 +374,13 @@
     flex: 0 1 470px;
     min-width: 0;
     align-self: flex-start;
+  }
+  /* Touch screens: controls at least 44 px tall (the mouse keeps the dense layout). */
+  @media (pointer: coarse) {
+    .t,
+    .o,
+    .preset select {
+      min-height: 44px;
+    }
   }
 </style>

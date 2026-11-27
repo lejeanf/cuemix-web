@@ -9,7 +9,9 @@
   });
 </script>
 
-<canvas bind:this={canvas} class:horizontal aria-hidden="true" data-label={label}></canvas>
+<!-- A tap clears the clip mark (the meter is decorative for screen readers). -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<canvas bind:this={canvas} class:horizontal aria-hidden="true" data-label={label} onclick={() => meterBank.clearClip(canvas)}></canvas>
 
 <style>
   canvas {

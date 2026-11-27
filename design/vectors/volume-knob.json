@@ -1,0 +1,19 @@
+{
+  "description": "Monitor and Phones volume knob (Simple view, Output view, iOS app). Knob position 0..1 along the 270 degree arc <-> level in dB. The trim taper of the sliders (frontend/src/lib/fader.ts trimDbToPos), stretched so the floor sits at position 0. Values are whole dB; one key press, wheel notch or VoiceOver swipe is 1 dB; there is no double-tap reset.",
+  "floor_db": -100,
+  "step_db": 1,
+  "tolerance": 0.0005,
+  "points": [
+    { "db": -100, "pos": 0 },
+    { "db": -80, "pos": 0.0616 },
+    { "db": -60, "pos": 0.161 },
+    { "db": -50, "pos": 0.2317 },
+    { "db": -40, "pos": 0.3216 },
+    { "db": -30, "pos": 0.4358 },
+    { "db": -20, "pos": 0.581 },
+    { "db": -12, "pos": 0.725 },
+    { "db": -6, "pos": 0.8526 },
+    { "db": -3, "pos": 0.9237 },
+    { "db": 0, "pos": 1 }
+  ]
+}

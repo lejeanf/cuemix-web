@@ -164,7 +164,7 @@
     width: 6px;
     margin-left: -3px;
     border-radius: 3px;
-    background: #0d0e11;
+    background: var(--field);
     border: 1px solid var(--border);
   }
   .fill {
@@ -192,8 +192,8 @@
     height: 22px;
     margin-bottom: -11px;
     border-radius: 4px;
-    background: linear-gradient(#4b5160, #2f333d);
-    border: 1px solid #5b6273;
+    background: linear-gradient(var(--thumb-hi), var(--thumb-lo));
+    border: 1px solid var(--thumb-edge);
     box-shadow: 0 2px 4px #0008;
     pointer-events: none;
   }
