@@ -78,6 +78,11 @@ class MeterBank {
     return () => this.targets.delete(t);
   }
 
+  /** Draws every meter again (new colours). */
+  redraw(): void {
+    for (const t of this.targets) draw(t);
+  }
+
   /** Clears the clip mark of the meter drawn on `canvas`. */
   clearClip(canvas: HTMLCanvasElement): void {
     for (const t of this.targets) {
@@ -86,11 +91,6 @@ class MeterBank {
         draw(t);
       }
     }
-  }
-
-  /** Draws every meter again (new colours). */
-  redraw(): void {
-    for (const t of this.targets) draw(t);
   }
 
   private wake(): void {
@@ -129,8 +129,15 @@ interface Palette {
   green: string;
   yellow: string;
   red: string;
+  tick: string;
 }
-const FALLBACK: Palette = { track: '#0d0e11', green: '#10B981', yellow: '#EAB308', red: '#EF4444' };
+const FALLBACK: Palette = {
+  track: '#0d0e11',
+  green: '#10B981',
+  yellow: '#EAB308',
+  red: '#EF4444',
+  tick: 'rgba(255, 255, 255, 0.22)',
+};
 let palette: Palette = FALLBACK;
 
 /** Reads the meter colours from the page's CSS variables (call after a theme change). */
@@ -143,6 +150,7 @@ export function refreshMeterPalette(): void {
     green: v('--meter-green', FALLBACK.green),
     yellow: v('--meter-yellow', FALLBACK.yellow),
     red: v('--meter-red', FALLBACK.red),
+    tick: v('--meter-tick', FALLBACK.tick),
   };
   meterBank.redraw();
 }
@@ -179,7 +187,7 @@ function draw(t: Target): void {
     else g.fillRect(0, Math.max(0, h - p), w, 2 * dpr);
   }
   // Scale ticks (-40 / -18 / -6 dBFS): faint lines across, readable on the track and the fill.
-  g.fillStyle = 'rgba(255, 255, 255, 0.22)';
+  g.fillStyle = palette.tick;
   for (const db of METER_TICKS_DB) {
     const p = Math.round(len * dbToMeterPos(db));
     if (t.horizontal) g.fillRect(p, 0, Math.max(1, dpr), h);
@@ -187,7 +195,7 @@ function draw(t: Target): void {
   }
   // Clip latch: a solid red cap at the 0 dBFS end until the meter is tapped.
   if (t.clip) {
-    g.fillStyle = '#EF4444';
+    g.fillStyle = palette.red;
     const c = Math.max(3, Math.round(4 * dpr));
     if (t.horizontal) g.fillRect(w - c, 0, c, h);
     else g.fillRect(0, 0, w, c);
