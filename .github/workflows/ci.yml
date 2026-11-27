@@ -21,8 +21,10 @@ jobs:
     name: Frontend (check + build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -39,7 +41,7 @@ jobs:
       - name: Build
         working-directory: frontend
         run: npm run build
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frontend-dist
           path: frontend/dist
@@ -51,8 +53,10 @@ jobs:
     needs: frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: frontend-dist
           path: frontend/dist
@@ -73,8 +77,10 @@ jobs:
     needs: frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: frontend-dist
           path: frontend/dist
@@ -90,26 +96,60 @@ jobs:
     name: Shell scripts (bash -n + shellcheck)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Syntax check
         run: for f in deploy/*.sh; do bash -n "$f"; done
       - name: shellcheck (preinstalled on ubuntu-latest)
         run: shellcheck --version && shellcheck -x deploy/*.sh
+      - name: One release signing key everywhere
+        # The updater pins the public key of deploy/minisign.pub; the release job checks every
+        # signature against that file.
+        run: |
+          set -euo pipefail
+          if [[ ! -f deploy/minisign.pub ]]; then
+            echo "::error file=deploy/minisign.pub::deploy/minisign.pub is missing: generate the release key (README, Releases)"
+            exit 1
+          fi
+          file="$(sed -n '2p' deploy/minisign.pub | tr -d '[:space:]')"
+          root="$(sed -n 's/^MINISIGN_PUBKEY="\([^"]*\)"/\1/p' deploy/cuemix-update.sh)"
+          if [[ ! "${file}" =~ ^RW[A-Za-z0-9+/]{54}$ || "${file}" != "${root}" ]]; then
+            echo "::error::MINISIGN_PUBKEY in deploy/cuemix-update.sh must equal the key in deploy/minisign.pub"
+            exit 1
+          fi
+          echo "release key: ${file}"
+      - name: One version floor everywhere
+        # The oldest installable release is written in three places; they must agree.
+        run: |
+          set -euo pipefail
+          file="$(tr -d '[:space:]' < deploy/min-version)"
+          server="$(sed -n 's/^pub(super) const MIN_PIN_VERSION: &str = "\([^"]*\)";/\1/p' src/web/update.rs)"
+          root="$(sed -n 's/^MIN_VERSION="\([^"]*\)"/\1/p' deploy/cuemix-update.sh)"
+          echo "deploy/min-version=${file} src/web/update.rs=${server} deploy/cuemix-update.sh=${root}"
+          if [[ -z "${file}" || "${file}" != "${server}" || "${file}" != "${root}" ]]; then
+            echo "::error::the version floor differs between deploy/min-version, src/web/update.rs and deploy/cuemix-update.sh"
+            exit 1
+          fi
 
   secrets:
     name: Secret scan (gitleaks + RFC1918)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Install gitleaks (pinned release)
         env:
           GITLEAKS_VERSION: 8.21.2
+          # From gitleaks_8.21.2_checksums.txt; change both together.
+          GITLEAKS_SHA256: 5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba
         run: |
           set -euo pipefail
           curl -sSfL -o gitleaks.tar.gz \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/gitleaks"
           tar -xzf gitleaks.tar.gz -C "$RUNNER_TEMP/gitleaks" gitleaks
           rm gitleaks.tar.gz

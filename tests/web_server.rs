@@ -31,6 +31,14 @@ impl Drop for Harness {
 }
 
 async fn harness(tag: &str) -> Result<Harness, Box<dyn std::error::Error>> {
+    harness_with(tag, None).await
+}
+
+/// The test server, optionally with an admin token.
+async fn harness_with(
+    tag: &str,
+    admin_token: Option<cuemix_web::web::admin::AdminToken>,
+) -> Result<Harness, Box<dyn std::error::Error>> {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_nanos();
@@ -46,8 +54,12 @@ async fn harness(tag: &str) -> Result<Harness, Box<dyn std::error::Error>> {
         WebConfig {
             trust_forwarded_headers: true,
             allowed_origins: vec!["http://mixer.example.com:8443".to_owned()],
-            update: Default::default(),
-            update_prefs_file: Default::default(),
+            allowed_hosts: vec!["mixer.example.net".to_owned()],
+            mdns_hostname: "cuemix-web".to_owned(),
+            admin_token,
+            // Writes stay in this test's directory.
+            update_prefs_file: dir.join("update-prefs.json"),
+            ..WebConfig::default()
         },
         shutdown,
     ));
@@ -139,7 +151,11 @@ async fn http_request(
     body: Option<&str>,
 ) -> Result<HttpResp, Box<dyn std::error::Error>> {
     let mut s = TcpStream::connect(addr).await?;
-    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n");
+    let mut req = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");
+    // `Host: localhost` unless the test names its own.
+    if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host")) {
+        req.push_str("Host: localhost\r\n");
+    }
     for (k, v) in headers {
         req.push_str(&format!("{k}: {v}\r\n"));
     }
@@ -709,5 +725,364 @@ async fn api_command_refuses_hostile_bodies() -> Result<(), Box<dyn std::error::
     // The state did not move.
     let s: Value = serde_json::from_slice(&http_get(h.addr, "/api/v1/summary").await?.body)?;
     assert_ne!(s["main"]["db"], -3.0);
+    Ok(())
+}
+
+/// DNS rebinding: the attacker's page names its own domain in both `Host` and `Origin`, which
+/// match each other. The host guard refuses it on every route before anything runs.
+#[tokio::test]
+async fn requests_for_an_unknown_host_name_are_refused_everywhere(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("rebind").await?;
+    let before: Value = serde_json::from_slice(&http_get(h.addr, "/api/v1/summary").await?.body)?;
+    let evil = [
+        ("Host", "rebind.attacker.example:8080"),
+        ("Origin", "http://rebind.attacker.example:8080"),
+    ];
+    let set = r#"{"cmd":"set","param":"main_vol","db":-7}"#;
+    assert_eq!(post(&h, set, &evil).await?.0, 421);
+    for (method, path, body) in [
+        ("GET", "/", None),
+        ("GET", "/api/health", None),
+        ("GET", "/api/v1/summary", None),
+        ("GET", "/api/update", None),
+        ("POST", "/api/update", Some(r#"{"version":"v9.9.9"}"#)),
+        ("GET", "/ws", None),
+    ] {
+        let mut headers = evil.to_vec();
+        headers.push(("x-cuemix-update", "1"));
+        headers.push(("Content-Type", "application/json"));
+        let r = http_request(h.addr, method, path, &headers, body).await?;
+        assert_eq!(r.status, 421, "{method} {path}");
+        assert_eq!(r.header("x-frame-options").as_deref(), Some("DENY"));
+    }
+    // The WebSocket upgrade itself.
+    let upgrade = [
+        ("Host", "rebind.attacker.example"),
+        ("Origin", "http://rebind.attacker.example"),
+        ("Connection", "Upgrade"),
+        ("Upgrade", "websocket"),
+        ("Sec-WebSocket-Version", "13"),
+        ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="),
+    ];
+    let r = http_request(h.addr, "GET", "/ws", &upgrade, None).await?;
+    assert_eq!(r.status, 421);
+    // Behind the trusted proxy, the forwarded host is the one that counts.
+    let r = http_request(
+        h.addr,
+        "GET",
+        "/api/health",
+        &[("X-Forwarded-Host", "rebind.attacker.example")],
+        None,
+    )
+    .await?;
+    assert_eq!(r.status, 421);
+    // Nothing moved.
+    let s: Value = serde_json::from_slice(&http_get(h.addr, "/api/v1/summary").await?.body)?;
+    assert_eq!(s["main"]["db"], before["main"]["db"]);
+    assert_ne!(s["main"]["db"], -7.0);
+
+    // Names an outside attacker cannot own are served: IP literals, localhost, .local, the
+    // mDNS name, allowed_hosts and the hosts of allowed_origins.
+    for host in [
+        h.addr.to_string(),
+        "127.0.0.1".to_owned(),
+        "[::1]:8080".to_owned(),
+        "LOCALHOST".to_owned(),
+        "cuemix-web.local:8080".to_owned(),
+        "studio-pi.local.".to_owned(),
+        "cuemix-web".to_owned(),
+        "Mixer.Example.NET".to_owned(),
+        "mixer.example.com:8443".to_owned(),
+    ] {
+        let r = http_request(h.addr, "GET", "/api/health", &[("Host", &host)], None).await?;
+        assert_eq!(r.status, 200, "{host}");
+    }
+    for host in ["x.example", "127.0.0.1:99999", "user@127.0.0.1"] {
+        let r = http_request(h.addr, "GET", "/api/health", &[("Host", host)], None).await?;
+        assert_ne!(r.status, 200, "{host:?}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn every_response_carries_the_security_headers() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("headers").await?;
+    for path in [
+        "/",
+        "/index.html",
+        "/api/health",
+        "/api/v1/summary",
+        "/some/spa/route",
+    ] {
+        let r = http_get(h.addr, path).await?;
+        let csp = r.header("content-security-policy").ok_or("no CSP")?;
+        for part in [
+            "default-src 'self'",
+            "script-src 'self';",
+            "frame-ancestors 'none'",
+            "object-src 'none'",
+            "connect-src 'self' ws://localhost wss://localhost;",
+        ] {
+            assert!(csp.contains(part), "{path}: {csp}");
+        }
+        assert_eq!(
+            r.header("x-frame-options").as_deref(),
+            Some("DENY"),
+            "{path}"
+        );
+        assert_eq!(
+            r.header("x-content-type-options").as_deref(),
+            Some("nosniff")
+        );
+        assert_eq!(r.header("referrer-policy").as_deref(), Some("no-referrer"));
+    }
+    Ok(())
+}
+
+/// The update endpoints apply the same cross-site Origin rule as `/ws` and `/api/v1`.
+#[tokio::test]
+async fn update_endpoints_refuse_cross_site_origins() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("update-origin").await?;
+    for (method, path, body) in [
+        ("GET", "/api/update", None),
+        ("POST", "/api/update", Some("")),
+        (
+            "PUT",
+            "/api/update/prefs",
+            Some(r#"{"show_prerelease":true}"#),
+        ),
+    ] {
+        let headers = [
+            ("Origin", "http://evil.example"),
+            ("x-cuemix-update", "1"),
+            ("Content-Type", "application/json"),
+        ];
+        let r = http_request(h.addr, method, path, &headers, body).await?;
+        assert_eq!(r.status, 403, "{method} {path}");
+    }
+    Ok(())
+}
+
+/// One client address cannot hold more than `MAX_WS_PER_IP` WebSockets; closing one frees a slot.
+#[tokio::test]
+async fn websockets_are_capped_per_client_address() -> Result<(), Box<dyn std::error::Error>> {
+    use cuemix_web::web::server::MAX_WS_PER_IP;
+    let h = harness("ws-cap").await?;
+    let mut open = Vec::new();
+    for _ in 0..MAX_WS_PER_IP {
+        open.push(connect(&h).await?);
+    }
+    assert_eq!(connect_with_origin(&h, None).await?, 503);
+    let mut first = open.remove(0);
+    first.close(None).await?;
+    drop(first);
+    // The slot comes back once the server has seen the close.
+    let mut status = 0;
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        status = connect_with_origin(&h, None).await?;
+        if status == 101 {
+            break;
+        }
+    }
+    assert_eq!(status, 101);
+    Ok(())
+}
+
+/// A client that never finishes its request headers is disconnected (slow-header attack).
+#[tokio::test]
+async fn a_client_that_never_finishes_its_headers_is_dropped(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use cuemix_web::web::server::HEADER_READ_TIMEOUT;
+    let h = harness("slow-header").await?;
+    let mut s = TcpStream::connect(h.addr).await?;
+    s.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n")
+        .await?;
+    let started = std::time::Instant::now();
+    let mut buf = [0u8; 256];
+    // Closed (0 bytes, or an error answer then close) well before twice the timeout.
+    let read = tokio::time::timeout(HEADER_READ_TIMEOUT * 2, async {
+        loop {
+            match s.read(&mut buf).await {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await;
+    assert!(read.is_ok(), "still open after {:?}", started.elapsed());
+    assert!(started.elapsed() >= HEADER_READ_TIMEOUT / 2);
+    Ok(())
+}
+
+/// With the admin token on, installs, the pre-release switch and the plug/OSC settings need a
+/// paired device; pairing sets an HttpOnly cookie; faders stay open.
+#[tokio::test]
+async fn admin_token_pairing_and_enforcement() -> Result<(), Box<dyn std::error::Error>> {
+    use cuemix_web::web::admin::AdminToken;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let secret = "5a".repeat(32);
+    let h = harness_with("admin", AdminToken::parse(&secret)).await?;
+    let json = ("Content-Type", "application/json");
+
+    let r = http_get(h.addr, "/api/admin").await?;
+    let v: Value = serde_json::from_slice(&r.body)?;
+    assert_eq!(
+        (v["required"].clone(), v["paired"].clone()),
+        (Value::Bool(true), Value::Bool(false))
+    );
+
+    // Not paired: admin-only HTTP routes answer 401.
+    for (method, path, body) in [
+        ("POST", "/api/update", Some("")),
+        (
+            "PUT",
+            "/api/update/prefs",
+            Some(r#"{"show_prerelease":true}"#),
+        ),
+    ] {
+        let r = http_request(
+            h.addr,
+            method,
+            path,
+            &[("x-cuemix-update", "1"), json],
+            body,
+        )
+        .await?;
+        assert_eq!(r.status, 401, "{method} {path}");
+    }
+    // ... and admin-only WebSocket commands are refused to this client only.
+    let mut ws = connect(&h).await?;
+    drain_initial(&mut ws).await?;
+    ws.send(Message::text(r#"{"cmd":"test_speaker_plug","on":true}"#))
+        .await?;
+    let e = next_json(&mut ws).await?;
+    assert_eq!(e["event"], "error");
+    assert!(
+        e["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not paired"),
+        "{e}"
+    );
+    // Faders are open to everyone.
+    let (status, _) = post(&h, r#"{"cmd":"set","param":"main_vol","db":-9}"#, &[]).await?;
+    assert_eq!(status, 200);
+
+    // A wrong token is refused without a cookie.
+    let bad = format!(r#"{{"token":"{}"}}"#, "00".repeat(32));
+    let r = http_request(h.addr, "POST", "/api/admin/pair", &[json], Some(&bad)).await?;
+    assert_eq!(r.status, 403);
+    assert!(r.header("set-cookie").is_none());
+
+    // The right one pairs: HttpOnly, SameSite=Strict cookie.
+    let good = format!(r#"{{"token":"{secret}"}}"#);
+    let r = http_request(h.addr, "POST", "/api/admin/pair", &[json], Some(&good)).await?;
+    assert_eq!(r.status, 200);
+    let cookie = r.header("set-cookie").ok_or("no cookie")?;
+    assert!(
+        cookie.starts_with(&format!("cuemix_admin={secret};")),
+        "{cookie}"
+    );
+    assert!(
+        cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"),
+        "{cookie}"
+    );
+    let jar = format!("cuemix_admin={secret}");
+
+    let r = http_request(h.addr, "GET", "/api/admin", &[("Cookie", &jar)], None).await?;
+    assert_eq!(serde_json::from_slice::<Value>(&r.body)?["paired"], true);
+    let r = http_request(
+        h.addr,
+        "PUT",
+        "/api/update/prefs",
+        &[("x-cuemix-update", "1"), json, ("Cookie", &jar)],
+        Some(r#"{"show_prerelease":true}"#),
+    )
+    .await?;
+    assert_ne!(r.status, 401, "a paired device passes the admin check");
+    // A script with the bearer header passes too.
+    let bearer = format!("Bearer {secret}");
+    let r = http_request(
+        h.addr,
+        "PUT",
+        "/api/update/prefs",
+        &[("x-cuemix-update", "1"), json, ("Authorization", &bearer)],
+        Some(r#"{"show_prerelease":false}"#),
+    )
+    .await?;
+    assert_ne!(r.status, 401);
+
+    // A paired WebSocket may send admin-only commands (the plug is off, so the test fails
+    // on its own terms, not with "not paired").
+    let mut req = format!("ws://{}/ws", h.addr).into_client_request()?;
+    req.headers_mut().insert("cookie", jar.parse()?);
+    let (mut paired, _) = tokio::time::timeout(T, connect_async(req)).await??;
+    drain_initial(&mut paired).await?;
+    paired
+        .send(Message::text(r#"{"cmd":"test_speaker_plug","on":true}"#))
+        .await?;
+    loop {
+        let ev = next_json(&mut paired).await?;
+        if ev["event"] == "error" {
+            assert!(
+                !ev["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("not paired"),
+                "{ev}"
+            );
+            break;
+        }
+        if ev["event"] == "speaker_plug_result" {
+            break;
+        }
+    }
+
+    // Unpair clears the cookie.
+    let r = http_request(
+        h.addr,
+        "POST",
+        "/api/admin/unpair",
+        &[("Cookie", &jar)],
+        None,
+    )
+    .await?;
+    let cleared = r.header("set-cookie").ok_or("no cookie")?;
+    assert!(
+        cleared.starts_with("cuemix_admin=;") && cleared.contains("Max-Age=0"),
+        "{cleared}"
+    );
+    Ok(())
+}
+
+/// With the token off (default), nothing changes for anyone.
+#[tokio::test]
+async fn admin_token_off_changes_nothing() -> Result<(), Box<dyn std::error::Error>> {
+    let h = harness("admin-off").await?;
+    let v: Value = serde_json::from_slice(&http_get(h.addr, "/api/admin").await?.body)?;
+    assert_eq!(v["required"], false);
+    let r = http_request(
+        h.addr,
+        "POST",
+        "/api/admin/pair",
+        &[("Content-Type", "application/json")],
+        Some(r#"{"token":"x"}"#),
+    )
+    .await?;
+    assert_eq!(r.status, 404);
+    let r = http_request(
+        h.addr,
+        "PUT",
+        "/api/update/prefs",
+        &[
+            ("x-cuemix-update", "1"),
+            ("Content-Type", "application/json"),
+        ],
+        Some(r#"{"show_prerelease":true}"#),
+    )
+    .await?;
+    assert_ne!(r.status, 401);
     Ok(())
 }
