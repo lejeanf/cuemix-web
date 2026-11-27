@@ -12,6 +12,20 @@ need attention. Preset files carry `schema_version`; see
 
 ## [Unreleased]
 
+Docs and screenshots after the UI review (no code change except the meter colours).
+
+### Changed
+- README: the Web UI section describes the header (Simple | Advanced, Night mode, Demo pill),
+  the Simple view and the Advanced view on phones in one place; new screenshots (Mixer, Input,
+  Output at desktop size; Simple view, Monitor off with its return level, the preset sheet,
+  Night mode and the phone Advanced view at 390 × 844), taken in demo mode. The WebSocket
+  examples show `power`, `set_return_level`, `rename_preset`, `delete_preset`,
+  `set_preset_in_simple`, and the `hidden` / `return_db` fields.
+- `docs/IOS-PLAN.md`: parity notes for the bottom tabs, the Night token set, the volume-knob
+  vectors, `return_db` / `set_return_level` and the presets `hidden` field.
+- Meters: the scale ticks and the clip mark take their colours from the theme tokens (new
+  `--meter-tick`), so Night mode dims them too.
+
 Touch sizes and Night mode from the UI review (web UI only).
 
 ### Added

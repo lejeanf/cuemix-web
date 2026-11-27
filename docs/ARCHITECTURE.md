@@ -620,7 +620,7 @@ Trois acteurs, chacun avec ses droits :
 
 - `frontend/public/` (copié tel quel dans `dist/`, donc embarqué par `rust-embed`) : `manifest.json` (`display: standalone`, `start_url: "./?simple"`, `scope: "./"`, couleurs `#121214`), icônes 192/512/maskable, `apple-touch-icon.png`, `icon.svg` (favicon). Tout est en URL **relative** (compatible sous-chemin de reverse proxy). Extension `.json` pour un `Content-Type` sûr côté `rust-embed`. Les icônes sont produites par `frontend/scripts/gen-icons.mjs` (Node seul, sans dépendance), qui régénère aussi `icon.svg`.
 - Zones sûres : `viewport-fit=cover` + barre d'état `black-translucent` ; `env(safe-area-inset-*)` (repli `0px`, donc bureau inchangé) sur TopBar (haut, côtés), vue Simple et ControlRoom (bas), bandeau hors-ligne, toasts, tiroir DSP, RoomTest.
-- `?simple` force la vue Simple pour ce chargement sans l'écrire dans `localStorage` ; priorité : `?simple` > `localStorage` > largeur d'écran. `?embed` seul (réservé à la future vue web de l'app native, où Simple est natif) ouvre la vue Avancée pour ce chargement (non sauvegardée) et masque le bouton Simple/Avancé et le point d'état ; `?embed&simple` ouvre Simple. Logique pure dans `frontend/src/lib/launch.ts`.
+- `?simple` force la vue Simple pour ce chargement sans l'écrire dans `localStorage` ; priorité : `?simple` > `localStorage` > largeur d'écran. `?embed` seul (réservé à la future vue web de l'app native, où Simple est natif) ouvre la vue Avancée pour ce chargement (non sauvegardée) et masque le bouton Simple/Avancé, le point d'état et la barre d'onglets du bas ; `?embed&simple` ouvre Simple. Logique pure dans `frontend/src/lib/launch.ts`.
 - Au retour de veille (`visibilitychange` visible, `pageshow` persisté), `store.reconnectNow()` rouvre la WebSocket immédiatement si elle n'est ni ouverte ni en cours de connexion (une seule tentative à la fois, backoff remis à zéro pour afficher « connexion » et non « hors ligne »). Si la socket paraît ouverte mais que la session est `online`/`demo` (mètres ≈ 30/s) et qu'aucun message n'arrive dans les 2 s suivant le retour au premier plan, elle est détachée sans attendre la fermeture et une nouvelle connexion est ouverte aussitôt. `manifest.json` porte `id: "./"` ; `theme_color` = couleur de la TopBar (`#16181d`), `background_color` = `#121214`.
 
 ### Vue Simple : affinages de la revue UX (non publié)
@@ -639,6 +639,14 @@ Trois acteurs, chacun avec ses droits :
 - L'onglet suit le fragment d'URL aussi après le chargement (`hashchange`, `tabFromHash` dans `ui.ts`).
 - Sous 640 px, le panneau Présets est fixé aux deux bords de l'écran (il débordait de 121 px à 375 px) ; les cartes de la vue Entrée se partagent chaque ligne.
 
+### Vue Simple : affinages de la revue UX (non publié)
+
+- Courbe des boutons de volume (Monitor, Phones ; vue Simple et vue Sortie) : `volKnobToNorm` / `volKnobFromNorm` (`frontend/src/lib/fader.ts`), c'est-à-dire la loi « trim » des curseurs étirée pour que le plancher (−100 dB) soit au début de l'arc. Vecteurs partagés avec l'app iOS : `design/vectors/volume-knob.json` (vérifiés par vitest). Flèches, molette et lecteur d'écran : pas exact de 1 dB (prop `keyStep` de `Knob.svelte`, avec `curve`).
+- Boutons marche/arrêt : pendant un fondu, couleur de l'état visé et barre animée (immobile avec `prefers-reduced-motion`) ; préchauffage de la prise en ambre avec compte à rebours calculé côté client depuis `warmup_ms` des réglages de la prise et l'instant où l'état `warming` arrive. Sous un canal éteint, « returns to −18 dB » vient du champ `return_db` de l'événement `power` (ligne réservée, pour que le bouton ne bouge pas). Tant que le canal est éteint, son bouton rotatif règle ce niveau de retour au lieu du volume (aiguille et arc gris ; commande `set_return_level`, entiers −99..0 dB, ignorée si le canal est allumé ou en fondu d'entrée ; le serveur le garde dans `power.json` même en démo, car c'est un choix explicite, contrairement au niveau mémorisé à l'arrêt). Option « Keep screen on » (verrou d'écran `navigator.wakeLock`, redemandé à chaque retour au premier plan ; par navigateur, désactivée par défaut, `frontend/src/lib/wakelock.ts`).
+- Canal éteint : « Off » au lieu du plancher sous le bouton (et dans `aria-valuetext`).
+- Présets en vue Simple : ligne « Preset » (préset courant, « ● Modified ») qui ouvre `PresetPicker.svelte` (fenêtre `Dialog`, un bouton Load par préset, seulement les présets absents de `hidden`, voir D31) ; `store.presetsOpen` compte dans `panelOpen`.
+- Mètres (`meters.ts`) : graduations à −40/−18/−6 dBFS, repère d'écrêtage rouge mémorisé dès qu'une trame atteint ≈ −0,3 dBFS, effacé d'un toucher sur le mètre (les mètres ne servent plus de surface de glissement du bouton).
+
 ### Vue Avancée : disposition (revue UX, non publié)
 
 - Téléphones (≤ 640 px) : barre d'onglets en bas (`.bnav` dans `App.svelte`, icônes + libellés, même ordre et mêmes noms que l'app iOS, Q11) ; l'en-tête garde une seule ligne (`TopBar` prop `phoneTabs`). Avec `?embed`, pas de barre du bas : les onglets restent dans l'en-tête et l'app native fournit sa barre.
@@ -648,9 +656,16 @@ Trois acteurs, chacun avec ses droits :
 
 ### Thème et tactile (revue UX, non publié)
 
-- Toutes les couleurs de l'interface viennent des jetons de `frontend/src/app.css` (nouveaux : `--danger-bg`, `--danger-text`, `--row-active`, `--thumb-hi/lo/edge`, `--grid`, `--grid-strong`, `--axis-text`) ; restent en dur les ombres, les couleurs d'étiquette proposées à l'utilisateur et celles des bandes d'EQ (données). Les mètres (canvas) lisent `--field` et `--meter-*` (`refreshMeterPalette` dans `meters.ts`).
+- Toutes les couleurs de l'interface viennent des jetons de `frontend/src/app.css` (nouveaux : `--danger-bg`, `--danger-text`, `--row-active`, `--thumb-hi/lo/edge`, `--grid`, `--grid-strong`, `--axis-text`) ; restent en dur les ombres, les couleurs d'étiquette proposées à l'utilisateur et celles des bandes d'EQ (données). Les mètres (canvas) lisent `--field` et `--meter-*`, graduations (`--meter-tick`) et repère d'écrêtage (`--meter-red`) compris (`refreshMeterPalette` dans `meters.ts`).
 - Mode Nuit : `:root[data-theme='night']` redéfinit les jetons (lumières atténuées, texte ≥ 4,5:1 sur sa carte) ; bouton lune dans l'en-tête, choix par navigateur (`frontend/src/lib/theme.ts`, clé `cuemix.theme`), appliqué dans `main.ts` avant le premier rendu. Base du futur `design/tokens.json` partagé avec iOS.
 - `@media (pointer: coarse)` : cibles d'au moins 44 px de haut dans chaque composant concerné ; la souris garde la disposition dense.
+
+### Captures d'écran (`docs/images/`)
+
+- Prises en mode démo (aucune MOTU, donc mètres vides ; la légende du README le dit) sur un serveur local `127.0.0.1`, avec des présets et libellés d'exemple ; aucune adresse ni nom d'hôte réel ne doit être visible (sinon `.example` / `192.0.2.x`).
+- Bureau, vue Avancée, 1400 × 820 : `webui-mixer.png`, `webui-input.png` (recadrée sur les cartes), `webui-output.png` (préset d'EQ Loudness appliqué).
+- Téléphone, 390 × 844 à 2× : vue Simple (`simple-phone.png`), Monitor éteint avec « returns to −18 dB » (`simple-phone-off.png` ; en démo le niveau mémorisé à l'arrêt n'est pas gardé, il est fixé par `set_return_level`), liste des présets (`simple-phone-presets.png`), mode Nuit (`simple-phone-night.png`), vue Avancée avec la barre d'onglets du bas (`advanced-phone.png`).
+- Vue imposée par `localStorage` (`cuemix.view`, `cuemix.theme`) dans un navigateur sans tête ; à reprendre à chaque changement visible de l'interface.
 
 ## 8. Questions matériel — arbitrages et état (2026-11-14)
 
